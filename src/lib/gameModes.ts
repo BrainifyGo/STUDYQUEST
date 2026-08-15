@@ -7,6 +7,7 @@
  */
 
 import type { QuizQuestion } from '../App';
+import { type Boss, pickBoss, phaseFor, playerDamageFor, justEnraged } from './bosses';
 
 export type ModeId = 'speed-run' | 'boss-battle';
 
@@ -69,9 +70,21 @@ export interface ModeState {
   playerHP: number;
   over: boolean;
   outcome: string;
+  /** Boss modes only. */
+  boss: Boss | null;
+  phase: 1 | 2 | 3;
+  /** True for the single answer that tipped the boss into a new phase. */
+  enragedThisTurn: boolean;
+  /** Won the boss fight, as opposed to merely ending it. */
+  won: boolean;
 }
 
-export function startState(mode: ModeRules, questions: QuizQuestion[]): ModeState {
+export function startState(
+  mode: ModeRules,
+  questions: QuizQuestion[],
+  subject = ''
+): ModeState {
+  const boss = mode.bossHP ? pickBoss(subject) : null;
   return {
     mode,
     questions,
@@ -83,10 +96,15 @@ export function startState(mode: ModeRules, questions: QuizQuestion[]): ModeStat
     bestCombo: 0,
     xp: 0,
     timeLeft: mode.duration,
-    bossHP: mode.bossHP,
+    // The boss carries its own health, so a tougher boss is a data change.
+    bossHP: boss ? boss.maxHP : mode.bossHP,
     playerHP: mode.playerHP,
     over: false,
     outcome: '',
+    boss,
+    phase: 1,
+    enragedThisTurn: false,
+    won: false,
   };
 }
 
@@ -106,6 +124,10 @@ export function applyAnswer(state: ModeState, correct: boolean): ModeState {
 
   const next: ModeState = { ...state };
   next.answered += 1;
+  next.enragedThisTurn = false;
+
+  const maxHP = next.boss ? next.boss.maxHP : next.mode.bossHP;
+  const hpBefore = next.bossHP;
 
   if (correct) {
     next.correct += 1;
@@ -117,7 +139,7 @@ export function applyAnswer(state: ModeState, correct: boolean): ModeState {
       next.score += 1;
       next.timeLeft += next.mode.rightBonus;
     }
-    if (next.mode.bossHP) {
+    if (maxHP) {
       const dmg = bossDamage(next.combo);
       next.bossHP = Math.max(0, next.bossHP - dmg);
       next.score += dmg;
@@ -125,14 +147,28 @@ export function applyAnswer(state: ModeState, correct: boolean): ModeState {
   } else {
     next.combo = 0;
     if (next.mode.duration) next.timeLeft = Math.max(0, next.timeLeft - next.mode.wrongPenalty);
-    if (next.mode.bossHP) next.playerHP = Math.max(0, next.playerHP - 1);
+    if (maxHP) {
+      // An enraged boss hits twice as hard, so the last third of the fight is
+      // where runs are actually lost. The damage is read from the phase BEFORE
+      // this answer — being punished by an enrage you triggered on the same
+      // turn would feel arbitrary.
+      next.playerHP = Math.max(0, next.playerHP - playerDamageFor(next.phase));
+    }
+  }
+
+  if (maxHP) {
+    next.enragedThisTurn = justEnraged(hpBefore, next.bossHP, maxHP);
+    next.phase = phaseFor(next.bossHP, maxHP);
   }
 
   next.index += 1;
 
-  if (next.mode.bossHP) {
-    if (next.bossHP <= 0) { next.over = true; next.outcome = 'Boss defeated'; }
-    else if (next.playerHP <= 0) { next.over = true; next.outcome = 'You were beaten'; }
+  if (maxHP) {
+    if (next.bossHP <= 0) {
+      next.over = true; next.won = true; next.outcome = 'Boss defeated';
+    } else if (next.playerHP <= 0) {
+      next.over = true; next.outcome = 'You were beaten';
+    }
   }
   if (next.mode.duration && next.timeLeft <= 0) {
     next.over = true;
@@ -159,7 +195,9 @@ export function tickClock(state: ModeState): ModeState {
 
 /** Bonus XP for how the run went, on top of the per-answer XP already banked. */
 export function completionBonus(state: ModeState): number {
-  if (state.mode.bossHP && state.bossHP <= 0) return 400;
+  // Reads `won` rather than re-deriving it: a fight that ended because the
+  // questions ran out with the boss on 1 HP is not a victory.
+  if (state.won) return 400;
   if (state.mode.duration) {
     if (state.score >= 15) return 250;
     if (state.score >= 8) return 100;

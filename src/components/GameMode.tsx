@@ -6,7 +6,8 @@ import {
   MODES, startState, applyAnswer, tickClock, completionBonus, accuracy,
   type ModeId, type ModeState,
 } from '../lib/gameModes';
-import { listMistakes, asQuiz, recordMistake, retireMistake } from '../lib/mistakes';
+import { lineFor, pickBoss } from '../lib/bosses';
+import { listMistakes, asQuiz, recordMistake, retireMistake, type Mistake } from '../lib/mistakes';
 import type { QuizQuestion } from '../App';
 
 /**
@@ -35,15 +36,37 @@ const shuffle = <T,>(a: T[]): T[] => {
 };
 
 export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
-  const [pool, setPool] = useState<QuizQuestion[] | null>(null);
+  const [mistakes, setMistakes] = useState<Mistake[] | null>(null);
   const [state, setState] = useState<ModeState | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
   const [awarded, setAwarded] = useState(false);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    listMistakes().then((m) => setPool(asQuiz(m)));
+    listMistakes().then(setMistakes);
   }, []);
+
+  const pool = useMemo(() => (mistakes ? asQuiz(mistakes) : null), [mistakes]);
+
+  /**
+   * Which subject you get quizzed on most — that decides which boss turns up.
+   *
+   * A pool spread across subjects gets The Examiner rather than whichever boss
+   * happened to match first, so the mixed fight is a deliberate outcome and not
+   * an accident of ordering.
+   */
+  const dominantSubject = useMemo(() => {
+    if (!mistakes?.length) return '';
+    const counts = new Map<string, number>();
+    for (const m of mistakes) {
+      const s = (m.subject || '').trim();
+      if (s && s !== 'Arcade' && s !== 'Review') counts.set(s, (counts.get(s) ?? 0) + 1);
+    }
+    if (!counts.size) return '';
+    const [top, n] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    // Only commit to a subject boss when it is over half the pool.
+    return n * 2 > mistakes.length ? top : '';
+  }, [mistakes]);
 
   // The clock. Cleared on unmount and whenever the round ends, or it keeps
   // counting in the background and fires after the player has left.
@@ -70,8 +93,8 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
     );
     setAwarded(false);
     setPicked(null);
-    setState(startState(MODES[id], filled));
-  }, [pool]);
+    setState(startState(MODES[id], filled, dominantSubject));
+  }, [pool, dominantSubject]);
 
   const current = state && !state.over ? state.questions[state.index] : null;
 
@@ -91,10 +114,30 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
     }, right ? 650 : 1500);
   };
 
-  const bossPercent = useMemo(
-    () => (state?.mode.bossHP ? Math.round((state.bossHP / state.mode.bossHP) * 100) : 0),
-    [state?.bossHP, state?.mode.bossHP]
-  );
+  const bossPercent = useMemo(() => {
+    if (!state?.boss) return 0;
+    return Math.round((state.bossHP / state.boss.maxHP) * 100);
+  }, [state?.bossHP, state?.boss]);
+
+  /**
+   * What the boss says right now.
+   *
+   * Seeded on the number answered so the same moment always produces the same
+   * line — with Math.random() the taunt would change on every re-render, which
+   * makes it read as noise rather than a reaction to what you just did.
+   */
+  const bossLine = useMemo(() => {
+    if (!state?.boss) return '';
+    if (state.over) return lineFor(state.boss, state.won ? 'defeat' : 'victory', state.answered);
+    if (state.enragedThisTurn) return lineFor(state.boss, 'enrage', state.answered);
+    if (picked === null) {
+      return state.answered === 0
+        ? lineFor(state.boss, 'intro', 0)
+        : lineFor(state.boss, 'hit', state.answered);
+    }
+    const wasRight = picked === current?.correctAnswer;
+    return lineFor(state.boss, wasRight ? 'hit' : 'playerHit', state.answered);
+  }, [state?.boss, state?.over, state?.won, state?.enragedThisTurn, state?.answered, picked, current]);
 
   /* ── loading ─────────────────────────────────────────── */
   if (pool === null) {
@@ -149,6 +192,14 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
                   <Icon className="w-7 h-7 text-brand-purple mb-3" />
                   <h2 className="text-lg font-bold text-text-main mb-1">{m.name}</h2>
                   <p className="text-sm text-text-dim">{m.blurb}</p>
+                  {/* Naming who you are about to face turns a mode into a fight. */}
+                  {id === 'boss-battle' && (
+                    <p className="mt-3 pt-3 border-t border-border-main text-xs text-text-dim">
+                      You face <span className="text-red-400 font-semibold">
+                        {pickBoss(dominantSubject).name}
+                      </span>, {pickBoss(dominantSubject).title}
+                    </p>
+                  )}
                 </button>
               );
             })}
@@ -226,17 +277,55 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
               hot={state.combo >= 3} />
       </div>
 
-      {state.mode.bossHP > 0 && (
-        <div className="mb-6">
-          <div className="flex justify-between text-xs text-text-dim mb-1">
-            <span>Boss</span><span>{bossPercent}%</span>
+      {state.boss && (
+        <div className={`mb-6 rounded-2xl border p-4 transition-colors ${
+          state.phase === 3
+            ? 'border-red-500/60 bg-red-500/5'
+            : 'border-border-main bg-glass-bg'
+        }`}>
+          <div className="flex items-center gap-3 mb-3">
+            {/* The boss flinches when hit and lurches when it enrages, so the
+                fight has a physical reaction rather than only a number. */}
+            <div className={`shrink-0 ${
+              state.enragedThisTurn ? 'animate-bounce' : picked && picked === current?.correctAnswer ? 'animate-pulse' : ''
+            }`}>
+              <BossFace phase={state.phase} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="font-bold text-text-main leading-tight">{state.boss.name}</div>
+              <div className="text-[11px] uppercase tracking-wider text-text-dim">
+                {state.phase === 3 ? 'ENRAGED' : state.boss.title}
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="text-lg font-bold tabular-nums text-text-main">{bossPercent}%</div>
+              <div className="text-[10px] uppercase tracking-wider text-text-dim">health</div>
+            </div>
           </div>
+
           <div className="h-3 rounded-full bg-black/40 overflow-hidden">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-orange-500 to-red-500 transition-all duration-300"
+              className={`h-full rounded-full transition-all duration-300 ${
+                state.phase === 3
+                  ? 'bg-gradient-to-r from-red-600 to-red-400'
+                  : 'bg-gradient-to-r from-orange-500 to-red-500'
+              }`}
               style={{ width: `${bossPercent}%` }}
             />
           </div>
+
+          {/* What the boss has to say about your last answer. */}
+          <p className={`mt-3 text-sm italic ${
+            state.enragedThisTurn ? 'text-red-400 font-semibold not-italic' : 'text-text-dim'
+          }`} role="status" aria-live="polite">
+            &ldquo;{bossLine}&rdquo;
+          </p>
+
+          {state.phase === 3 && (
+            <p className="mt-2 text-[11px] uppercase tracking-wider text-red-400">
+              Mistakes now cost 2 health
+            </p>
+          )}
         </div>
       )}
 
@@ -294,6 +383,38 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
         </>
       )}
     </div>
+  );
+};
+
+/**
+ * The boss itself. Drawn rather than imported: an image would be another asset to
+ * ship and would not react. The eyes narrow and the colour deepens as it takes
+ * damage, so the phase is readable without reading the percentage.
+ */
+const BossFace: React.FC<{ phase: 1 | 2 | 3 }> = ({ phase }) => {
+  const tone = phase === 3 ? '#ef4444' : phase === 2 ? '#f97316' : '#a78bfa';
+  return (
+    <svg width="52" height="52" viewBox="0 0 52 52" aria-hidden="true">
+      <circle cx="26" cy="26" r="24" fill={tone} opacity={0.16} />
+      <circle cx="26" cy="26" r="24" fill="none" stroke={tone} strokeWidth="2" />
+      {/* Eyes: level at first, angled further down as it gets angrier. */}
+      <path
+        d={phase === 1 ? 'M15 21 L23 21' : phase === 2 ? 'M15 19 L23 22' : 'M15 18 L23 23'}
+        stroke={tone} strokeWidth="3" strokeLinecap="round"
+      />
+      <path
+        d={phase === 1 ? 'M29 21 L37 21' : phase === 2 ? 'M29 22 L37 19' : 'M29 23 L37 18'}
+        stroke={tone} strokeWidth="3" strokeLinecap="round"
+      />
+      {/* Mouth: flat, then a grimace, then bared teeth. */}
+      {phase < 3 ? (
+        <path d={phase === 1 ? 'M18 34 Q26 34 34 34' : 'M18 35 Q26 31 34 35'}
+              stroke={tone} strokeWidth="3" fill="none" strokeLinecap="round" />
+      ) : (
+        <path d="M17 32 L21 37 L25 32 L29 37 L33 32 L35 35"
+              stroke={tone} strokeWidth="2.5" fill="none" strokeLinejoin="round" />
+      )}
+    </svg>
   );
 };
 

@@ -257,3 +257,77 @@ would turn the login form into a tool for finding out which email addresses have
 ### Files
 
 `src/lib/authErrors.ts` (new), `tests/authErrors.test.ts` (new), `src/App.tsx`, `package.json`.
+
+---
+
+## [2026-08-15] — The bosses
+
+**Editor:** Claude Code (Opus 5)
+
+Boss Battle shipped as a bar labelled "Boss". Mechanically it worked, but there was nothing to
+beat: no name, no reaction, and a bar draining at a constant rate is the same fight for its
+whole length. A boss is a character you are trying to shut up.
+
+### `src/lib/bosses.ts` (new)
+
+Four bosses, as data. Adding one is adding a row, not editing a component.
+
+| Boss | Title | Guards |
+|---|---|---|
+| **Pythagorus Rex** | Devourer of Decimals | Maths |
+| **Lord Mitochondria** | The Actual Powerhouse | Science |
+| **The Bardolith** | Keeper of the Quotation | English |
+| **The Examiner** | Reader of Papers | anything |
+
+Each carries lines for six moments — intro, landing a hit, hitting you, enraging, dying, and
+winning — so the fight talks back. `lineFor()` is **seeded on the number answered** rather than
+random: with `Math.random()` the taunt would change on every re-render, which reads as noise
+instead of a reaction to what you just did.
+
+**Which boss turns up is decided by your mistakes.** `dominantSubject` only commits to a
+subject boss when that subject is over half the pool; otherwise The Examiner takes the fight.
+The fallback is chosen explicitly rather than "first match wins", so a mixed round is not
+guarded by the maths boss purely because it sits first in the list.
+
+### Phases
+
+`phaseFor()` splits the fight in three: above two thirds, above one third, below it. Phase 3 is
+**enraged**, and a wrong answer then costs **two** health instead of one.
+
+That puts the danger where the fight was previously flattest — the last third, when you are
+closest to winning — and it gives a combo something to protect.
+
+One deliberate detail: the damage you take is read from the phase **before** your answer is
+applied. Being hit twice by an enrage that your own answer triggered on the same turn would
+feel arbitrary, and there is a test pinning it.
+
+### `won` is now recorded, not re-derived
+
+`completionBonus` used to pay 400 XP for `bossHP <= 0`. A fight that ended because the questions
+ran out with the boss on 1 HP is not a victory, and paying for it would make running out of
+questions the cheapest way to farm XP. The state now records `won` at the moment the fight ends.
+
+### The face
+
+`BossFace` is drawn as inline SVG rather than shipped as an image — an image is another asset
+and cannot react. The eyes angle further down and the mouth goes from level, to a grimace, to
+bared teeth as the phases pass, and the colour moves violet → orange → red. The phase is
+readable without reading the percentage. It flinches on a hit and lurches on an enrage.
+
+The mode picker now names who you are about to face, which is what turns a mode into a fight.
+
+### Verification
+
+- **84 tests passing** (17 new in `bosses.test.ts`); `tsc` clean; `npm run build` clean.
+- Tests cover: each subject gets its own boss; a mixed pool gets The Examiner rather than the
+  first list entry; every boss has all six line sets; lines are deterministic and never empty
+  for any seed, including negative and huge ones; phase boundaries at 66% and 33%; enraged
+  mistakes cost two health; the enrage that your own answer triggered does **not** also punish
+  you that turn; a win pays 400 and a loss pays nothing; running out of questions with the boss
+  alive pays **nothing**; and state is still never mutated.
+- `phaseFor(0, 0)` is covered so a zero-health boss cannot divide by zero.
+
+### Files
+
+`src/lib/bosses.ts` (new), `tests/bosses.test.ts` (new), `src/lib/gameModes.ts`,
+`src/components/GameMode.tsx`, `package.json`.
