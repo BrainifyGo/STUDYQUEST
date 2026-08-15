@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense, useCallback} from 'react';
 import { toast } from 'sonner';
 import { 
   BookOpen, 
@@ -94,6 +94,7 @@ import {
 const UpgradePage = lazy(() => import('./components/UpgradePage'));
 const LegalPage = lazy(() => import('./components/LegalPage'));
 const MistakesView = lazy(() => import('./components/MistakesView'));
+const GameMode = lazy(() => import('./components/GameMode'));
 const FocusTimer = lazy(() => import('./components/FocusTimer'));
 const AITutorChat = lazy(() => import('./components/AITutorChat'));
 const Library = lazy(() => import('./components/Library'));
@@ -268,6 +269,35 @@ export default function App() {
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
   const [lastRequestTime, setLastRequestTime] = useState(0);
   const { uploadPdf, progress: pdfProgress, isProcessing: isPdfProcessing, extractedText: pdfExtractedText } = usePdfUpload();
+
+  /**
+   * Bank XP earned in the arcade.
+   *
+   * Goes through the SAME level curve as everything else — a separate currency
+   * would make the arcade feel like a different app bolted on. Guests have
+   * nowhere to save it, so it is skipped rather than half-applied.
+   */
+  const awardArcadeXP = useCallback(async (earned: number) => {
+    if (!earned || earned <= 0 || !user || !userData) return;
+
+    const newXp = (userData.xp || 0) + earned;
+    const newLevel = levelFromXP(newXp);
+    const levelledUp = newLevel > (userData.level || 1);
+
+    try {
+      await updateDoc(doc(db, 'users', user.uid), { xp: newXp, level: newLevel });
+      setUserData({ ...userData, xp: newXp, level: newLevel });
+      if (levelledUp) {
+        setShowLevelUp(true);
+        toast.success(`Level up — you're now level ${newLevel}`);
+      } else {
+        toast.success(`+${earned} XP`);
+      }
+    } catch (err) {
+      // Losing the XP is annoying; losing the round to an error would be worse.
+      console.warn('[arcade] could not save XP:', err);
+    }
+  }, [user, userData, setUserData]);
 
   // Give each view its own <title>. Without a router every view shared one title, which made
   // browser tabs, history and bookmarks all read "Brainify AI".
@@ -1895,6 +1925,15 @@ ${inputMethod === 'youtube' ? `The following is a transcript from a YouTube vide
                   collapsed={sidebarCollapsed}
                 />
               </GuestGuard>
+              <GuestGuard featureName="Arcade">
+                <SidebarItem
+                  icon={<Zap size={18} />}
+                  label="Arcade"
+                  active={activeView === 'arcade'}
+                  onClick={() => setActiveView('arcade')}
+                  collapsed={sidebarCollapsed}
+                />
+              </GuestGuard>
               <GuestGuard featureName="My Mistakes">
                 <SidebarItem
                   icon={<RotateCcw size={18} />}
@@ -2315,6 +2354,11 @@ ${inputMethod === 'youtube' ? `The following is a transcript from a YouTube vide
             <UpgradePage 
               onBack={() => setActiveView('dashboard')} 
               isSubscribed={localStorage.getItem('brainify_test_pro') === 'true' || userData?.isPro || false}
+            />
+          ) : activeView === 'arcade' ? (
+            <GameMode
+              onBack={() => setActiveView('dashboard')}
+              onAwardXP={awardArcadeXP}
             />
           ) : activeView === 'mistakes' ? (
             <MistakesView

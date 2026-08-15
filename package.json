@@ -11,7 +11,7 @@
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "test:rules": "firebase emulators:exec --only firestore \"vitest run tests/rules.test.ts\"",
-    "test": "vitest run tests/progress.test.ts tests/mistakes.test.ts tests/rules-structure.test.ts"
+    "test": "vitest run tests/progress.test.ts tests/gameModes.test.ts tests/mistakes.test.ts tests/rules-structure.test.ts"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

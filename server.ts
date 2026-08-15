@@ -16,6 +16,51 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+/*
+  Check the credentials BEFORE handing them to Firebase.
+
+  Copying .env.example to .env and running `npm run dev` used to die on
+  "Failed to parse private key: Invalid PEM formatted message" and a stack trace
+  through firebase-admin internals — which tells you nothing about the actual
+  problem, namely that the file still contains the example's placeholders.
+  A setup step that fails should say what to do about it.
+*/
+const REQUIRED_SERVER_ENV = [
+  'VITE_FIREBASE_PROJECT_ID',
+  'FIREBASE_CLIENT_EMAIL',
+  'FIREBASE_PRIVATE_KEY',
+] as const;
+
+function checkServerEnv(): void {
+  const missing = REQUIRED_SERVER_ENV.filter((k) => !process.env[k]?.trim());
+
+  // The placeholder in .env.example is a real PEM header wrapped around "...",
+  // so it looks plausible and passes an emptiness check. Catch it by name.
+  const key = process.env.FIREBASE_PRIVATE_KEY ?? '';
+  const stillTemplate = key.includes('\\n...\\n') || key.includes('\n...\n');
+
+  if (!missing.length && !stillTemplate) return;
+
+  console.error('\n  StudyQuest cannot start: the server credentials are not set up.\n');
+  if (missing.length) {
+    console.error('  Missing from .env:');
+    missing.forEach((k) => console.error('    - ' + k));
+  }
+  if (stillTemplate) {
+    console.error('  FIREBASE_PRIVATE_KEY is still the placeholder from .env.example.');
+  }
+  console.error(
+    '\n  Copying .env.example gives you the KEYS, not the VALUES. Fill them in:\n' +
+    '    - Firebase console -> Project settings -> Service accounts -> Generate new private key\n' +
+    '      That JSON holds client_email and private_key.\n' +
+    '    - The VITE_FIREBASE_* values are on the same page, under "Your apps".\n' +
+    '\n  Keep the whole private key on one line, quoted, with the \\n escapes intact.\n'
+  );
+  process.exit(1);
+}
+
+checkServerEnv();
+
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert({
