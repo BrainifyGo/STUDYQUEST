@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   levelFromXP, levelProgress, xpForLevel, xpToReachLevel,
   xpForCorrectAnswer, endOfQuizBonus, nextStreak, localDayKey,
-  BASE_LEVEL_XP, XP_COMBO_CAP,
+  BASE_LEVEL_XP, XP_COMBO_CAP, MAX_LEVEL, LEVEL_COST_CAP,
 } from '../src/lib/progress';
 
 describe('the level curve', () => {
@@ -36,6 +36,40 @@ describe('the level curve', () => {
     expect(xpToReachLevel(4)).toBe(1820);
     expect(levelFromXP(1819)).toBe(3);
     expect(levelFromXP(1820)).toBe(4);
+  });
+
+  it('caps the cost of a single level, so the curve stays finite', () => {
+    // Without this, 20% compounding for 1999 levels is `Infinity` in a double —
+    // the level bar would render NaN%. Every level still costs more than the last
+    // until the cap, which is the "harder each time" Daniel asked for.
+    expect(xpForLevel(1000)).toBe(LEVEL_COST_CAP);
+    expect(Number.isFinite(xpForLevel(MAX_LEVEL))).toBe(true);
+    expect(Number.isFinite(xpToReachLevel(MAX_LEVEL))).toBe(true);
+  });
+
+  it('rises every level right up to the cap, then holds', () => {
+    let prev = 0;
+    let hitCap = 0;
+    for (let l = 1; l <= 40; l++) {
+      const cost = xpForLevel(l);
+      if (cost === LEVEL_COST_CAP) { hitCap++; } else { expect(cost).toBeGreaterThan(prev); }
+      prev = cost;
+    }
+    expect(hitCap).toBeGreaterThan(0);   // it does plateau
+  });
+
+  it('stops at level 2000 however much XP is thrown at it', () => {
+    expect(MAX_LEVEL).toBe(2000);
+    expect(levelFromXP(Number.MAX_SAFE_INTEGER)).toBe(MAX_LEVEL);
+  });
+
+  it('never reports a broken percentage, at any XP', () => {
+    for (const xp of [0, 1, 499, 500, 12345, 5_000_000, 1e12, Number.MAX_SAFE_INTEGER]) {
+      const p = levelProgress(xp);
+      expect(Number.isFinite(p.percent)).toBe(true);
+      expect(p.percent).toBeGreaterThanOrEqual(0);
+      expect(p.percent).toBeLessThanOrEqual(100);
+    }
   });
 
   it('is NOT the old flat 100-XP-per-level rule', () => {

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Music, X, Play, Pause, Volume2, Headphones, Wind, Coffee, Trees, Sparkles, CloudRain, Waves, TreePine, Ghost, Zap } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Howl } from 'howler';
+import { toast } from 'sonner';
 
 interface StudyMusicProps {
   onClose: () => void;
@@ -23,7 +24,10 @@ const STUDY_TRACKS: StudyTrack[] = [
   { id: '5qap5aO4i9A', title: 'Chill Beats', category: 'Lo-Fi' },
   { id: 'DWcJFNfaw9c', title: 'Deep Focus', category: 'Focus' },
   { id: 'lTRiuFIWV54', title: 'Alpha Waves', category: 'Focus' },
-  { id: '__eq8T5b4-w', title: 'Classical Study', category: 'Classical' },
+  // Was `__eq8T5b4-w`, which is gone from YouTube — checked, it 404s on oEmbed,
+  // so the Classical tab had exactly one track and that track was a dead frame.
+  // Every id in this list was verified live before shipping.
+  { id: 'mIYzp5rcTvU', title: 'Classical Study', category: 'Classical' },
   { id: 'sjkrrmBnpGE', title: 'Jazz Coffee', category: 'Ambient' },
 ];
 
@@ -70,11 +74,26 @@ export default function StudyMusic({ onClose }: StudyMusicProps) {
     
     if (!isCurrentlyActive) {
       if (!howlsRef.current[id]) {
+        /*
+          The button used to light up whether or not a single byte arrived.
+
+          A blocked school network, an offline phone or a moved file all produced
+          the same thing: an "on" toggle and silence, which is why the music looked
+          broken rather than unavailable. Howler reports both failures — the file
+          not loading, and the browser refusing to play it — so both now switch the
+          toggle back off and say what happened.
+        */
+        const fail = (what: string) => {
+          setActiveAmbients(prev => ({ ...prev, [id]: { ...prev[id], active: false } }));
+          toast.error(`${sound.name} could not ${what}. Check your connection — some networks block it.`);
+        };
         howlsRef.current[id] = new Howl({
           src: [sound.url],
           loop: true,
           volume: activeAmbients[id].volume,
-          html5: true
+          html5: true,
+          onloaderror: () => fail('load'),
+          onplayerror: () => fail('play'),
         });
       }
       howlsRef.current[id].play();
@@ -110,7 +129,7 @@ export default function StudyMusic({ onClose }: StudyMusicProps) {
       initial={{ opacity: 0, y: 20, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 20, scale: 0.95 }}
-      className="fixed bottom-24 right-4 md:bottom-8 md:right-8 w-[calc(100vw-2rem)] md:w-[400px] glass rounded-[2.5rem] border border-border-main shadow-2xl z-[60] overflow-hidden"
+      className="fixed bottom-24 right-4 md:bottom-8 md:right-8 w-[calc(100vw-2rem)] md:w-[400px] glass-panel rounded-[2.5rem] border border-border-main shadow-2xl z-[60] overflow-hidden"
     >
       {/* Header */}
       <div className="p-6 border-b border-border-main flex items-center justify-between bg-glass-bg">

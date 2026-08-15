@@ -49,7 +49,7 @@ const callOpenRouter = async (prompt: string, model: string): Promise<string> =>
       'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': 'https://brainifyai.app',
-      'X-Title': 'Brainify AI',
+      'X-Title': 'StudyQuest',
     },
     body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }] }),
   });

@@ -361,7 +361,7 @@ export const Settings: React.FC = () => {
               </div>
             </div>
             <div className="text-right">
-              <div className="text-sm font-bold text-text-main">{userData?.isPro ? 'Brainify Pro' : 'Brainify Free'}</div>
+              <div className="text-sm font-bold text-text-main">{userData?.isPro ? 'StudyQuest Pro' : 'StudyQuest Free'}</div>
               <div className="text-xs text-text-dim">{userData?.isPro ? 'Active' : 'Limited Access'}</div>
             </div>
           </div>

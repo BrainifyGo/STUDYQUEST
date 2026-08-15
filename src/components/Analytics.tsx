@@ -9,7 +9,8 @@ import {
   Award, Calendar, ChevronRight, Activity, Sparkles
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { db, auth, collection, query, where, getDocs, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, auth, collection, query, where, getDocs, doc, getDoc, handleFirestoreError, OperationType } from '../lib/firebase';
+import { levelProgress } from '../lib/progress';
 
 const COLORS = ['#7c7cff', '#f87171', '#fbbf24', '#34d399', '#a78bfa', '#f472b6'];
 
@@ -38,8 +39,28 @@ function useContainerReady() {
   return { isReady, containerRef };
 }
 
+/**
+ * Badges, and what each is actually for.
+ *
+ * Kept as data next to the check that awards it, so a badge cannot appear in the
+ * list without something deciding whether it has been earned.
+ */
+const BADGES: { id: string; name: string; how: string; earned: (s: BadgeStats) => boolean }[] = [
+  { id: 'first-xp', name: 'Off the mark', how: 'Earn your first XP', earned: (s) => s.xp > 0 },
+  { id: 'level-2', name: 'Levelling up', how: 'Reach level 2', earned: (s) => s.level >= 2 },
+  { id: 'level-5', name: 'Getting serious', how: 'Reach level 5', earned: (s) => s.level >= 5 },
+  { id: 'level-10', name: 'Veteran', how: 'Reach level 10', earned: (s) => s.level >= 10 },
+  { id: 'sessions-5', name: 'Regular', how: 'Log 5 study sessions', earned: (s) => s.sessions >= 5 },
+  { id: 'sessions-25', name: 'Committed', how: 'Log 25 study sessions', earned: (s) => s.sessions >= 25 },
+];
+
+interface BadgeStats { xp: number; level: number; sessions: number; }
+
 export default function Analytics() {
   const [loading, setLoading] = useState(true);
+  const [showBadges, setShowBadges] = useState(false);
+  const [xp, setXp] = useState(0);
+  const progress = levelProgress(xp);
   const { isReady: activityReady, containerRef: activityRef } = useContainerReady();
   const { isReady: subjectReady, containerRef: subjectRef } = useContainerReady();
   const [studyData, setStudyData] = useState<any[]>([]);
@@ -107,6 +128,11 @@ export default function Analytics() {
           totalSessions: sessions.length,
           goalProgress: Math.min(Math.round((totalHours / 40) * 100), 100) // Goal is 40 hours
         });
+
+        // The player's real XP, for the level bar and the badges. Previously the
+        // bar was a hardcoded 85% and the numbers beneath it were invented.
+        const me = await getDoc(doc(db, 'users', auth.currentUser.uid));
+        setXp(Number(me.data()?.xp) || 0);
 
       } catch (err) {
         // Fail quiet: fall back to the empty state instead of an error banner
@@ -347,31 +373,80 @@ export default function Analytics() {
             <Award size={48} className="text-white" />
           </div>
           
+          {/*
+            This block used to be invented: "Weekly Champion", "10 focus sessions
+            this week", "top 5% of students", a bar fixed at 85%, and 850/1000 XP —
+            none of it read from anything. Made-up praise is worse than no praise,
+            because the moment someone notices, they stop believing the real numbers
+            too. It now shows the player's actual level and XP.
+          */}
           <div className="flex-1 text-center md:text-left space-y-4">
             <div className="space-y-1">
-              <h3 className="text-2xl font-black text-text-main tracking-tight">Weekly Champion</h3>
-              <p className="text-text-dim font-medium">You've completed 10 focus sessions this week! You're in the top 5% of students.</p>
+              <h3 className="text-2xl font-black text-text-main tracking-tight">
+                Level {progress.level}
+              </h3>
+              <p className="text-text-dim font-medium">
+                {stats.totalSessions > 0
+                  ? `${stats.totalSessions} study session${stats.totalSessions === 1 ? '' : 's'} logged. Keep going.`
+                  : 'No study sessions logged yet — play a round in the Arcade to start earning XP.'}
+              </p>
             </div>
             <div className="w-full h-3 bg-glass-bg rounded-full overflow-hidden border border-border-main">
-              <motion.div 
+              <motion.div
                 initial={{ width: 0 }}
-                whileInView={{ width: '85%' }}
+                whileInView={{ width: `${progress.percent}%` }}
                 viewport={{ once: true }}
                 transition={{ duration: 1.5, ease: 'easeOut' }}
                 className="h-full bg-gradient-to-r from-brand-purple to-brand-purple-dark shadow-[0_0_15px_rgba(124,124,255,0.5)]"
               />
             </div>
             <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-text-dim">
-              <span>850 XP</span>
-              <span>1000 XP to next level</span>
+              <span>{progress.into.toLocaleString()} XP</span>
+              <span>{(progress.needed - progress.into).toLocaleString()} XP to level {progress.level + 1}</span>
             </div>
           </div>
 
-          <button className="btn-primary px-8 py-4 rounded-2xl font-bold flex items-center gap-2 shrink-0">
-            View Badges
-            <ChevronRight size={18} />
+          <button
+            onClick={() => setShowBadges((v) => !v)}
+            aria-expanded={showBadges}
+            className="btn-primary px-8 py-4 rounded-2xl font-bold flex items-center gap-2 shrink-0"
+          >
+            {showBadges ? 'Hide Badges' : 'View Badges'}
+            <ChevronRight size={18} className={showBadges ? 'rotate-90 transition-transform' : 'transition-transform'} />
           </button>
         </div>
+
+        {/* The panel the button had nothing to open. Locked badges stay visible
+            with what earns them — a badge you cannot see is not a goal. */}
+        {showBadges && (
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {BADGES.map((b) => {
+              const earned = b.earned({ xp, level: progress.level, sessions: stats.totalSessions });
+              return (
+                <div
+                  key={b.id}
+                  className={cn(
+                    'flex items-center gap-3 rounded-2xl border p-4',
+                    earned
+                      ? 'border-brand-purple/40 bg-brand-purple/5'
+                      : 'border-border-main bg-glass-bg opacity-60'
+                  )}
+                >
+                  <Award
+                    size={22}
+                    className={earned ? 'text-brand-purple shrink-0' : 'text-text-dim shrink-0'}
+                  />
+                  <div className="min-w-0">
+                    <div className="font-bold text-text-main text-sm">{b.name}</div>
+                    <div className="text-xs text-text-dim">
+                      {earned ? 'Earned' : b.how}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

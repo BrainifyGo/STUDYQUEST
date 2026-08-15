@@ -21,13 +21,40 @@ export const BASE_LEVEL_XP = 500;
 /** Each level costs this much more than the one before it. */
 export const LEVEL_GROWTH = 1.2;
 
-/** Levels beyond this are not computed — a guard against a corrupt XP value. */
-const MAX_LEVEL = 500;
+/**
+ * The ceiling. Daniel asked for 2000.
+ *
+ * 2000 is only a real number because of LEVEL_COST_CAP below. Compounding 20% for
+ * 1999 levels reaches 1.2^1999, which is not a big number — it is `Infinity` in a
+ * double, and every level past roughly 480 already returned `Infinity` under the
+ * old cap of 500. The bar would have shown `NaN%`. So raising the cap without
+ * flattening the curve would have shipped a broken screen, not a longer game.
+ */
+export const MAX_LEVEL = 2000;
+
+/**
+ * The most a single level may ever cost.
+ *
+ * Levels keep getting 20% dearer — which is what Daniel asked for — until one
+ * costs this much, and from there they stay level. Two reasons:
+ *   1. It keeps the arithmetic finite (see MAX_LEVEL).
+ *   2. It keeps the number readable. "25,000 XP to level 43" is a goal;
+ *      "3,400,000,000,000 XP to level 43" is a wall, and a wall is where people
+ *      stop playing.
+ * The ramp reaches this at about level 22, so every level a real player will see
+ * for a long time still costs more than the one before it.
+ */
+export const LEVEL_COST_CAP = 25000;
+
+/** The cost of the next level, given this one's — the curve in one place. */
+function nextCost(need: number): number {
+  return Math.min(Math.round(need * LEVEL_GROWTH), LEVEL_COST_CAP);
+}
 
 /** What the given level costs to clear, on its own. */
 export function xpForLevel(level: number): number {
   let need = BASE_LEVEL_XP;
-  for (let l = 1; l < level; l++) need = Math.round(need * LEVEL_GROWTH);
+  for (let l = 1; l < level; l++) need = nextCost(need);
   return need;
 }
 
@@ -37,7 +64,7 @@ export function xpToReachLevel(level: number): number {
   let total = 0;
   for (let l = 1; l < level; l++) {
     total += need;
-    need = Math.round(need * LEVEL_GROWTH);
+    need = nextCost(need);
   }
   return total;
 }
@@ -50,7 +77,7 @@ export function levelFromXP(totalXP: number): number {
   while (left >= need && level < MAX_LEVEL) {
     left -= need;
     level++;
-    need = Math.round(need * LEVEL_GROWTH);
+    need = nextCost(need);
   }
   return level;
 }

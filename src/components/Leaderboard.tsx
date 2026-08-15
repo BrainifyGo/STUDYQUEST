@@ -84,7 +84,7 @@ export default function Leaderboard() {
             <div className="text-2xl">👥</div>
             <h3 className="font-bold text-text-main text-sm">Be the first to climb the ranks!</h3>
             <p className="text-text-dim text-xs leading-relaxed">
-              Share Brainify AI with your classmates. As more students join, the leaderboard fills up — and you'll see exactly where you rank.
+              Share StudyQuest with your classmates. As more students join, the leaderboard fills up — and you'll see exactly where you rank.
             </p>
             <div className="flex items-center justify-center gap-2 pt-1">
               <button

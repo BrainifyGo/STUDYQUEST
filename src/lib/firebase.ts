@@ -100,7 +100,17 @@ export const signInWithEmail = async (
 };
 
 export const resetPassword = async (email: string) => {
-  await sendPasswordResetEmail(auth, email);
+  // Trimmed, because a trailing space from a phone keyboard's autocomplete is a
+  // silent "no such account" — and Firebase does not tell you that (below).
+  const clean = email.trim().toLowerCase();
+  // Send the reader back to StudyQuest after they set the new password, rather
+  // than to Firebase's bare "password changed" page with no way home.
+  const siteUrl = import.meta.env.VITE_SITE_URL;
+  if (siteUrl) {
+    await sendPasswordResetEmail(auth, clean, { url: siteUrl, handleCodeInApp: false });
+    return;
+  }
+  await sendPasswordResetEmail(auth, clean);
 };
 
 // Phone authentication

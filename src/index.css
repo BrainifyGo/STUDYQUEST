@@ -32,6 +32,11 @@ html {
   --bg-main: #0f0f1a;
   --bg-secondary: #13131f;
   --glass-bg: rgba(255, 255, 255, 0.04);
+  /* Floating panels sit ON TOP of the page, so they need a floor of their own.
+     At 4% white you can read the article through the music player, which is what
+     Daniel meant by the transparency being distracting. Near-solid here; the
+     translucent --glass-bg is still used for cards that sit IN the page. */
+  --panel-bg: rgba(19, 19, 31, 0.94);
   --border-main: rgba(255, 255, 255, 0.08);
   --text-main: #f0f0ff;
   --text-dim: rgba(240, 240, 255, 0.4);
@@ -45,6 +50,7 @@ html {
   --bg-main: #f8f7ff;
   --bg-secondary: #ffffff;
   --glass-bg: rgba(0, 0, 0, 0.03);
+  --panel-bg: rgba(255, 255, 255, 0.96);
   --border-main: rgba(0, 0, 0, 0.08);
   --text-main: #1a1a2e;
   --text-dim: rgba(26, 26, 46, 0.4);
@@ -107,6 +113,15 @@ html {
     background-color: var(--glass-bg);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-main);
+  }
+
+  /* Same frame, readable floor. For anything that floats over the page: the
+     tutor, the music player, the side panels. */
+  .glass-panel {
+    background-color: var(--panel-bg);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     border: 1px solid var(--border-main);
   }
 

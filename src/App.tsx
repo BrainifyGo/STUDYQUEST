@@ -301,7 +301,7 @@ export default function App() {
   }, [user, userData, setUserData]);
 
   // Give each view its own <title>. Without a router every view shared one title, which made
-  // browser tabs, history and bookmarks all read "Brainify AI".
+  // browser tabs, history and bookmarks all read "StudyQuest".
   useDocumentTitle(activeView);
   const [dueFlashcardsCount, setDueFlashcardsCount] = useState(0);
   const [studyGoal, setStudyGoal] = useState(2); // Default 2 hours daily
@@ -722,10 +722,10 @@ export default function App() {
           return;
         }
         await signUpWithEmail(email, password);
-        toast.success('Account created! Welcome to Brainify AI 🎉');
+        toast.success('Account created! Welcome to StudyQuest 🎉');
       } else {
         await signInWithEmail(email, password);
-        toast.success('Welcome back to Brainify AI! 🎉');
+        toast.success('Welcome back to StudyQuest! 🎉');
       }
       
       // Create user document if first time
@@ -784,17 +784,31 @@ export default function App() {
     
     try {
       await resetPassword(email);
-      toast.success('Password reset email sent! Check your inbox.');
+      /*
+        Deliberately not "sent! check your inbox".
+
+        Firebase has email-enumeration protection on by default, so this call
+        succeeds *even when no account exists for that address* — that is the
+        point of it, it stops people probing for who has an account. It also
+        sends nothing to an account created with Google sign-in, because such an
+        account has no password to reset. Both cases previously showed a
+        confident "sent!" and then nothing arrived, which is exactly what Daniel
+        saw. So the message says what is actually true, and names the two reasons
+        an email would not turn up.
+      */
+      toast.success('If that email has a StudyQuest password, a reset link is on its way. Check your spam folder.');
       setShowPasswordReset(false);
     } catch (error: any) {
-      toast.error('Failed to send reset email. Please try again.');
+      const { message } = describeAuthError(error);
+      toast.error(message);
+      console.error('Password reset failed:', error?.code, error);
     }
   };
 
   const handleGitHubLogin = async () => {
     try {
       await signInWithGitHub();
-      toast.success('Welcome back to Brainify AI! 🎉');
+      toast.success('Welcome back to StudyQuest! 🎉');
       
       // Create user document if first time
       if (auth.currentUser) {
@@ -857,7 +871,7 @@ export default function App() {
 
     try {
       await confirmationResult.confirm(phoneCode);
-      toast.success('Phone number verified! Welcome to Brainify AI! 🎉');
+      toast.success('Phone number verified! Welcome to StudyQuest! 🎉');
       
       // Create user document if first time
       if (auth.currentUser) {
@@ -907,7 +921,7 @@ export default function App() {
     const testProMode = localStorage.getItem('brainify_test_pro') === 'true';
     const userPlan = testProMode || userData?.isPro ? 'pro' : 'free';
 
-    const prompt = `You are Brainify AI, a professional study assistant. Generate a ${studyMode} from the following content. Format clearly using Markdown with sections and bullet points.\n\nCONTENT:\n${inputText}`;
+    const prompt = `You are StudyQuest, a professional study assistant. Generate a ${studyMode} from the following content. Format clearly using Markdown with sections and bullet points.\n\nCONTENT:\n${inputText}`;
 
     const response = await fetch('/api/generate', {
       method: 'POST',
@@ -949,25 +963,21 @@ export default function App() {
       // Also update localStorage for requested streak tracker
       updateStreak();
       
-      // Gamification: Add XP
-      const newXp = (userData.xp || 0) + 20;
-      const newLevel = levelFromXP(newXp);
-      const newBadges = [...(userData.badges || [])];
+      /*
+        NO XP HERE. XP is the Arcade's currency now.
 
+        Generating a study kit used to pay 20 XP, which meant the fastest way to
+        level up was to paste text and never read it. That is levelling for using
+        the app rather than for learning anything, and it makes the level number
+        worthless as a measure. Levels are now earned only by answering questions
+        in the Arcade, where being right is the only thing that pays.
+        Streaks and study days still count — turning up is still worth recording.
+      */
       await updateDoc(userRef, {
         dailyGenerations: newCount,
         lastGenerationDate: today,
         studyDays: newStudyDays,
-        xp: newXp,
-        level: newLevel,
-        badges: newBadges,
       });
-
-      // Check for level up
-      if (newLevel > (userData.level || 1)) {
-        setShowLevelUp(true);
-        toast.success(`🎉 Level Up! You're now level ${newLevel}!`);
-      }
 
       // Check for usage limit (free users only)
       if (!userData.isPro && newCount >= 10) {
@@ -1119,7 +1129,7 @@ export default function App() {
       const isUrlInput = inputMethod === 'youtube' || inputMethod === 'article';
       
       const systemPrompt = `
-You are Brainify AI, a professional study assistant.
+You are StudyQuest, a professional study assistant.
 Your job is to transform study notes into structured, high-quality revision content.
 
 STRICT RULES:
@@ -1149,7 +1159,7 @@ OUTPUT FORMAT:
         const isPro = testProMode || userData?.isPro || false;
         
         enhancedSystemPrompt = `
-You are Brainify AI, a professional study assistant.
+You are StudyQuest, a professional study assistant.
 Your job is to transform study notes into structured, high-quality revision content.
 
 UNIQUENESS SEED: ${randomSeed}-${timestamp}. 
@@ -1221,40 +1231,24 @@ ${inputMethod === 'youtube' ? `The following is a transcript from a YouTube vide
         // Also update localStorage for requested streak tracker
         updateStreak();
         
-        // Gamification: Add XP
-        const newXp = (userData.xp || 0) + 20;
-        const newLevel = levelFromXP(newXp);
+        // No XP for generating — see the note on the other generate path. Badges
+        // that measure turning up rather than levelling still apply.
         const newBadges = [...(userData.badges || [])];
-        
-        if (newLevel > (userData.level || 1)) {
-          setShowLevelUp(true);
-          setTimeout(() => setShowLevelUp(false), 5000);
-          
-          // Add badges based on levels
-          if (newLevel === 2 && !newBadges.includes('Fast Learner')) newBadges.push('Fast Learner');
-          if (newLevel === 5 && !newBadges.includes('Study Master')) newBadges.push('Study Master');
-        }
-
-        // Add specific badges
         if (newStudyDays.length >= 7 && !newBadges.includes('Weekly Warrior')) newBadges.push('Weekly Warrior');
 
         await updateDoc(userRef, {
           dailyGenerations: newCount,
           lastGenerationDate: today,
           studyDays: newStudyDays,
-          xp: newXp,
-          level: newLevel,
           badges: newBadges
         });
-        
+
         // Update local state immediately for better UX
-        setUserData({ 
-          ...userData, 
-          dailyGenerations: newCount, 
-          lastGenerationDate: today, 
+        setUserData({
+          ...userData,
+          dailyGenerations: newCount,
+          lastGenerationDate: today,
           studyDays: newStudyDays,
-          xp: newXp,
-          level: newLevel,
           badges: newBadges
         });
       } else {
@@ -1678,7 +1672,7 @@ ${inputMethod === 'youtube' ? `The following is a transcript from a YouTube vide
             className="space-y-6 w-full max-w-md"
           >
             <div className="space-y-2">
-              <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-white">Brainify AI</h1>
+              <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-white">StudyQuest</h1>
               <p className="text-text-dim text-base md:text-lg font-medium">Your AI-Powered Study Companion</p>
             </div>
 
@@ -1915,7 +1909,7 @@ ${inputMethod === 'youtube' ? `The following is a transcript from a YouTube vide
                 width: sidebarCollapsed ? 80 : 256
               }}
               exit={{ x: -300 }}
-              className={`glass border-r border-border-main flex flex-col z-50 fixed h-full transition-all duration-300 overflow-hidden ${!sidebarOpen ? 'border-r-0' : ''}`}
+              className={`glass-panel border-r border-border-main flex flex-col z-50 fixed h-full transition-all duration-300 overflow-hidden ${!sidebarOpen ? 'border-r-0' : ''}`}
             >
             <div className="p-6 flex items-center gap-2">
               <button 
@@ -2843,7 +2837,7 @@ ${inputMethod === 'youtube' ? `The following is a transcript from a YouTube vide
                         <div className="space-y-2">
                           <h3 className="text-2xl font-black text-text-dim">Your study kit will appear here</h3>
                           <p className="text-text-dim/50 text-sm max-w-xs mx-auto">
-                            Choose a mode, provide your material, and let Brainify AI do the magic.
+                            Choose a mode, provide your material, and let StudyQuest do the magic.
                           </p>
                         </div>
                       </motion.div>
@@ -3022,10 +3016,10 @@ ${inputMethod === 'youtube' ? `The following is a transcript from a YouTube vide
                 <footer className="pt-12 pb-24 border-t border-white/5 mt-12">
                   <div className="flex flex-col md:flex-row items-center justify-between gap-6">
                     <Logo size={62} className="opacity-80" />
-                    <p className="text-text-dim text-xs">© 2026 Brainify AI. All rights reserved.</p>
+                    <p className="text-text-dim text-xs">© 2026 StudyQuest. All rights reserved.</p>
                     {/* These were all `href="#"` — three links that looked like policies and
                         went nowhere. A privacy policy is a legal requirement once you collect
-                        email addresses and take payments, and Brainify does both. */}
+                        email addresses and take payments, and StudyQuest does both. */}
                     <div className="flex items-center gap-6 text-xs text-text-dim font-medium">
                       <button type="button" onClick={() => setActiveView('privacy')}
                         className="hover:text-brand-purple transition-colors">Privacy</button>
@@ -3061,7 +3055,7 @@ ${inputMethod === 'youtube' ? `The following is a transcript from a YouTube vide
               </div>
               <div className="flex-1">
                 <h4 className="font-bold text-white">Upgrade Successful!</h4>
-                <p className="text-xs text-white/60">Welcome to Brainify Pro. Enjoy unlimited access.</p>
+                <p className="text-xs text-white/60">Welcome to StudyQuest Pro. Enjoy unlimited access.</p>
               </div>
               <button 
                 onClick={() => setShowUpgradeSuccess(false)}
@@ -3208,7 +3202,7 @@ ${inputMethod === 'youtube' ? `The following is a transcript from a YouTube vide
                 <div className="w-16 h-16 bg-brand-purple/20 border border-brand-purple/30 rounded-2xl flex items-center justify-center mx-auto">
                   <Logo showText={false} size={62} />
                 </div>
-                <h2 className="text-2xl font-black text-text-main">Welcome to Brainify AI! 🧠</h2>
+                <h2 className="text-2xl font-black text-text-main">Welcome to StudyQuest! 🧠</h2>
                 <p className="text-text-dim text-sm">Turn any study material into a complete study kit in seconds.</p>
               </div>
 

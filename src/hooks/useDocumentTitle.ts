@@ -4,15 +4,15 @@ import { trackView } from '../lib/analytics';
 /**
  * Keep <title> in step with whatever the user is actually looking at.
  *
- * Brainify is a single state-driven page — there is no router, so every view shared the one
+ * StudyQuest is a single state-driven page — there is no router, so every view shared the one
  * title baked into index.html. That costs three real things: the browser tab is unreadable
- * once a few are open, history and bookmarks all read "Brainify AI", and any analytics that
+ * once a few are open, history and bookmarks all read "StudyQuest", and any analytics that
  * groups by page title sees one undifferentiated blob.
  *
  * The title is restored on unmount so a view cannot leave its title behind after it closes.
  */
 
-const SUFFIX = 'Brainify AI';
+const SUFFIX = 'StudyQuest';
 
 export const VIEW_TITLES: Record<string, string> = {
   dashboard:   'Dashboard',

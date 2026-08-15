@@ -6,7 +6,7 @@ import { ArrowLeft, Mail, Clock, ShieldCheck } from 'lucide-react';
  *
  * These three links existed in the footer as `href="#"` — they looked like a real policy and
  * went nowhere. That is worse than having no link at all: a privacy policy is a legal
- * requirement once you collect email addresses and take payments, and Brainify does both.
+ * requirement once you collect email addresses and take payments, and StudyQuest does both.
  *
  * The content below describes what the app ACTUALLY does, checked against the code rather than
  * copied from a template: Firebase Auth for sign-in, Firestore for study history and progress,
@@ -40,7 +40,7 @@ const LI: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 const Privacy = () => (
   <>
     <P>
-      This policy explains exactly what Brainify AI stores about you, why, and how to get rid
+      This policy explains exactly what StudyQuest stores about you, why, and how to get rid
       of it. It covers the app at this domain and nothing else.
     </P>
 
@@ -57,7 +57,7 @@ const Privacy = () => (
     </ul>
     <P>
       We do not store your payment card. Payments are handled by the payment provider and
-      Brainify only ever sees whether a subscription is active.
+      StudyQuest only ever sees whether a subscription is active.
     </P>
 
     <H>What we send to the AI</H>
@@ -76,7 +76,7 @@ const Privacy = () => (
 
     <H>Cookies and tracking</H>
     <P>
-      Brainify uses browser local storage to remember your theme and keep you signed in. There
+      StudyQuest uses browser local storage to remember your theme and keep you signed in. There
       is no advertising, no third-party tracking pixel and nothing is sold to anyone.
     </P>
 
@@ -89,7 +89,7 @@ const Privacy = () => (
 
     <H>Under 18</H>
     <P>
-      Brainify is built for GCSE students, so most users are under 18. We collect no more than
+      StudyQuest is built for GCSE students, so most users are under 18. We collect no more than
       the list above, and never location, contacts or advertising identifiers. If you are under
       13, ask a parent or guardian before creating an account.
     </P>
@@ -104,9 +104,9 @@ const Privacy = () => (
 
 const Terms = () => (
   <>
-    <P>By creating an account or using Brainify AI, you agree to the following.</P>
+    <P>By creating an account or using StudyQuest, you agree to the following.</P>
 
-    <H>What Brainify is</H>
+    <H>What StudyQuest is</H>
     <P>
       A study tool that turns your notes and past papers into revision material using AI. It is
       a revision aid, not a teacher and not an exam board. <b>AI output can be wrong.</b> Check
@@ -119,7 +119,7 @@ const Terms = () => (
     <ul className="list-disc pl-5 mb-3">
       <LI>One account per person. Keep your sign-in details to yourself.</LI>
       <LI>You are responsible for what is generated from your account.</LI>
-      <LI>Do not use Brainify to produce anything illegal, hateful, or aimed at harassing
+      <LI>Do not use StudyQuest to produce anything illegal, hateful, or aimed at harassing
         someone.</LI>
       <LI>Do not attempt to bypass usage limits, billing, or the security rules. Accounts doing
         so can be suspended without refund.</LI>
@@ -141,13 +141,13 @@ const Terms = () => (
 
     <H>Your content</H>
     <P>
-      What you paste in and what Brainify generates for you stays yours. We store it so you can
+      What you paste in and what StudyQuest generates for you stays yours. We store it so you can
       come back to it, and we do not publish it or use it to train anything.
     </P>
 
     <H>Availability</H>
     <P>
-      Brainify is provided as-is. It is a small, independent product and there is no uptime
+      StudyQuest is provided as-is. It is a small, independent product and there is no uptime
       guarantee — during exam season especially, generation may be slower. We are not liable
       for exam results, missed revision, or losses arising from using the app.
     </P>
@@ -165,7 +165,7 @@ const Terms = () => (
 const Contact = () => (
   <>
     <P>
-      Brainify is built and run by a small independent team. Questions, bugs, billing problems
+      StudyQuest is built and run by a small independent team. Questions, bugs, billing problems
       and data requests all go to the same place, and a real person reads them.
     </P>
 
@@ -211,7 +211,7 @@ const TITLES: Record<LegalView, string> = {
 
 const BLURBS: Record<LegalView, string> = {
   privacy: 'What we store, why, and how to delete it.',
-  terms: 'The rules for using Brainify AI.',
+  terms: 'The rules for using StudyQuest.',
   contact: 'Get in touch — a real person replies.',
 };
 

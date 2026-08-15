@@ -68,7 +68,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ className }) => {
               animate={{ opacity: 1, x: 0 }}
               className="text-xl font-black tracking-tighter text-white"
             >
-              Brainify <span className="text-secondary">AI</span>
+              Study<span className="text-secondary">Quest</span>
             </motion.span>
           )}
         </div>

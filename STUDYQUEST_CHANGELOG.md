@@ -331,3 +331,142 @@ The mode picker now names who you are about to face, which is what turns a mode 
 
 `src/lib/bosses.ts` (new), `tests/bosses.test.ts` (new), `src/lib/gameModes.ts`,
 `src/components/GameMode.tsx`, `package.json`.
+
+---
+
+## [2026-08-15] — Daniel's test report, first batch
+
+**Editor:** Claude Code (Opus 5)
+
+Daniel tested the live site properly and sent sixteen things. This entry covers the eight that were
+real, findable defects. The rest are features rather than bugs and are triaged at the bottom.
+
+### The tutor could not be closed
+
+The tutor panel is full-width on a phone, and its only exit was a single X at the very top — which
+sits under the status bar or a notch on plenty of handsets. If you cannot reach it, you are stuck
+inside the tutor with the whole app behind it.
+
+It now has **three** ways out: Escape, a tap on the backdrop, and the X — and the header is padded
+by `env(safe-area-inset-top)` so the X is not under the notch in the first place. It also announces
+itself as `role="dialog"`.
+
+### "View Badges" did nothing, and the XP beside it was invented
+
+Two separate defects in the same block of the Analytics screen.
+
+The button had **no `onClick`**. Not a broken handler — no handler at all. It now opens a panel of
+six badges. Locked ones stay visible with what earns them, because a badge you cannot see is not a
+goal.
+
+The block beside it was worse. `850 XP`, `1000 XP to next level`, a bar hardcoded to `85%`, and
+"You're in the top 5% of students" — none of it came from anywhere. It was the same for every
+account, including a brand new one. It now reads the player's real XP from Firestore and runs it
+through the same level curve as the rest of the app, and an account with no XP is told to go and
+earn some in the Arcade rather than being congratulated for nothing.
+
+While in that area: the upgrade page claimed **"Join 10,000+ students already using Pro"**. There are
+not 10,000 students. On a page that takes card details, an invented number is not marketing.
+
+### The password reset email that never arrived
+
+Not a bug in the sending — a bug in what we promised. Firebase has email-enumeration protection on
+by default, which means `sendPasswordResetEmail` **succeeds even when no account exists** for that
+address; that is the whole point of the feature, it stops people probing for who has an account. It
+also sends nothing to an account created with Google sign-in, because there is no password to reset.
+
+Both cases showed a confident *"Password reset email sent! Check your inbox."* and then nothing
+arrived. The message now says what is actually true and names the two reasons an email would not
+turn up, the address is trimmed and lowercased (a trailing space from a phone keyboard was a silent
+"no such account"), the real error code is surfaced instead of a generic failure, and the link now
+carries a continue URL so the reader lands back on StudyQuest rather than on a bare Firebase page.
+
+**Still worth checking on Daniel's side:** the spam folder, and whether the account he tested with
+was created with Google.
+
+### Level cap: 500 → 2000
+
+Daniel asked for a cap of 2000 with each level costing more than the last. The second half was
+already true — 20% per level — and it is exactly why the first half could not simply be typed in.
+
+`1.2 ^ 1999` is not a large number. It is `Infinity` in a double. Every level past roughly 480 was
+**already** returning `Infinity` under the old cap of 500, and the progress bar would have shown
+`NaN%`. Raising the cap without touching the curve would have shipped a broken screen, not a longer
+game.
+
+So the per-level cost now stops rising at **25,000 XP** (`LEVEL_COST_CAP`). Levels get 20% dearer
+until they hit that ceiling — around level 22 — and hold there. This keeps the arithmetic finite and,
+just as important, keeps the number readable: *"25,000 XP to level 43"* is a goal, *"3.4 trillion XP
+to level 43"* is a wall, and a wall is where people stop playing.
+
+### XP now comes from the Arcade only
+
+Generating a study kit paid 20 XP, on two separate code paths. That made the fastest route to a high
+level "paste text, never read it" — levelling for *using* the app rather than for learning anything,
+which makes the level number worthless as a measure of anything.
+
+Both awards are gone. XP is earned by answering questions in the Arcade, where being right is the
+only thing that pays. Streaks, study days and the daily generation count still record — turning up
+is still worth recording, it just is not worth XP.
+
+### The music
+
+The Classical tab had exactly one track, and that track was a **dead frame** — video `__eq8T5b4-w`
+has been removed from YouTube. Every id in the list was checked against YouTube's oEmbed endpoint;
+that was the only dead one, and it has been replaced with a verified-live recording. The four ambient
+sounds all returned 200, so they were never the problem.
+
+The bigger issue was the ambient toggle: it lit up **whether or not a single byte arrived**. A
+blocked school network, an offline phone and a missing file all produced the same thing — an "on"
+button and silence, which reads as "the music is broken" rather than "the music is unavailable".
+Howler reports both the load failure and the play failure; both now switch the toggle back off and
+say what happened.
+
+### The transparency
+
+The floating panels — tutor, music player, sidebar — were painted at **4% white** over the page. You
+could read the article through the music player, which is what Daniel meant by distracting.
+
+Panels that float over the page now use a new `.glass-panel` surface at 94% opacity (96% in light
+mode); cards that sit *in* the page keep the translucent `.glass`. Same frame, readable floor.
+
+### The name
+
+`Brainify AI` → `StudyQuest` across everything a user can see: 51 mentions across 13 files, the two
+split wordmarks in the logo and the sidebar, the browser tab title, the 404 page, the legal pages,
+the AI's own system prompts (it was introducing itself as Brainify), and the OpenRouter request
+header. Comments that describe what *Brainify* used to do are left alone — they are history, and
+they are accurate.
+
+### Verification
+
+- **88 tests passing** (4 new on the level curve); `tsc` clean; `npm run build` clean.
+- New tests pin: a single level never costs more than the cap; `xpForLevel` and `xpToReachLevel` stay
+  finite at level 2000; cost rises every level until the plateau; `levelFromXP(MAX_SAFE_INTEGER)`
+  returns exactly 2000; and `levelProgress` returns a percentage between 0 and 100 at every XP value
+  tested, including `1e12`.
+- The music was verified by request, not by reading: four ambient files (200) and six video ids
+  (five live, one 404).
+
+### Files
+
+`src/components/AITutorChat.tsx`, `src/components/Analytics.tsx`, `src/components/StudyMusic.tsx`,
+`src/components/Logo.tsx`, `src/components/Sidebar.tsx`, `src/components/UpgradePage.tsx`,
+`src/components/Leaderboard.tsx`, `src/components/LegalPage.tsx`, `src/components/Settings.tsx`,
+`src/components/TimerEngine.tsx`, `src/hooks/useDocumentTitle.ts`, `src/lib/firebase.ts`,
+`src/lib/progress.ts`, `src/lib/aiProviders.server.ts`, `src/App.tsx`, `src/index.css`,
+`tests/progress.test.ts`, `index.html`, `public/404.html`.
+
+### Not fixed yet, and why
+
+These are from the same report but are features, not defects:
+
+| Daniel's point | Standing |
+|---|---|
+| Quiz generator for the mistakes session | **The keystone.** The Arcade is empty because nothing writes mistakes into it yet. Next. |
+| "The arcade is missing the games" | Same root cause as above — the modes exist, the questions do not. |
+| Doesn't run on mobile | Needs a device-by-device pass, not a guess. Separate piece of work. |
+| AI "jumbles it all up" | A prompt and formatting job. Real, and worth doing properly rather than quickly. |
+| Colour scheme | Design decision, wants Ola and Daniel to agree a direction first. |
+| Tailored questions from wrong answers | Depends on the mistakes store existing. After the quiz generator. |
+| Daily progress test | Depends on the same. After the quiz generator. |

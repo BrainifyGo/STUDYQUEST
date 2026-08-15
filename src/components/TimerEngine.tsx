@@ -65,9 +65,9 @@ export default function TimerEngine() {
     if (timerIsRunning) {
       const m = Math.floor(timerTimeLeft / 60).toString().padStart(2, '0');
       const s = (timerTimeLeft % 60).toString().padStart(2, '0');
-      document.title = `🔴 Focusing... (${m}:${s}) — Brainify AI`;
+      document.title = `🔴 Focusing... (${m}:${s}) — StudyQuest`;
     } else {
-      document.title = 'Brainify AI — Study Smarter';
+      document.title = 'StudyQuest — Study Smarter';
     }
   }, [timerIsRunning, timerTimeLeft]);
 

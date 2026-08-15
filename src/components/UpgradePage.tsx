@@ -45,7 +45,7 @@ const HeroSection = ({ onUpgrade }: { onUpgrade: () => void }) => (
         transition={{ delay: 0.2 }}
         className="text-2xl md:text-3xl font-bold text-text-main/80 tracking-tight"
       >
-        Go beyond limits with Brainify Pro
+        Go beyond limits with StudyQuest Pro
       </motion.h2>
       <motion.p 
         initial={{ opacity: 0 }}
@@ -601,7 +601,7 @@ export default function UpgradePage({ onBack, isSubscribed = false, onUpgradeSuc
             <div className="space-y-4">
               <h3 className="text-3xl font-black text-text-main tracking-tight">Why Pro?</h3>
               <p className="text-text-dim font-medium leading-relaxed">
-                Brainify Pro is more than just a subscription. It's an investment in your academic success. 
+                StudyQuest Pro is more than just a subscription. It's an investment in your academic success. 
                 Unlock the full power of our AI and collaborate with students worldwide.
               </p>
             </div>
@@ -638,7 +638,10 @@ export default function UpgradePage({ onBack, isSubscribed = false, onUpgradeSuc
           >
             Start Pro Now
           </button>
-          <p className="text-text-dim text-xs font-bold uppercase tracking-widest">Join 10,000+ students already using Brainify Pro</p>
+          {/* Was "Join 10,000+ students already using Pro". There are not 10,000
+              students. On a page that takes card details, an invented number is
+              not marketing, it is a false statement to someone about to pay. */}
+          <p className="text-text-dim text-xs font-bold uppercase tracking-widest">Built by GCSE students, for GCSE students</p>
         </div>
       </div>
     </div>

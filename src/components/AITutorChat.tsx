@@ -17,11 +17,19 @@ interface AITutorChatProps {
 
 export default function AITutorChat({ context, onClose }: AITutorChatProps) {
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: "Hi! I'm your Brainify AI Tutor. I've analyzed your study material. What would you like me to explain in more detail?" }
+    { role: 'assistant', content: "Hi! I'm your StudyQuest tutor. I've read your study material — what would you like me to explain in more detail?" }
   ]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Escape closes it. The third way out, and the one that always works even if
+  // the button is under a notch or the backdrop is covered.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -39,7 +47,7 @@ export default function AITutorChat({ context, onClose }: AITutorChatProps) {
 
     try {
       const systemPrompt = `
-        You are an expert AI Study Tutor for Brainify AI.
+        You are an expert AI Study Tutor for StudyQuest.
         Your goal is to help the student understand their study material better.
 
         CONTEXT OF STUDY MATERIAL:
@@ -68,11 +76,35 @@ export default function AITutorChat({ context, onClose }: AITutorChatProps) {
   };
 
   return (
-    <motion.div 
+    <>
+      {/*
+        THREE WAYS OUT, because there was one.
+
+        The panel is full-width on mobile, so the only exit was a single X at the
+        very top — which sits under the browser chrome or a notch on plenty of
+        phones. If you cannot hit it, you are stuck in the tutor with the whole
+        app behind it. Escape and a tap outside now close it too.
+      */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="fixed inset-0 bg-black/40 z-[99]"
+        aria-hidden="true"
+      />
+
+    <motion.div
       initial={{ x: 400 }}
       animate={{ x: 0 }}
       exit={{ x: 400 }}
-      className="fixed top-0 right-0 h-full w-full md:w-[400px] glass border-l border-border-main z-[100] flex flex-col shadow-2xl"
+      role="dialog"
+      aria-modal="true"
+      aria-label="AI Study Tutor"
+      className="fixed top-0 right-0 h-full w-full md:w-[400px] glass-panel border-l border-border-main z-[100] flex flex-col shadow-2xl"
+      // Keeps the header clear of a notch or the status bar, which is what put
+      // the close button out of reach in the first place.
+      style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       {/* Header */}
       <div className="p-6 border-b border-border-main flex items-center justify-between bg-glass-bg">
@@ -175,9 +207,10 @@ export default function AITutorChat({ context, onClose }: AITutorChatProps) {
           </button>
         </div>
         <p className="text-[10px] text-text-dim text-center mt-4 uppercase tracking-widest font-bold">
-          Powered by Brainify AI • Gemini 3.1 Pro
+          Powered by StudyQuest AI
         </p>
       </div>
     </motion.div>
+    </>
   );
 }
