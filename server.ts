@@ -80,7 +80,10 @@ async function startServer() {
     },
   });
 
-  const PORT = 3000;
+  // Hosts tell the app which port to listen on via PORT, and route traffic to it.
+  // Hard-coding 3000 means the host's router finds nothing listening where it
+  // expects — the app boots fine and the site still fails to load.
+  const PORT = Number(process.env.PORT) || 3000;
   const distPath = path.join(process.cwd(), "dist");
 
   app.use(express.json());
