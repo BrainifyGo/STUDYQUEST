@@ -124,6 +124,7 @@ import { callAI } from './lib/aiService';
 import { getMonthlyLimit, getDailyLimit } from './lib/tokenService';
 import { limitAdvice } from './lib/tokenService';
 import { levelFromXP } from './lib/progress';
+import { describeAuthError } from './lib/authErrors';
 import { recordMistake, retireMistake, listMistakes, asQuiz, type Mistake } from './lib/mistakes';
 
 // Configure PDF.js worker
@@ -657,7 +658,14 @@ export default function App() {
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
-      console.error("Login failed", err);
+      // This used to only console.error, so a failed sign-in looked like a dead
+      // button. Say what went wrong, on screen, where the person clicking is.
+      console.error('Login failed', err);
+      const { message, isSetupProblem } = describeAuthError(err);
+      toast.error(message, {
+        // A configuration fault needs reading, not glancing at.
+        duration: isSetupProblem ? 12000 : 5000,
+      });
     }
   };
 
@@ -725,6 +733,11 @@ export default function App() {
         const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
         if (!userDoc.exists()) {
           const userData = {
+            // REQUIRED by isValidUser() in firestore.rules, which checks
+            // hasAll(['uid', 'email']). Without it the account is created in
+            // Firebase Auth and then this write is refused, so signing up
+            // appears to fail while leaving a half-made account behind.
+            uid: auth.currentUser.uid,
             email: auth.currentUser.email,
             displayName: auth.currentUser.displayName || email.split('@')[0],
             plan: 'free',
@@ -741,22 +754,24 @@ export default function App() {
       }
     } catch (error: any) {
       console.error('Auth error:', error);
-      
-      // Specific error messages
-      if (error.code === 'auth/email-already-in-use') {
-        toast.error('Email already registered. Sign in instead.');
-      } else if (error.code === 'auth/wrong-password') {
-        toast.error('Wrong password. Try again or reset it.');
-      } else if (error.code === 'auth/user-not-found') {
-        toast.error('No account found. Sign up instead.');
-      } else if (error.code === 'auth/weak-password') {
-        toast.error('Password must be at least 6 characters.');
-      } else if (error.code === 'auth/invalid-email') {
-        toast.error('Please enter a valid email address.');
-      } else if (error.code === 'auth/account-exists-with-different-credential') {
+
+      // This was a hand-written if/else over six codes, and everything it did not
+      // list fell through to "Sign in failed. Please try again." — which is what a
+      // misconfigured deployment looked like, so nobody could tell a wrong
+      // password from a site that was never authorised for sign-in.
+      if (error?.code === 'auth/account-exists-with-different-credential') {
         toast.error('An account exists with this email. Try signing in with Google.');
+      } else if (error?.code === 'permission-denied') {
+        // Auth succeeded but the Firestore write did not, which leaves a real
+        // account with no profile behind it. Worth saying out loud.
+        toast.error(
+          "Your account was created but your profile couldn't be saved. Try signing in — " +
+          'if it keeps happening, tell us.',
+          { duration: 10000 }
+        );
       } else {
-        toast.error('Sign in failed. Please try again.');
+        const { message, isSetupProblem } = describeAuthError(error);
+        toast.error(message, { duration: isSetupProblem ? 12000 : 5000 });
       }
     }
   };
@@ -786,6 +801,9 @@ export default function App() {
         const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
         if (!userDoc.exists()) {
           const userData = {
+            // Required by isValidUser() in firestore.rules — see the note on the
+            // email sign-up path above. Missing it means the write is refused.
+            uid: auth.currentUser.uid,
             email: auth.currentUser.email,
             displayName: auth.currentUser.displayName || auth.currentUser.email?.split('@')[0],
             plan: 'free',
@@ -846,6 +864,9 @@ export default function App() {
         const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
         if (!userDoc.exists()) {
           const userData = {
+            // Required by isValidUser() in firestore.rules — see the note on the
+            // email sign-up path above. Missing it means the write is refused.
+            uid: auth.currentUser.uid,
             email: auth.currentUser.email,
             displayName: auth.currentUser.displayName || 'User',
             plan: 'free',

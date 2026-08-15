@@ -181,3 +181,79 @@ Reachable from a new **Arcade** entry in the sidebar.
 
 `server.ts`, `src/main.tsx`, `src/lib/gameModes.ts` (new), `src/components/GameMode.tsx` (new),
 `tests/gameModes.test.ts` (new), `src/App.tsx`, `package.json`.
+
+---
+
+## [2026-08-15] — Why sign-in worked for one founder and not the other
+
+**Editor:** Claude Code (Opus 5)
+
+Live on Render. Ola could neither sign in nor sign up; Daniel could. Two separate causes, found
+by querying the live Firebase config rather than guessing.
+
+### Cause 1 — the Render domain was never authorised (Google sign-in)
+
+Queried the Identity Toolkit admin API for the project's authorised domains:
+
+    localhost
+    brainify-app-5f96d.firebaseapp.com
+    brainify-app-5f96d.web.app
+
+`studyquest-ruuq.onrender.com` is absent, so `signInWithPopup` fails with
+`auth/unauthorized-domain` for **everyone on the live site**. It worked for Daniel because he
+was testing on `localhost`, which is authorised — which is exactly how this class of fault
+reaches real users: whoever tests locally never sees it.
+
+**Attempting to add the domain from here was blocked by a permission guard**, correctly — it is
+a config change to a live project. It has to be added in the Firebase console.
+
+### Cause 2 — the rules refused the new user document (email sign-up)
+
+Sign-up with email/password creates the Firebase Auth account and then writes
+`users/{uid}`. All three of those write paths in `App.tsx` built the document **without a `uid`
+field**, while `isValidUser()` in `firestore.rules` requires `hasAll(['uid', 'email'])`.
+
+So the account was created, the profile write was refused, and sign-up looked like it failed —
+leaving a real Auth account behind with no profile. Introduced when the rules were hardened;
+`AuthWrapper.tsx` had the field, these three did not. All three now set it.
+
+### Why neither cause was visible
+
+`handleGoogleLogin` was:
+
+    catch (err) { console.error("Login failed", err); }
+
+The error went to a console nobody had open, and the button looked dead. The email path did show
+toasts, but from a hand-written if/else over six error codes — and everything unlisted fell
+through to *"Sign in failed. Please try again."*, so a misconfigured deployment was
+indistinguishable from a typo in a password.
+
+`src/lib/authErrors.ts` (new) maps codes to messages and flags which are **setup faults** rather
+than user mistakes. Setup faults name the actual host and the exact console page to fix, and
+stay on screen for 12 seconds instead of 5, because they need reading rather than glancing at.
+A `permission-denied` from Firestore now says the account exists but the profile did not save,
+rather than blaming the password.
+
+One property is preserved deliberately: wrong password, unknown account and invalid credential
+all return the **same** message. Firebase returns one code for them on purpose — splitting them
+would turn the login form into a tool for finding out which email addresses have accounts.
+
+### Verification
+
+- **67 tests passing** (8 new in `authErrors.test.ts`), `tsc` clean, `npm run build` clean.
+- The tests cover: the domain message names the current host; setup faults are flagged
+  separately from user mistakes; wrong-password, user-not-found and invalid-credential produce
+  identical text; and `describeAuthError` returns something sayable when handed `null`,
+  `undefined`, a string, a bare `Error` or a number — never "undefined" or "[object Object]".
+
+### Still to do, by hand
+
+- **Firebase console → Authentication → Settings → Authorised domains → add
+  `studyquest-ruuq.onrender.com`.** Google sign-in cannot work until this is done.
+- Set `VITE_SITE_URL=https://studyquest-ruuq.onrender.com` in Render and redeploy — the build
+  log shows five warnings about it, and without it the canonical link and social share images
+  point nowhere.
+
+### Files
+
+`src/lib/authErrors.ts` (new), `tests/authErrors.test.ts` (new), `src/App.tsx`, `package.json`.
