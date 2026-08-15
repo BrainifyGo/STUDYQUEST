@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Page not found | Brainify AI</title>
+<meta name="description" content="That page doesn't exist. Head back to Brainify AI to keep revising.">
+<!-- A 404 must never be indexed: it has no content worth ranking and, duplicated across every
+     bad URL, it dilutes the pages that do. -->
+<meta name="robots" content="noindex, follow">
+<meta name="theme-color" content="#0b0916">
+<link rel="icon" href="/logo-brain-transparent.png">
+<style>
+  /* Self-contained on purpose. A 404 that depends on the app bundle is a 404 that breaks
+     whenever the thing causing the 404 is a broken deploy. */
+  :root{ --bg:#0b0916; --card:#141024; --line:#241d3d; --text:#f1eefc;
+         --dim:#9d94bd; --purple:#8b5cf6; --pink:#ec4899; }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:16px/1.6 "Segoe UI",system-ui,-apple-system,sans-serif;
+       display:grid;place-items:center;padding:24px;text-align:center;
+       background-image:radial-gradient(ellipse 70% 55% at 50% -10%, #4c1d9566, transparent 70%)}
+  .wrap{max-width:520px}
+  .code{font-size:clamp(72px,18vw,124px);font-weight:800;line-height:1;margin:0;
+        background:linear-gradient(100deg,var(--purple),var(--pink));
+        -webkit-background-clip:text;background-clip:text;color:transparent}
+  h1{font-size:clamp(20px,4vw,26px);margin:14px 0 10px}
+  p{color:var(--dim);margin:0 0 28px}
+  .actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  a.btn{display:inline-block;padding:12px 24px;border-radius:11px;text-decoration:none;
+        font-weight:600;font-size:15px}
+  a.primary{background:linear-gradient(100deg,var(--purple),var(--pink));color:#fff}
+  a.primary:hover{opacity:.9}
+  a.ghost{border:1px solid var(--line);color:var(--text)}
+  a.ghost:hover{background:#ffffff0a}
+  .logo{width:64px;height:64px;margin-bottom:6px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <img class="logo" src="/logo-brain-transparent.png" alt="Brainify AI">
+    <p class="code">404</p>
+    <h1>That page doesn't exist</h1>
+    <p>The link may be out of date, or there's a typo in the address. Your study kits and
+       history are safe — nothing has been lost.</p>
+    <div class="actions">
+      <a class="btn primary" href="/">Back to Brainify</a>
+    </div>
+  </div>
+</body>
+</html>

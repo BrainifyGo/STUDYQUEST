@@ -1,0 +1,137 @@
+/**
+ * The level curve, XP rewards and streaks.
+ *
+ * These numbers decide how the whole app feels, and they are the first thing
+ * ported from ReviseGo — so they are pinned here before anything is built on top.
+ * A curve that silently changes is a curve that resets everyone's level.
+ */
+import { describe, expect, it } from 'vitest';
+import {
+  levelFromXP, levelProgress, xpForLevel, xpToReachLevel,
+  xpForCorrectAnswer, endOfQuizBonus, nextStreak, localDayKey,
+  BASE_LEVEL_XP, XP_COMBO_CAP,
+} from '../src/lib/progress';
+
+describe('the level curve', () => {
+
+  it('starts everyone at level 1', () => {
+    expect(levelFromXP(0)).toBe(1);
+    expect(levelFromXP(499)).toBe(1);
+  });
+
+  it('reaches level 2 at exactly 500 XP', () => {
+    expect(levelFromXP(BASE_LEVEL_XP)).toBe(2);
+  });
+
+  it('gets harder each level, by 20%', () => {
+    expect(xpForLevel(1)).toBe(500);
+    expect(xpForLevel(2)).toBe(600);
+    expect(xpForLevel(3)).toBe(720);
+    expect(xpForLevel(4)).toBe(864);
+  });
+
+  it('matches ReviseGo exactly — level 4 begins at 1820 XP', () => {
+    // 500 + 600 + 720. This is the number the two apps must agree on, or a player
+    // levels up in one and not the other.
+    expect(xpToReachLevel(4)).toBe(1820);
+    expect(levelFromXP(1819)).toBe(3);
+    expect(levelFromXP(1820)).toBe(4);
+  });
+
+  it('is NOT the old flat 100-XP-per-level rule', () => {
+    // Brainify used Math.floor(xp/100)+1, which made level 40 as easy as level 4.
+    expect(levelFromXP(1000)).not.toBe(11);
+    expect(levelFromXP(1000)).toBe(2);
+  });
+
+  it('survives junk without hanging', () => {
+    for (const bad of [NaN, -50, Infinity, undefined as unknown as number]) {
+      const lvl = levelFromXP(bad);
+      expect(Number.isFinite(lvl)).toBe(true);
+      expect(lvl).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('reports progress through the current level', () => {
+    const p = levelProgress(500);          // exactly level 2, nothing into it
+    expect(p.level).toBe(2);
+    expect(p.into).toBe(0);
+    expect(p.needed).toBe(600);
+    expect(p.percent).toBe(0);
+
+    const half = levelProgress(500 + 300);  // 300 of the 600 needed
+    expect(half.level).toBe(2);
+    expect(half.percent).toBe(50);
+  });
+});
+
+describe('XP for answers', () => {
+
+  it('pays a base amount for a correct answer', () => {
+    expect(xpForCorrectAnswer(0)).toBe(40);
+  });
+
+  it('pays more as the combo builds', () => {
+    expect(xpForCorrectAnswer(3)).toBeGreaterThan(xpForCorrectAnswer(1));
+  });
+
+  it('CAPS the combo bonus', () => {
+    // Uncapped, grinding one easy topic beats revising anything hard.
+    const huge = xpForCorrectAnswer(1000);
+    expect(huge).toBe(40 + XP_COMBO_CAP);
+    expect(xpForCorrectAnswer(50)).toBe(huge);
+  });
+});
+
+describe('end-of-quiz bonus', () => {
+
+  it('rewards a perfect round most', () => {
+    const perfect = endOfQuizBonus(10, 10, 10).total;
+    const good = endOfQuizBonus(8, 10, 3).total;
+    expect(perfect).toBeGreaterThan(good);
+  });
+
+  it('always pays something for finishing', () => {
+    const { rows, total } = endOfQuizBonus(0, 10, 0);
+    expect(total).toBeGreaterThan(0);
+    expect(rows.some(r => /complete/i.test(r.label))).toBe(true);
+  });
+
+  it('adds up to what it says it adds up to', () => {
+    // The breakdown is shown to the user; a total that disagrees with its own
+    // rows is worse than showing no breakdown.
+    const { rows, total } = endOfQuizBonus(10, 10, 12);
+    expect(rows.reduce((n, r) => n + r.xp, 0)).toBe(total);
+  });
+
+  it('handles an empty quiz without inventing XP', () => {
+    expect(endOfQuizBonus(0, 0, 0).total).toBe(0);
+  });
+});
+
+describe('streaks', () => {
+  const today = new Date('2026-08-15T10:00:00');
+
+  it('starts at 1 for a first-ever session', () => {
+    expect(nextStreak(0, null, today)).toBe(1);
+  });
+
+  it('does not increase twice in one day', () => {
+    // Studying twice on Saturday is not a two-day streak.
+    expect(nextStreak(5, localDayKey(today), today)).toBe(5);
+  });
+
+  it('increases after studying yesterday', () => {
+    expect(nextStreak(5, '2026-08-14', today)).toBe(6);
+  });
+
+  it('resets after a missed day', () => {
+    expect(nextStreak(5, '2026-08-13', today)).toBe(1);
+  });
+
+  it('uses the local date, not UTC', () => {
+    // Late-evening study in the UK must not count as the next day.
+    const lateEvening = new Date('2026-08-15T23:30:00');
+    expect(localDayKey(lateEvening)).toBe('2026-08-15');
+  });
+});

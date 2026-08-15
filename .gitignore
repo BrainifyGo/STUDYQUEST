@@ -1,0 +1,13 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Leftover Google AI Studio scaffolding: unused by any code, and it points at a
+# different Firebase project. It is where the stray API key in the old history
+# came from, so it is not carried into StudyQuest.
+firebase-applet-config.json

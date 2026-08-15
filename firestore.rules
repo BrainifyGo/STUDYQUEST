@@ -1,0 +1,304 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required)
+    //   - displayName: string (optional)
+    //   - notifications: boolean (optional)
+    //   - isPro: boolean (optional)
+    //   - dailyGenerations: number (optional)
+    //   - lastGenerationDate: string (optional)
+    //   - subscriptionType: string (optional, enum: ['monthly', 'annual', 'none'])
+    //   - xp: number (optional)
+    //   - level: number (optional)
+    //   - badges: list (optional)
+    //
+    // Collection: exams
+    // Document ID: examId
+    // Fields:
+    //   - userId: string (required)
+    //   - subject: string (required)
+    //   - date: string (required)
+    //   - importance: string (required, enum: ['low', 'medium', 'high'])
+    //   - completed: boolean (required)
+    //   - createdAt: string (required)
+    //
+    // Collection: study_tasks
+    // Document ID: taskId
+    // Fields:
+    //   - userId: string (required)
+    //   - title: string (required)
+    //   - subject: string (required)
+    //   - duration: number (required)
+    //   - date: string (required)
+    //   - completed: boolean (required)
+    //   - createdAt: string (required)
+    //
+    // Collection: study_sessions
+    // Document ID: sessionId
+    // Fields:
+    //   - userId: string (required)
+    //   - date: string (required)
+    //   - duration: number (required)
+    //   - score: number (required)
+    //   - subject: string (optional)
+    //
+    // Collection: upgrade_keys
+    // Document ID: keyId
+    // Fields:
+    //   - key: string (required)
+    //   - type: string (required, enum: ['monthly', 'annual'])
+    //   - isUsed: boolean (required)
+    //   - usedBy: string (optional)
+    //
+    // Collection: study_history
+    // Document ID: historyId
+    // Fields:
+    //   - user_id: string (required)
+    //   - subject: string (required)
+    //   - timestamp: string (optional)
+    //   - mode: string (optional)
+    //   - content: string (optional)
+    //   - outputModes: map (optional)
+    //   - created_at: string (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        (request.auth.token.email == "olamidepeniel@gmail.com" && request.auth.token.email_verified == true) ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.uid is string && data.uid.size() < 128 &&
+             data.email is string && data.email.size() < 256 &&
+             (!('displayName' in data) || data.displayName is string && data.displayName.size() < 100) &&
+             (!('notifications' in data) || data.notifications is bool) &&
+             (!('isPro' in data) || data.isPro is bool) &&
+             (!('dailyGenerations' in data) || data.dailyGenerations is int) &&
+             (!('lastGenerationDate' in data) || data.lastGenerationDate is string && data.lastGenerationDate.size() < 64) &&
+             (!('subscriptionType' in data) || data.subscriptionType in ['monthly', 'annual', 'none']) &&
+             (!('xp' in data) || data.xp is int) &&
+             (!('level' in data) || data.level is int) &&
+             (!('badges' in data) || data.badges is list && data.badges.size() < 50) &&
+             (!('redeemedKey' in data) || data.redeemedKey is string && data.redeemedKey.size() < 128);
+    }
+
+    function isValidExam(data) {
+      return data.keys().hasAll(['userId', 'subject', 'date', 'importance', 'completed', 'createdAt']) &&
+             data.userId is string && data.userId.size() < 128 &&
+             data.subject is string && data.subject.size() < 100 &&
+             data.date is string && data.date.size() < 64 &&
+             data.importance in ['low', 'medium', 'high'] &&
+             data.completed is bool &&
+             data.createdAt is string && data.createdAt.size() < 64;
+    }
+
+    function isValidStudyTask(data) {
+      return data.keys().hasAll(['userId', 'title', 'subject', 'duration', 'date', 'completed', 'createdAt']) &&
+             data.userId is string && data.userId.size() < 128 &&
+             data.title is string && data.title.size() < 200 &&
+             data.subject is string && data.subject.size() < 100 &&
+             data.duration is number &&
+             data.date is string && data.date.size() < 64 &&
+             data.completed is bool &&
+             data.createdAt is string && data.createdAt.size() < 64;
+    }
+
+    function isValidStudySession(data) {
+      return data.keys().hasAll(['userId', 'date', 'duration', 'score']) &&
+             data.userId is string && data.userId.size() < 128 &&
+             data.date is string && data.date.size() < 64 &&
+             data.duration is number &&
+             data.score is number &&
+             (!('subject' in data) || data.subject is string && data.subject.size() < 100);
+    }
+
+    function isValidStudyHistory(data) {
+      return data.keys().hasAll(['user_id', 'subject', 'created_at']) &&
+             data.user_id is string && data.user_id.size() < 128 &&
+             data.subject is string && data.subject.size() < 100 &&
+             data.created_at is string && data.created_at.size() < 64 &&
+             (!('timestamp' in data) || data.timestamp is string && data.timestamp.size() < 64) &&
+             (!('mode' in data) || data.mode is string && data.mode.size() < 64) &&
+             (!('content' in data) || data.content is string && data.content.size() < 10000) &&
+             (!('outputModes' in data) || data.outputModes is map);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    // FIELDS A USER MAY NEVER CHANGE ON THEIR OWN DOCUMENT.
+    //
+    // isValidUser() checks that isPro is a bool — and `true` is a bool, so it happily allowed
+    // any signed-in user to run this in the browser console and get a free subscription:
+    //
+    //     updateDoc(doc(db, 'users', myUid), { isPro: true })
+    //
+    // `role` was already protected exactly this way; these fields simply never got the same
+    // treatment. Validating the SHAPE of data is not the same as deciding who may change it.
+    //
+    // NOT listed here: `dailyGenerations`. It looks like a quota, but nothing gates on it any
+    // more — App.tsx checks `tokensUsedToday` against the real limit and says so in a comment.
+    // It is now just a counter the app writes on every generation, so pinning it broke every
+    // one of those writes, and with them the xp/level/badges/streak fields written alongside.
+    // Protect what actually costs money, and only that.
+    function paidFieldsUnchanged() {
+      return request.resource.data.get('isPro', false) == resource.data.get('isPro', false)
+          && request.resource.data.get('subscriptionType', 'none') == resource.data.get('subscriptionType', 'none');
+    }
+
+    // THE FIELDS THAT DO COST MONEY.
+    //
+    // Every AI call is charged against `tokensUsedToday`/`tokensUsedThisMonth`, which the server
+    // increments with the Admin SDK. The month/day rollover used to run in the browser, which
+    // meant the client decided both when the day had ended and what the counter reset to — so
+    // `updateDoc(userRef, { tokensUsedToday: 0 })` was unlimited free AI, no upgrade key needed.
+    // Rollover now happens in `readBudget()` server-side; the client never writes these.
+    function budgetUnchanged() {
+      return request.resource.data.get('tokensUsedToday', 0) == resource.data.get('tokensUsedToday', 0)
+          && request.resource.data.get('tokensUsedThisMonth', 0) == resource.data.get('tokensUsedThisMonth', 0)
+          && request.resource.data.get('tokenResetDate', '') == resource.data.get('tokenResetDate', '')
+          && request.resource.data.get('tokenDailyResetDate', '') == resource.data.get('tokenDailyResetDate', '');
+    }
+
+    // THE ONE WAY A USER MAY GRANT THEMSELVES PRO: by burning a key that is now stamped with
+    // their own uid.
+    //
+    // Redemption is two writes, and the order is forced by these rules. First the user claims
+    // the key itself (isUsed false -> true, usedBy = me), which only succeeds if nobody has
+    // claimed it before. Only then does this allow isPro to flip, and only to the plan type
+    // recorded on that key. Skipping the first write leaves the second with nothing to point at.
+    //
+    // This is the no-Cloud-Functions path: Functions need the Blaze plan, and closing the
+    // original holes without a replacement would have left nobody able to upgrade at all.
+    function redeemedWithMyKey() {
+      let k = request.resource.data.get('redeemedKey', '');
+      let path = /databases/$(database)/documents/upgrade_keys/$(k);
+      return k is string && k.size() > 0
+          && k != resource.data.get('redeemedKey', '')
+          && exists(path)
+          && get(path).data.isUsed == true
+          && get(path).data.usedBy == request.auth.uid
+          && request.resource.data.get('isPro', false) == true
+          && request.resource.data.get('subscriptionType', 'none') == get(path).data.type;
+    }
+
+    match /users/{userId} {
+      // Allow users to read/write their own data
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      // A new account may not arrive pre-upgraded, or pre-spent.
+      allow create: if isAuthenticated() && request.auth.uid == userId
+                    && isValidUser(request.resource.data)
+                    && (request.resource.data.role == 'client' || !('role' in request.resource.data))
+                    && request.resource.data.get('isPro', false) == false
+                    && request.resource.data.get('subscriptionType', 'none') == 'none'
+                    && request.resource.data.get('tokensUsedToday', 0) == 0
+                    && request.resource.data.get('tokensUsedThisMonth', 0) == 0;
+      allow update: if isAdmin()
+                    || (isAuthenticated() && request.auth.uid == userId
+                        && isValidUser(request.resource.data)
+                        && (!('role' in resource.data) || request.resource.data.role == resource.data.role)
+                        && budgetUnchanged()
+                        && (paidFieldsUnchanged() || redeemedWithMyKey()));
+    }
+
+    match /exams/{examId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidExam(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidExam(request.resource.data) && request.resource.data.userId == resource.data.userId;
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /study_tasks/{taskId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidStudyTask(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidStudyTask(request.resource.data) && request.resource.data.userId == resource.data.userId;
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /study_sessions/{sessionId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidStudySession(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidStudySession(request.resource.data) && request.resource.data.userId == resource.data.userId;
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // AN UPGRADE KEY IS A SECRET, so it must never be readable in bulk.
+    //
+    // `allow read: if isAuthenticated()` was meant to let someone check the key they were
+    // given. What it actually allowed was any signed-in user LISTING THE WHOLE COLLECTION,
+    // reading every unused key, and redeeming one — and UpgradePage.tsx already contains the
+    // query to copy. A secret you can enumerate is not a secret.
+    //
+    // The fix is that THE DOCUMENT ID IS NOW THE KEY STRING ITSELF. `get` is allowed to any
+    // signed-in user, but `list` is not — so you can look up a key you were given and cannot
+    // discover one you weren't. A lookup by exact ID reveals nothing you didn't already have.
+    //
+    // Claiming a key is a one-way door: unused -> used, stamped with the claimer's uid, and
+    // `key`/`type` frozen so nobody can rewrite a spent monthly key into a fresh annual one.
+    // Once claimed, `resource.data.isUsed == false` fails forever, so a shared key is worth
+    // exactly one upgrade to exactly one account.
+    match /upgrade_keys/{keyId} {
+      allow get: if isAuthenticated();
+      allow list: if isAdmin();
+      allow update: if isAuthenticated()
+                    && resource.data.isUsed == false
+                    && request.resource.data.isUsed == true
+                    && request.resource.data.usedBy == request.auth.uid
+                    && request.resource.data.type == resource.data.type
+                    && request.resource.data.get('key', '') == resource.data.get('key', '');
+      allow create, delete: if isAdmin();
+    }
+
+    // Questions the user got wrong, kept until they get them right. Same owner-only
+    // shape as every other study collection — and `delete` matters here as much as
+    // the others, because retiring a mistake IS the reward loop.
+    function isValidMistake(data) {
+      return data.keys().hasAll(['user_id', 'question', 'correctAnswer']) &&
+             data.user_id is string && data.user_id.size() < 128 &&
+             data.question is string && data.question.size() < 2000 &&
+             data.correctAnswer is string && data.correctAnswer.size() < 1000 &&
+             (!('options' in data) || data.options is list && data.options.size() < 12) &&
+             (!('chosen' in data) || data.chosen is string && data.chosen.size() < 1000) &&
+             (!('explanation' in data) || data.explanation is string && data.explanation.size() < 4000) &&
+             (!('subject' in data) || data.subject is string && data.subject.size() < 100) &&
+             (!('times' in data) || data.times is int);
+    }
+
+    match /study_mistakes/{mistakeId} {
+      allow read: if isAuthenticated() && (resource.data.user_id == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.user_id == request.auth.uid
+                    && isValidMistake(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.user_id == request.auth.uid
+                    && isValidMistake(request.resource.data)
+                    && request.resource.data.user_id == resource.data.user_id;
+      allow delete: if isAuthenticated() && (resource.data.user_id == request.auth.uid || isAdmin());
+    }
+
+    match /study_history/{historyId} {
+      allow read: if isAuthenticated() && (resource.data.user_id == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.user_id == request.auth.uid && isValidStudyHistory(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.user_id == request.auth.uid && isValidStudyHistory(request.resource.data) && request.resource.data.user_id == resource.data.user_id;
+      allow delete: if isAuthenticated() && (resource.data.user_id == request.auth.uid || isAdmin());
+    }
+  }
+}

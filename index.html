@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>StudyQuest | GCSE Revision, Gamified</title>
+    <meta name="description" content="Turn any notes, textbook page or past paper into AI study kits, flashcards and practice questions. Built for GCSE students who want to revise faster and remember more." />
+
+    <!-- %VITE_SITE_URL% is substituted by Vite at build time from the .env file. Set it to the
+         real domain before deploying: an absolute URL is required here, because a social
+         scraper fetching a share card has no page context to resolve a relative path against,
+         and a wrong canonical is worse than none. -->
+    <link rel="canonical" href="%VITE_SITE_URL%/" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#0b0916" />
+
+    <!-- Open Graph: what WhatsApp, Discord, iMessage and Facebook show when the link is shared.
+         This is the single highest-leverage tag for a product students pass to each other. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="StudyQuest" />
+    <meta property="og:title" content="StudyQuest — GCSE revision, gamified" />
+    <meta property="og:description" content="AI study kits, flashcards and past-paper practice for GCSE. Paste your notes, get a revision kit back in seconds." />
+    <meta property="og:url" content="%VITE_SITE_URL%/" />
+    <meta property="og:image" content="%VITE_SITE_URL%/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="StudyQuest — GCSE revision, gamified" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="StudyQuest — GCSE revision, gamified" />
+    <meta name="twitter:description" content="AI study kits, flashcards and past-paper practice for GCSE." />
+    <meta name="twitter:image" content="%VITE_SITE_URL%/og-image.png" />
+
+    <!-- Structured data. NOT LocalBusiness: Brainify has no premises, opening hours or service
+         area, and claiming otherwise would be marking up a business that does not exist.
+         SoftwareApplication is what this actually is. -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "StudyQuest",
+      "applicationCategory": "EducationalApplication",
+      "operatingSystem": "Web",
+      "description": "AI study kits, flashcards and past-paper practice for GCSE students.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "GBP",
+        "description": "Free tier with a daily usage limit; Pro subscription available."
+      }
+    }
+    </script>
+
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238B5CF6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-1.16z'/><path d='M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-1.16z'/></svg>" />
+    <link rel="apple-touch-icon" href="/logo-brain-transparent.png" />
+
+    <script>
+      const theme = localStorage.getItem('brainify_theme') || 'dark';
+      document.documentElement.classList.add(theme);
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

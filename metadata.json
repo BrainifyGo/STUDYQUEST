@@ -1,0 +1,5 @@
+{
+  "name": "Brainify AI",
+  "description": "A dark purple themed AI study assistant that transforms notes, videos, and articles into educational content using Google Gemini API.",
+  "requestFramePermissions": []
+}
