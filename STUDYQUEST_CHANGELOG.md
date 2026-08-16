@@ -970,3 +970,122 @@ in its own right, not a follow-on from this.
 
 **Direct messages between friends.** Chat currently exists only inside a room. Worth doing after
 calls, or instead of them.
+
+---
+
+## [2026-08-16] — Usernames, direct messages, and the end of YouTube
+
+**Editor:** Claude Code (Opus 5)
+
+---
+
+### Usernames are claimed now, not guessed
+
+The first version of friends *derived* a username from your display name:
+
+    username: name.toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, 32)
+
+Which means every account called "Ola" produced the username `ola`, one of them won the write, and
+the rest were unfindable — with nothing anywhere telling them why. A derived username is not an
+identifier; it is a collision waiting for a second user with the same first name.
+
+Usernames are now a document you own in `usernames/{name}`, and **the claim is atomic without a
+transaction**: Firestore's `create` fails if the document already exists, and the rules forbid
+`update`. Two people racing for the same name cannot both win, and nobody can take a name off
+someone by overwriting it. Renaming secures the new name *before* releasing the old one, so a failure
+halfway leaves you with the username you had rather than none at all.
+
+What a username may be is deliberately tight — 3 to 20 characters, lower case, letters, numbers, dots
+and underscores, no leading or trailing separator and no doubled ones. `_ola` and `o..la` read as
+the same person at a glance, and impersonation by punctuation is a real problem on anything with a
+friends list. Cheap to prevent here, painful to retrofit later.
+
+### Finding people by name
+
+Search now takes a **username, a display name, or an email**, and returns up to ten people rather
+than a single lucky match.
+
+Display names are not unique and cannot be, so that search is a prefix range on a lower-cased copy of
+the name — `displayLower` exists purely because Firestore has no case-insensitive comparison, so the
+lower-cased copy *is* the index. Three characters minimum and ten results maximum keeps it a lookup
+rather than a browsable directory of every child using the app.
+
+### Direct messages
+
+Stored at `dms/{pairId}/messages/{id}`, where `pairId` is the **same sorted-pair id as the
+friendship**. That single decision is the whole design: because the conversation and the friendship
+share an id, the rule can be
+
+    exists(/databases/$(database)/documents/friendships/$(pairId))
+
+with no second copy of who is allowed to be here. There is no members list to drift out of step with
+the friends list, and — because that `exists()` runs on **every read and every write, not once when
+the chat opened** — removing someone closes the conversation for both sides immediately. On an app
+used by children, that is what unfriending has to mean.
+
+Firestore rather than the Socket.IO server the study rooms use: a room is ephemeral so relaying is
+right for it, but a DM has to survive both people being offline, and that is a database.
+
+Messages are written with `setDoc` and a generated id rather than `addDoc`, so every write is a
+`create` — which lets the rules say `allow update: if false`. **A message is never edited.** Rewriting
+what someone said after they have read it is not a feature we want and not one we are leaving open.
+You can delete your own message; the rule refuses anyone else's.
+
+Small things that matter in a chat: the composer clears the moment you hit send and puts the text
+back if the write fails (leaving it in the box is how people send the same message twice); Enter
+sends and Shift+Enter is a newline on a real keyboard, while a phone's return key still inserts a
+line break; and day separators read "Today" and "Yesterday" rather than a date.
+
+### YouTube is gone
+
+Agreed with Ola, and overdue. The music tab was reported broken **four times across three rounds** for
+four different reasons — a deleted video, a 24/7 livestream with no embeddable recording, a phone
+refusing to autoplay, and school networks blocking youtube.com. All four look identical to a student:
+a black rectangle. None is fixable by picking another video, because the next video can die the same
+way.
+
+And I could not verify a replacement. oEmbed, the innertube player API and scraping the embed page
+each reported all six videos fine or all six broken, *including ones known to work*. Shipping an id I
+cannot test is exactly how the previous three replacements were chosen.
+
+So the music is generated: `src/lib/generativeMusic.ts`. Not synthesised lofi — nobody would enjoy
+that. Generative ambient in the Music for Airports tradition: a slow chord pad, with notes drawn from
+the chord currently sounding, arriving at gaps that vary by up to half the average so it never
+settles into a pulse. Four pieces, each a mode and a tempo rather than a recording.
+
+It never loops because it is never recorded. Notes are scheduled about four seconds ahead on a
+repeating timer, because Web Audio's clock is sample-accurate and `setTimeout` is not — a note fired
+from a delayed timer lands late and you can hear it.
+
+Two details worth writing down. Melody notes are drawn from **the chord that is sounding**, not from
+the scale at large: random scale notes would eventually hit a second against the pad, which is the one
+thing that would make this grating rather than ignorable. And the reverb is generated as decaying
+noise rather than loaded as an impulse response — indistinguishable at this length, and no download.
+
+All three tabs are now generated. Nothing to 404, nothing to block, no data used, no licence, no id
+to go stale.
+
+**A test caught me contradicting myself.** The file states that every piece avoids the leading tone —
+a semitone below the root — because that interval creates tension that wants resolving, which is what
+pulls your attention off the page. The piece called Glass had `11` in its scale, which is exactly
+that interval. The scale was wrong, not the principle; Glass gets its brightness from a high root and
+an open filter instead.
+
+### Verification
+
+- **157 tests passing** (20 new), 10 files; `tsc` clean; `npm run build` clean; rules deployed.
+- New tests pin: `pairId` is order-independent (the reason a friendship is one document) while
+  `requestId` is directional (or you could "accept" your own request); usernames reject spaces,
+  hyphens, leading and doubled separators, and are case-folded so `Ola` and `ola` cannot both exist;
+  A440 lands on 440 Hz and octaves double and halve; a scale degree past the end of the scale wraps
+  into the next octave; **a negative degree does not produce NaN** — JS `%` keeps the sign of the
+  dividend, so `-1 % 5` is `-1` and indexes off the front of the array, which would have been silence
+  with no error; and `musicGain` refuses NaN, because a NaN gain silences a Web Audio node
+  permanently and logs nothing.
+
+### Files
+
+`src/lib/generativeMusic.ts` (new), `src/lib/dms.ts` (new), `src/components/DirectMessages.tsx`
+(new), `tests/friends.test.ts` (new), `tests/generativeMusic.test.ts` (new), `src/lib/friends.ts`,
+`src/components/FriendsView.tsx`, `src/components/StudyMusic.tsx`, `src/components/MusicBar.tsx`,
+`firestore.rules`, `tests/rules-structure.test.ts`.

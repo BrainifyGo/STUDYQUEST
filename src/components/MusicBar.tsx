@@ -7,6 +7,9 @@ import {
 import {
   onFocusChange, playingFocusTone, stopFocusTone, toneById,
 } from '../lib/focusTones';
+import {
+  onMusicChange, playingPiece, stopMusic, pieceById,
+} from '../lib/generativeMusic';
 
 /**
  * The music bar — what is playing, when the player itself is closed.
@@ -45,14 +48,17 @@ export const MusicBar: React.FC<MusicBarProps> = ({ onExpand, raised }) => {
     const rerender = () => bump((n) => n + 1);
     const offA = onAmbienceChange(rerender);
     const offF = onFocusChange(rerender);
-    return () => { offA(); offF(); };
+    const offM = onMusicChange(rerender);
+    return () => { offA(); offF(); offM(); };
   }, []);
 
   const layers = activeAmbience();
   const tone = playingFocusTone();
-  const playing = layers.length > 0 || !!tone;
+  const piece = playingPiece();
+  const playing = layers.length > 0 || !!tone || !!piece;
 
   const label = [
+    piece ? pieceById(piece)?.title : null,
     tone ? toneById(tone)?.title : null,
     ...layers.map((id) => NAMES[id] ?? id),
   ].filter(Boolean).join(' + ');
@@ -60,6 +66,7 @@ export const MusicBar: React.FC<MusicBarProps> = ({ onExpand, raised }) => {
   const stopEverything = () => {
     stopAllAmbience();
     stopFocusTone();
+    stopMusic();
     // Belt and braces: stopAllAmbience iterates a copy, but a layer added
     // between the two calls would otherwise survive the "stop everything".
     for (const id of activeAmbience()) stopAmbience(id);

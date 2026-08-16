@@ -1,9 +1,9 @@
 /**
- * FRIENDS — requests, acceptance, and the list.
+ * FRIENDS — usernames, requests, acceptance, and the list.
  *
  * The shape is ported from GhostChat, not the code: GhostChat is on Supabase
  * with SQL row-level security and SECURITY DEFINER functions, and this is
- * Firestore. What carries over is the design, and the two decisions in it that
+ * Firestore. What carries over is the design, and the decisions in it that
  * matter:
  *
  *  1. A REQUEST IS NOT A FRIENDSHIP. Adding someone creates a pending request
@@ -15,19 +15,22 @@
  *     no query and no index, and two people cannot end up half-friends because
  *     one of a pair of writes failed.
  *
- * Searching is by exact username or email. There is no fuzzy directory search on
- * purpose — a browsable list of every child using the app is not something we
- * are going to build.
+ *  3. A USERNAME IS CLAIMED, NOT DERIVED. The first version generated one from
+ *     the display name, which meant every account called "Ola" produced the
+ *     username `ola` and only one of them was findable. A username is now a
+ *     document in `usernames/` that you own; Firestore `create` fails if the
+ *     document already exists, so the claim is atomic without a transaction.
  */
 import {
   db, auth, doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs,
-  onSnapshot, Timestamp,
+  onSnapshot, Timestamp, orderBy, limit,
 } from './firebase';
 
 export interface FriendRequest {
   id: string;
   fromUid: string;
   fromName: string;
+  fromUsername?: string;
   toUid: string;
   createdAt: string;
 }
@@ -35,8 +38,18 @@ export interface FriendRequest {
 export interface Friend {
   uid: string;
   name: string;
+  username?: string;
   since: string;
 }
+
+export interface Person {
+  uid: string;
+  name: string;
+  username?: string;
+}
+
+/** Search results are capped. A search that returns everyone is a directory. */
+const MAX_RESULTS = 10;
 
 /**
  * The id of the friendship document for a pair, in a fixed order.
@@ -59,50 +72,169 @@ function me(): string {
   return uid;
 }
 
+/* ------------------------------------------------------------- usernames */
+
+/**
+ * What a username is allowed to be.
+ *
+ * Lower case only, so `Ola` and `ola` cannot both exist and be mistaken for each
+ * other. No leading or trailing punctuation, and no runs of it, because
+ * `o...l...a` reads as a different person at a glance — impersonation by
+ * punctuation is a real thing on any app with a friends list.
+ */
+export function usernameProblem(name: string): string | null {
+  const u = name.trim().toLowerCase();
+  if (u.length < 3) return 'Usernames need at least 3 characters.';
+  if (u.length > 20) return 'Usernames can be at most 20 characters.';
+  if (!/^[a-z0-9._]+$/.test(u)) return 'Use letters, numbers, dots and underscores only.';
+  if (/^[._]|[._]$/.test(u)) return 'It cannot start or end with a dot or underscore.';
+  if (/[._]{2,}/.test(u)) return 'No two dots or underscores in a row.';
+  return null;
+}
+
+export function normaliseUsername(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+export async function isUsernameFree(name: string): Promise<boolean> {
+  const u = normaliseUsername(name);
+  const snap = await getDoc(doc(db, 'usernames', u));
+  return !snap.exists() || (snap.data() as any)?.uid === auth.currentUser?.uid;
+}
+
+/**
+ * Claim a username, releasing the previous one.
+ *
+ * The claim relies on Firestore `create` failing when the document already
+ * exists, and on the rules forbidding `update` — so two people racing for the
+ * same name cannot both win, with no transaction and no server.
+ */
+export async function claimUsername(name: string, displayName: string, email: string | null): Promise<void> {
+  const uid = me();
+  const u = normaliseUsername(name);
+  const problem = usernameProblem(u);
+  if (problem) throw new Error(problem);
+
+  const existing = await getDoc(doc(db, 'usernames', u));
+  if (existing.exists()) {
+    if ((existing.data() as any)?.uid !== uid) throw new Error('That username is taken.');
+    return;                                   // already yours; nothing to do
+  }
+
+  // The old name is released only after the new one is secured, so a failure
+  // here leaves you with your existing username rather than none at all.
+  const profile = await getDoc(doc(db, 'public_profiles', uid));
+  const previous = (profile.data() as any)?.username as string | undefined;
+
+  await setDoc(doc(db, 'usernames', u), { uid });
+  await publishProfile(displayName, email, u);
+
+  if (previous && previous !== u) {
+    try {
+      await deleteDoc(doc(db, 'usernames', previous));
+    } catch (err) {
+      // A stranded claim costs one unusable name; failing the rename here would
+      // cost the user their new one.
+      console.warn('[friends] could not release the old username:', err);
+    }
+  }
+}
+
+/* -------------------------------------------------------------- profiles */
+
 /**
  * Make sure this account is findable.
  *
  * Searching means reading a stranger's document, and the rule on /users
  * correctly refuses that — a user document holds their email, their plan, their
- * token spend and their whole progress. So the two searchable fields are
- * mirrored into `public_profiles`, which holds nothing else. Called on sign-in,
- * so existing accounts get one without having to do anything.
+ * token spend and their whole progress. So only the searchable fields are
+ * mirrored into `public_profiles`, which holds nothing else.
+ *
+ * `displayLower` exists purely so display-name search can be a range query.
+ * Firestore has no case-insensitive comparison, so the lower-cased copy IS the
+ * index.
  */
-export async function publishProfile(displayName: string, email: string | null): Promise<void> {
+export async function publishProfile(
+  displayName: string,
+  email: string | null,
+  username?: string
+): Promise<void> {
   const uid = auth.currentUser?.uid;
   if (!uid) return;
   const name = (displayName || email?.split('@')[0] || 'Student').slice(0, 60);
+
+  const payload: Record<string, unknown> = {
+    uid,
+    displayName: name,
+    displayLower: name.toLowerCase(),
+    emailLower: (email || '').toLowerCase().slice(0, 256),
+  };
+
+  // Never blank an existing username by republishing without one — this runs on
+  // every sign-in, and that would silently unclaim the name every time.
+  const current = username ?? (await getDoc(doc(db, 'public_profiles', uid))).data()?.username;
+  if (current) payload.username = current;
+
   try {
-    await setDoc(doc(db, 'public_profiles', uid), {
-      uid,
-      displayName: name,
-      username: name.toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, 32),
-      emailLower: (email || '').toLowerCase().slice(0, 256),
-    });
+    await setDoc(doc(db, 'public_profiles', uid), payload);
   } catch (err) {
     // Not being findable is a smaller problem than not being able to sign in.
     console.warn('[friends] could not publish profile:', err);
   }
 }
 
-/** Find one person by exact username or email. Never a browsable list. */
-export async function findPerson(term: string): Promise<{ uid: string; name: string } | null> {
+export async function myProfile(): Promise<{ username?: string; displayName?: string } | null> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return null;
+  const snap = await getDoc(doc(db, 'public_profiles', uid));
+  return snap.exists() ? (snap.data() as any) : null;
+}
+
+/* ---------------------------------------------------------------- search */
+
+/**
+ * Find people by username, display name or email.
+ *
+ * Username and email are exact. Display name is a prefix match, because that is
+ * the only thing anyone can remember about a friend — but it is capped at ten
+ * results and needs three characters, so it is a lookup rather than a browsable
+ * directory of every child using the app.
+ */
+export async function findPeople(term: string): Promise<Person[]> {
   const q = term.trim().toLowerCase();
-  if (q.length < 3) return null;
+  if (q.length < 3) return [];
 
   const profiles = collection(db, 'public_profiles');
-  // Email first — it is the field every account definitely has. Both are stored
-  // lower-cased so the comparison does not depend on how someone typed it.
-  const byEmail = await getDocs(query(profiles, where('emailLower', '==', q)));
-  const hit = byEmail.docs[0]
-    ?? (await getDocs(query(profiles, where('username', '==', q)))).docs[0];
+  const found = new Map<string, Person>();
+  const mine = auth.currentUser?.uid;
 
-  if (!hit) return null;
-  if (hit.id === auth.currentUser?.uid) return null;   // you already know yourself
+  const add = (id: string, data: any) => {
+    if (id === mine || found.has(id)) return;
+    found.set(id, { uid: id, name: data.displayName || data.username || 'Student', username: data.username });
+  };
 
-  const data = hit.data() as any;
-  return { uid: hit.id, name: data.displayName || data.username || 'Student' };
+  const [byUsername, byEmail] = await Promise.all([
+    getDocs(query(profiles, where('username', '==', q))),
+    getDocs(query(profiles, where('emailLower', '==', q))),
+  ]);
+  byUsername.docs.forEach((d) => add(d.id, d.data()));
+  byEmail.docs.forEach((d) => add(d.id, d.data()));
+
+  // Prefix range. '' is the highest code point Firestore will sort, so
+  // [q, q+] is every string beginning with q.
+  const byName = await getDocs(query(
+    profiles,
+    orderBy('displayLower'),
+    where('displayLower', '>=', q),
+    where('displayLower', '<=', q + ''),
+    limit(MAX_RESULTS)
+  ));
+  byName.docs.forEach((d) => add(d.id, d.data()));
+
+  return Array.from(found.values()).slice(0, MAX_RESULTS);
 }
+
+/* --------------------------------------------------------------- friends */
 
 export async function areFriends(otherUid: string): Promise<boolean> {
   const snap = await getDoc(doc(db, 'friendships', pairId(me(), otherUid)));
@@ -117,7 +249,7 @@ export async function areFriends(otherUid: string): Promise<boolean> {
  * up with two pending requests and no friendship, and both are left wondering
  * why the button did nothing.
  */
-export async function sendRequest(toUid: string, myName: string): Promise<'sent' | 'accepted'> {
+export async function sendRequest(toUid: string, myName: string, myUsername?: string): Promise<'sent' | 'accepted'> {
   const uid = me();
   if (toUid === uid) throw new Error('You cannot add yourself.');
   if (await areFriends(toUid)) throw new Error('You are already friends.');
@@ -131,6 +263,7 @@ export async function sendRequest(toUid: string, myName: string): Promise<'sent'
   await setDoc(doc(db, 'friend_requests', requestId(uid, toUid)), {
     fromUid: uid,
     fromName: myName,
+    ...(myUsername ? { fromUsername: myUsername } : {}),
     toUid,
     createdAt: Timestamp.now().toDate().toISOString(),
   });

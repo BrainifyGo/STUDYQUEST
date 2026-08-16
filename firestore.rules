@@ -389,7 +389,7 @@ service cloud.firestore {
       allow create, update: if isAuthenticated()
                             && request.auth.uid == userId
                             && request.resource.data.uid == userId
-                            && request.resource.data.keys().hasOnly(['uid', 'username', 'displayName', 'emailLower'])
+                            && request.resource.data.keys().hasOnly(['uid', 'username', 'displayName', 'displayLower', 'emailLower'])
                             && request.resource.data.displayName is string
                             && request.resource.data.displayName.size() <= 60
                             && (!('username' in request.resource.data)
@@ -397,9 +397,78 @@ service cloud.firestore {
                                     && request.resource.data.username.size() <= 32))
                             && (!('emailLower' in request.resource.data)
                                 || (request.resource.data.emailLower is string
-                                    && request.resource.data.emailLower.size() <= 256));
+                                    && request.resource.data.emailLower.size() <= 256))
+                            && (!('displayLower' in request.resource.data)
+                                || (request.resource.data.displayLower is string
+                                    && request.resource.data.displayLower.size() <= 60));
 
       allow delete: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+    }
+
+    /* =====================================================================
+       USERNAMES
+
+       One document per claimed name, id = the name itself in lower case.
+
+       The claim is atomic WITHOUT a transaction, because Firestore `create`
+       fails when the document already exists and `update` is forbidden below.
+       Two people racing for the same username cannot both win, and nobody can
+       take a name off someone by overwriting it.
+       ===================================================================== */
+    match /usernames/{name} {
+      // Readable so the sign-up form can say "taken" before you submit.
+      // It holds a uid and nothing else.
+      allow read: if isAuthenticated();
+
+      allow create: if isAuthenticated()
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.keys().hasOnly(['uid'])
+                    && name.size() >= 3 && name.size() <= 20
+                    && name.matches('^[a-z0-9._]+$');
+
+      // Never rewritten — that is what makes the create above a lock.
+      allow update: if false;
+
+      // Released only by its owner, when they change name or delete the account.
+      allow delete: if isAuthenticated()
+                    && (resource.data.uid == request.auth.uid || isAdmin());
+    }
+
+    /* =====================================================================
+       DIRECT MESSAGES
+
+       Document id is the same sorted-pair id as the friendship, so the rule can
+       check the friendship exists without storing a second copy of who is
+       allowed. Messages are a subcollection of that.
+
+       YOU MUST BE FRIENDS. Not "must have been friends when you started" — the
+       exists() runs on every read and every write, so removing someone ends the
+       conversation for both sides immediately. That is what unfriending has to
+       mean on an app used by children.
+       ===================================================================== */
+    match /dms/{pairId}/messages/{messageId} {
+      function inThisPair() {
+        return isAuthenticated() && pairId.split('__').hasAny([request.auth.uid]);
+      }
+      function stillFriends() {
+        return exists(/databases/$(database)/documents/friendships/$(pairId));
+      }
+
+      allow read: if inThisPair() && stillFriends();
+
+      allow create: if inThisPair() && stillFriends()
+                    && request.resource.data.senderUid == request.auth.uid
+                    && request.resource.data.text is string
+                    && request.resource.data.text.size() > 0
+                    && request.resource.data.text.size() <= 2000
+                    && request.resource.data.sentAt is string;
+
+      // A message is not edited. Rewriting what someone said after they read it
+      // is not a feature we want, and it is not one we are going to leave open.
+      allow update: if false;
+
+      // You may delete your own message. You may not delete theirs.
+      allow delete: if inThisPair() && resource.data.senderUid == request.auth.uid;
     }
   }
 }

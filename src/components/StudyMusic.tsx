@@ -1,62 +1,60 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Music, X, Play, Pause, Volume2, Headphones, Wind, Coffee, Trees, Sparkles, CloudRain, Waves, TreePine, Ghost, Zap } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { motion } from 'motion/react';
+import {
+  Music, X, Play, Pause, Volume2, Headphones, Wind, Trees,
+  CloudRain, Waves, TreePine, Zap,
+} from 'lucide-react';
 import { cn } from '../lib/utils';
 import { toast } from 'sonner';
 import {
-  startAmbience, stopAmbience, setAmbienceVolume,
-  type AmbienceId,
+  startAmbience, stopAmbience, setAmbienceVolume, type AmbienceId,
 } from '../lib/ambience';
 import {
-  FOCUS_TONES, playFocusTone, stopFocusTone, setFocusVolume,
-  type FocusToneId,
+  FOCUS_TONES, playFocusTone, stopFocusTone, setFocusVolume, type FocusToneId,
 } from '../lib/focusTones';
+import {
+  PIECES, playPiece, stopMusic, setMusicVolume as setEngineVolume,
+  playingPiece, onMusicChange, type PieceId,
+} from '../lib/generativeMusic';
+
+/**
+ * STUDY MUSIC — three tabs, none of which touch the network.
+ *
+ * THIS PANEL USED TO BE YOUTUBE. It was reported broken four times across three
+ * rounds of fixes, for four different reasons: a deleted video, a 24/7
+ * livestream with no embeddable recording, a phone refusing to autoplay, and
+ * school networks blocking youtube.com. Every one looked identical to a student
+ * — a black rectangle — and none was fixable by choosing another video, because
+ * the next video can die the same way. I also could not verify a replacement
+ * from this machine: oEmbed, the innertube API and the embed page each reported
+ * every video fine or every video broken, including ones known to work.
+ *
+ * So all three tabs are generated in the browser now. Nothing to 404, nothing to
+ * block, no data used, no licence, and no id to go stale.
+ *
+ *   Music   — generative ambient (src/lib/generativeMusic.ts)
+ *   Focus   — binaural tones and noise beds (src/lib/focusTones.ts)
+ *   Ambient — rain, waves, forest, static (src/lib/ambience.ts)
+ *
+ * Closing this panel does NOT stop the sound. The engines are module singletons,
+ * so audio survives unmounting — which is what lets music carry on into a study
+ * room. <MusicBar /> is the control that goes with that.
+ */
 
 interface StudyMusicProps {
   onClose: () => void;
 }
 
-type MusicCategory = 'Lo-Fi' | 'Focus' | 'Classical' | 'Ambient';
+type MusicCategory = 'Music' | 'Focus' | 'Ambient';
 
-interface StudyTrack {
-  id: string;
-  title: string;
-  category: MusicCategory;
-}
-
-// Standard YouTube videos (not livestreams — livestream links go dead when the
-// broadcast ends, regular uploads don't).
-const STUDY_TRACKS: StudyTrack[] = [
-  { id: 'jfKfPfyJRdk', title: 'Lofi Hip Hop', category: 'Lo-Fi' },
-  { id: '5qap5aO4i9A', title: 'Chill Beats', category: 'Lo-Fi' },
-  // Deep Focus and Alpha Waves used to be YouTube embeds here. They are
-  // generated now (src/lib/focusTones.ts) — the whole Focus tab works with no
-  // network at all, which is the only way to stop it breaking again.
-  // Was `__eq8T5b4-w`, which is gone from YouTube — checked, it 404s on oEmbed,
-  // so the Classical tab had exactly one track and that track was a dead frame.
-  // Every id in this list was verified live before shipping.
-  { id: 'mIYzp5rcTvU', title: 'Classical Study', category: 'Classical' },
-  { id: 'sjkrrmBnpGE', title: 'Jazz Coffee', category: 'Ambient' },
-];
-
-const CATEGORIES: MusicCategory[] = ['Lo-Fi', 'Focus', 'Classical', 'Ambient'];
+const CATEGORIES: MusicCategory[] = ['Music', 'Focus', 'Ambient'];
 
 const CATEGORY_ICONS: Record<MusicCategory, React.ReactNode> = {
-  'Lo-Fi': <Headphones size={16} />,
-  'Focus': <Wind size={16} />,
-  'Classical': <Coffee size={16} />,
-  'Ambient': <Trees size={16} />,
+  Music: <Headphones size={16} />,
+  Focus: <Wind size={16} />,
+  Ambient: <Trees size={16} />,
 };
 
-/*
-  Generated, not downloaded.
-
-  These used to be four hotlinked MP3s from mixkit's sound-EFFECT preview
-  endpoint. Measured: 7 KB to 42 KB each, i.e. between half a second and two
-  seconds of audio. Set to loop, a half-second forest clip restarts twice a
-  second and every seam is a click — which is precisely how they sounded.
-  See src/lib/ambience.ts.
-*/
 const AMBIENT_SOUNDS: { id: AmbienceId; name: string; icon: React.ReactNode }[] = [
   { id: 'rain', name: 'Rain', icon: <CloudRain size={16} /> },
   { id: 'waves', name: 'Waves', icon: <Waves size={16} /> },
@@ -65,82 +63,28 @@ const AMBIENT_SOUNDS: { id: AmbienceId; name: string; icon: React.ReactNode }[] 
 ];
 
 export default function StudyMusic({ onClose }: StudyMusicProps) {
-  const [activeCategory, setActiveCategory] = useState<MusicCategory>('Lo-Fi');
-  const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
-  const [activeAmbients, setActiveAmbients] = useState<Record<string, { active: boolean, volume: number }>>({
-    rain: { active: false, volume: 0.5 },
-    waves: { active: false, volume: 0.5 },
-    forest: { active: false, volume: 0.5 },
-    'white-noise': { active: false, volume: 0.5 },
-  });
-  
-  const playerFrameRef = useRef<HTMLIFrameElement>(null);
-  /** Track id -> why it would not play. Empty when everything is fine. */
-  const [failedTracks, setFailedTracks] = useState<Record<string, string>>({});
+  const [activeCategory, setActiveCategory] = useState<MusicCategory>('Music');
 
-  /*
-    YouTube reports embed failures by posting a message to the parent, but only
-    once the player has been told to listen. Without this the iframe fails
-    completely silently.
-  */
-  useEffect(() => {
-    const onMessage = (e: MessageEvent) => {
-      if (!/^https:\/\/(www\.)?youtube(-nocookie)?\.com$/.test(e.origin)) return;
-      let payload: any;
-      try { payload = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch { return; }
+  /* ── generative music ─────────────────────────────────── */
+  const [activePiece, setActivePiece] = useState<PieceId | null>(playingPiece());
+  const [musicVolume, setMusicVolume] = useState(0.55);
 
-      if (payload?.event === 'onReady') {
-        // Ask for events; YouTube stays quiet until it is asked.
-        playerFrameRef.current?.contentWindow?.postMessage(
-          JSON.stringify({ event: 'listening', id: 1 }), 'https://www.youtube.com'
-        );
-        return;
-      }
+  // The engine may already be playing from before this panel mounted, and can be
+  // stopped from the MusicBar while it is open. Subscribing keeps the two in
+  // step rather than letting this component trust its own stale copy.
+  useEffect(() => onMusicChange(() => setActivePiece(playingPiece())), []);
 
-      if (payload?.event === 'onError' && activeTrackIdRef.current) {
-        // 101 and 150 are the same thing: the owner disallowed embedding.
-        const code = Number(payload.info);
-        const why = code === 2 ? 'The link for this track is wrong — please report it.'
-                  : code === 5 ? 'This browser cannot play it.'
-                  : code === 100 ? 'The video has been removed from YouTube.'
-                  : (code === 101 || code === 150) ? 'The owner does not allow it to play inside other sites.'
-                  : 'It would not load. Some school and office networks block YouTube.';
-        setFailedTracks((prev) => ({ ...prev, [activeTrackIdRef.current!]: why }));
-      }
-    };
-    window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
-  }, []);
-
-  /*
-    Closing the panel does NOT stop the sound.
-
-    The engines are module singletons, so audio survives this component being
-    unmounted — which is what lets your rain keep going when you close the player
-    or walk into a study room. The hazard that creates, audio with no control on
-    screen, is answered by <MusicBar />, which appears whenever something is
-    playing and the full player is not open.
-  */
-
-  const toggleAmbient = (id: AmbienceId) => {
-    const wasActive = activeAmbients[id].active;
+  const togglePiece = (id: PieceId) => {
+    if (activePiece === id) { stopMusic(); return; }
     try {
-      if (wasActive) stopAmbience(id);
-      else startAmbience(id, activeAmbients[id].volume);
+      playPiece(id, musicVolume);
     } catch (err) {
-      // Only reachable on a browser with no Web Audio at all.
-      console.warn('[ambience]', err);
-      toast.error('Your browser will not play ambient sound.');
-      return;
+      console.warn('[music]', err);
+      toast.error('Your browser will not play generated audio.');
     }
-    setActiveAmbients(prev => ({ ...prev, [id]: { ...prev[id], active: !wasActive } }));
   };
 
-  const handleVolumeChange = (id: AmbienceId, volume: number) => {
-    setActiveAmbients(prev => ({ ...prev, [id]: { ...prev[id], volume } }));
-    setAmbienceVolume(id, volume);
-  };
-
+  /* ── focus tones ──────────────────────────────────────── */
   const [activeTone, setActiveTone] = useState<FocusToneId | null>(null);
   const [toneVolume, setToneVolume] = useState(0.5);
 
@@ -153,33 +97,54 @@ export default function StudyMusic({ onClose }: StudyMusicProps) {
     try {
       playFocusTone(id, toneVolume);
       setActiveTone(id);
-      // A generated tone replaces a video; two things playing at once is a mess.
-      setActiveTrackId(null);
     } catch (err) {
       console.warn('[focus]', err);
       toast.error('Your browser will not play generated audio.');
     }
   };
 
-  const activeTrackIdRef = useRef<string | null>(null);
-  useEffect(() => { activeTrackIdRef.current = activeTrackId; }, [activeTrackId]);
+  /* ── ambient layers ───────────────────────────────────── */
+  const [activeAmbients, setActiveAmbients] = useState<Record<string, { active: boolean; volume: number }>>({
+    rain: { active: false, volume: 0.5 },
+    waves: { active: false, volume: 0.5 },
+    forest: { active: false, volume: 0.5 },
+    'white-noise': { active: false, volume: 0.5 },
+  });
 
-  const toggleTrack = (id: string) => {
-    setActiveTrackId(prev => (prev === id ? null : id));
+  const toggleAmbient = (id: AmbienceId) => {
+    const wasActive = activeAmbients[id].active;
+    try {
+      if (wasActive) stopAmbience(id);
+      else startAmbience(id, activeAmbients[id].volume);
+    } catch (err) {
+      // Only reachable on a browser with no Web Audio at all.
+      console.warn('[ambience]', err);
+      toast.error('Your browser will not play generated audio.');
+      return;
+    }
+    setActiveAmbients((prev) => ({ ...prev, [id]: { ...prev[id], active: !wasActive } }));
   };
 
-  const tracksInCategory = STUDY_TRACKS.filter(t => t.category === activeCategory);
-  const activeTrack = STUDY_TRACKS.find(t => t.id === activeTrackId) || null;
+  const handleAmbientVolume = (id: AmbienceId, volume: number) => {
+    setActiveAmbients((prev) => ({ ...prev, [id]: { ...prev[id], volume } }));
+    setAmbienceVolume(id, volume);
+  };
+
+  const anythingPlaying = !!activePiece || !!activeTone
+    || Object.values(activeAmbients).some((a) => a.active);
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 20, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 20, scale: 0.95 }}
-      className="fixed bottom-24 right-4 md:bottom-8 md:right-8 w-[calc(100vw-2rem)] md:w-[400px] glass-panel rounded-[2.5rem] border border-border-main shadow-2xl z-[60] overflow-hidden"
+      role="dialog"
+      aria-label="Study music"
+      className="fixed bottom-24 right-3 left-3 md:left-auto md:bottom-8 md:right-8 md:w-[400px] glass-panel rounded-3xl border border-border-main shadow-2xl z-[60] overflow-hidden"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       {/* Header */}
-      <div className="p-6 border-b border-border-main flex items-center justify-between bg-glass-bg">
+      <div className="p-5 border-b border-border-main flex items-center justify-between bg-glass-bg">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-brand-purple/20 border border-brand-purple/30 flex items-center justify-center">
             <Music className="text-brand-purple" size={20} />
@@ -187,32 +152,35 @@ export default function StudyMusic({ onClose }: StudyMusicProps) {
           <div>
             <h3 className="font-bold text-text-main">Study Music</h3>
             <div className="flex items-center gap-1.5">
-              <div className={cn("w-1.5 h-1.5 rounded-full", activeTrack ? "bg-brand-purple animate-pulse" : "bg-text-dim/40")} />
+              <div className={cn('w-1.5 h-1.5 rounded-full',
+                anythingPlaying ? 'bg-brand-purple animate-pulse' : 'bg-text-dim/40')} />
               <span className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
-                {activeTrack ? 'Now Playing' : 'Paused'}
+                {anythingPlaying ? 'Playing' : 'Silent'}
               </span>
             </div>
           </div>
         </div>
         <button
           onClick={onClose}
+          aria-label="Close the music player"
           className="p-2 rounded-xl hover:bg-glass-bg text-text-dim hover:text-text-main transition-all"
         >
           <X size={20} />
         </button>
       </div>
 
-      {/* Category Filters */}
-      <div className="p-4 flex items-center gap-2 overflow-x-auto no-scrollbar border-b border-border-main bg-black/20">
+      {/* Tabs */}
+      <div className="p-3 flex items-center gap-2 border-b border-border-main bg-black/20">
         {CATEGORIES.map((category) => (
           <button
             key={category}
             onClick={() => setActiveCategory(category)}
+            aria-pressed={activeCategory === category}
             className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap",
+              'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all',
               activeCategory === category
-                ? "bg-brand-purple text-white shadow-lg shadow-brand-purple/20"
-                : "text-text-dim hover:text-text-main hover:bg-glass-bg"
+                ? 'bg-brand-purple text-white shadow-lg shadow-brand-purple/20'
+                : 'text-text-dim hover:text-text-main hover:bg-glass-bg'
             )}
           >
             {CATEGORY_ICONS[category]}
@@ -221,93 +189,58 @@ export default function StudyMusic({ onClose }: StudyMusicProps) {
         ))}
       </div>
 
-      {/*
-        Now playing.
-
-        The iframe used to be dropped in with `autoplay=1` and nothing watching
-        it. When YouTube refuses to play a video in an embed — the owner
-        disabled embedding, the stream ended, the network blocks youtube.com, or
-        a phone refuses to autoplay — the result was a silent black rectangle
-        with no explanation and no way out, which is why "the music doesn't
-        work" covered four completely different causes.
-
-        The player now reports. `enablejsapi` plus an origin lets YouTube post
-        errors back, and anything that goes wrong is named, with a link out to
-        the track so the student can still listen to it.
-      */}
-      {activeTrack && (
-        <div className="p-4 aspect-video bg-black/40 relative group">
-          {failedTracks[activeTrack.id] ? (
-            <div className="w-full h-full rounded-2xl border border-border-main flex flex-col items-center justify-center text-center gap-3 p-6">
-              <Music className="text-text-dim" size={28} />
-              <p className="text-sm font-bold text-text-main">{activeTrack.title} will not play here</p>
-              <p className="text-xs text-text-dim max-w-xs">{failedTracks[activeTrack.id]}</p>
-              <a
-                href={`https://www.youtube.com/watch?v=${activeTrack.id}`}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs font-bold text-brand-purple hover:underline"
+      {/* Music */}
+      {activeCategory === 'Music' && (
+        <div className="p-4 space-y-3 max-h-[24rem] overflow-y-auto scrollbar-hide">
+          <p className="text-[10px] font-black uppercase tracking-widest text-text-dim">
+            Made in your browser — works offline, never repeats
+          </p>
+          {PIECES.map((piece) => {
+            const isOn = activePiece === piece.id;
+            return (
+              <button
+                key={piece.id}
+                onClick={() => togglePiece(piece.id)}
+                className={cn(
+                  'w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all border',
+                  isOn ? 'bg-brand-purple/20 border-brand-purple'
+                       : 'bg-glass-bg border-border-main hover:border-brand-purple/40'
+                )}
               >
-                Open it on YouTube
-              </a>
+                <span className={cn('w-9 h-9 rounded-lg flex items-center justify-center shrink-0',
+                  isOn ? 'bg-brand-purple text-white' : 'bg-black/20 text-text-dim')}>
+                  {isOn ? <Pause size={16} /> : <Play size={16} />}
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm font-bold text-text-main">{piece.title}</span>
+                  <span className="block text-[11px] text-text-dim leading-snug">{piece.blurb}</span>
+                </span>
+              </button>
+            );
+          })}
+
+          {activePiece && (
+            <div className="flex items-center gap-2 pt-1">
+              <Volume2 size={14} className="text-text-dim shrink-0" />
+              <input
+                type="range" min="0" max="1" step="0.01"
+                value={musicVolume}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  setMusicVolume(v);
+                  setEngineVolume(v);
+                }}
+                className="w-full h-1 accent-brand-purple"
+                aria-label="Music volume"
+              />
             </div>
-          ) : (
-            <iframe
-              key={activeTrack.id}
-              ref={playerFrameRef}
-              width="100%"
-              height="100%"
-              src={`https://www.youtube.com/embed/${activeTrack.id}?autoplay=1&controls=1&rel=0&modestbranding=1&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`}
-              title={activeTrack.title}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-              className="rounded-2xl w-full h-full border-0"
-            />
           )}
         </div>
       )}
 
-      {/* Track List */}
-      {tracksInCategory.length > 0 && (
-        <div className="p-4 space-y-2 max-h-52 overflow-y-auto">
-          {tracksInCategory.map((track) => {
-            const isActive = activeTrackId === track.id;
-            return (
-              <button
-                key={track.id}
-                onClick={() => toggleTrack(track.id)}
-                className={cn(
-                  "w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all border",
-                  isActive
-                    ? "bg-brand-purple/20 border-brand-purple"
-                    : "bg-glass-bg border-border-main hover:border-brand-purple/40"
-                )}
-              >
-                <div className={cn(
-                  "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
-                  isActive ? "bg-brand-purple text-white" : "bg-black/20 text-text-dim"
-                )}>
-                  {isActive ? <Pause size={16} /> : <Play size={16} />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-text-main truncate">{track.title}</p>
-                  <p className="text-[10px] text-text-dim uppercase tracking-widest font-bold">{track.category}</p>
-                </div>
-                {isActive && (
-                  <span className="text-[9px] font-black uppercase tracking-widest text-brand-purple shrink-0">Now Playing</span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Focus tones — generated, so this tab cannot go dark. */}
+      {/* Focus */}
       {activeCategory === 'Focus' && (
-        <div className="p-4 space-y-3">
-          <p className="text-[10px] font-black uppercase tracking-widest text-text-dim">
-            Generated in your browser — works offline
-          </p>
+        <div className="p-4 space-y-3 max-h-[24rem] overflow-y-auto scrollbar-hide">
           {FOCUS_TONES.map((tone) => {
             const isOn = activeTone === tone.id;
             return (
@@ -320,16 +253,14 @@ export default function StudyMusic({ onClose }: StudyMusicProps) {
                        : 'bg-glass-bg border-border-main hover:border-brand-purple/40'
                 )}
               >
-                <div className={cn(
-                  'w-9 h-9 rounded-lg flex items-center justify-center shrink-0',
-                  isOn ? 'bg-brand-purple text-white' : 'bg-black/20 text-text-dim'
-                )}>
+                <span className={cn('w-9 h-9 rounded-lg flex items-center justify-center shrink-0',
+                  isOn ? 'bg-brand-purple text-white' : 'bg-black/20 text-text-dim')}>
                   {isOn ? <Pause size={16} /> : <Play size={16} />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-text-main">{tone.title}</p>
-                  <p className="text-[11px] text-text-dim leading-snug">{tone.blurb}</p>
-                </div>
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm font-bold text-text-main">{tone.title}</span>
+                  <span className="block text-[11px] text-text-dim leading-snug">{tone.blurb}</span>
+                </span>
               </button>
             );
           })}
@@ -338,8 +269,7 @@ export default function StudyMusic({ onClose }: StudyMusicProps) {
             <div className="flex items-center gap-2 pt-1">
               <Volume2 size={14} className="text-text-dim shrink-0" />
               <input
-                type="range"
-                min="0" max="1" step="0.01"
+                type="range" min="0" max="1" step="0.01"
                 value={toneVolume}
                 onChange={(e) => {
                   const v = parseFloat(e.target.value);
@@ -353,59 +283,48 @@ export default function StudyMusic({ onClose }: StudyMusicProps) {
           )}
 
           <p className="text-[10px] text-text-dim/70 leading-relaxed pt-1">
-            These are tones and noise, described by how they sound. We make no
-            claim that they change how well you concentrate.
+            These are tones and noise, described by how they sound. We make no claim that they
+            change how well you concentrate.
           </p>
         </div>
       )}
 
-      {/* Ambient Sounds */}
+      {/* Ambient */}
       {activeCategory === 'Ambient' && (
-      <div className="p-6 space-y-4 bg-glass-bg/50">
-        <h4 className="text-[10px] font-black uppercase tracking-widest text-text-dim">Ambient Layers</h4>
-        <div className="grid grid-cols-2 gap-3">
-          {AMBIENT_SOUNDS.map((sound) => (
-            <div key={sound.id} className="space-y-2">
-              <button
-                onClick={() => toggleAmbient(sound.id)}
-                className={cn(
-                  "w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all border",
-                  activeAmbients[sound.id].active
-                    ? "bg-brand-purple/20 border-brand-purple text-brand-purple shadow-lg shadow-brand-purple/10"
-                    : "bg-glass-bg border-border-main text-text-dim hover:text-text-main"
+        <div className="p-5 space-y-4 max-h-[24rem] overflow-y-auto scrollbar-hide">
+          <p className="text-[10px] font-black uppercase tracking-widest text-text-dim">
+            Ambient layers — stack as many as you like
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            {AMBIENT_SOUNDS.map((sound) => (
+              <div key={sound.id} className="space-y-2">
+                <button
+                  onClick={() => toggleAmbient(sound.id)}
+                  aria-pressed={activeAmbients[sound.id].active}
+                  className={cn(
+                    'w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all border',
+                    activeAmbients[sound.id].active
+                      ? 'bg-brand-purple/20 border-brand-purple text-brand-purple'
+                      : 'bg-glass-bg border-border-main text-text-dim hover:text-text-main'
+                  )}
+                >
+                  {sound.icon}
+                  {sound.name}
+                </button>
+                {activeAmbients[sound.id].active && (
+                  <input
+                    type="range" min="0" max="1" step="0.01"
+                    value={activeAmbients[sound.id].volume}
+                    onChange={(e) => handleAmbientVolume(sound.id, parseFloat(e.target.value))}
+                    className="w-full h-1 accent-brand-purple"
+                    aria-label={`${sound.name} volume`}
+                  />
                 )}
-              >
-                {sound.icon}
-                {sound.name}
-              </button>
-              {activeAmbients[sound.id].active && (
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="1" 
-                  step="0.01"
-                  value={activeAmbients[sound.id].volume}
-                  onChange={(e) => handleVolumeChange(sound.id, parseFloat(e.target.value))}
-                  className="w-full h-1 bg-brand-purple/20 rounded-lg appearance-none cursor-pointer accent-brand-purple"
-                />
-              )}
-            </div>
-          ))}
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
       )}
-
-      {/* Footer Info */}
-      <div className="p-4 bg-glass-bg flex items-center justify-between border-t border-border-main">
-        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-text-dim">
-          <Volume2 size={12} />
-          <span>Mix your perfect focus</span>
-        </div>
-        <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-brand-purple">
-          <Sparkles size={12} />
-          <span>Focus Mode Active</span>
-        </div>
-      </div>
     </motion.div>
   );
 }

@@ -181,7 +181,7 @@ describe('the friends blocks', () => {
   it('keeps public profiles to the searchable fields only', () => {
     // hasOnly is the guard that stops a token count or a plan flag being
     // mirrored into the one collection every signed-in user can read.
-    expect(profiles).toMatch(/hasOnly\(\['uid', 'username', 'displayName', 'emailLower'\]\)/);
+    expect(profiles).toMatch(/hasOnly\(\['uid', 'username', 'displayName', 'displayLower', 'emailLower'\]\)/);
   });
 
   it('only lets you write your own public profile', () => {
