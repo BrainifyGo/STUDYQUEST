@@ -2,8 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Music, X, Play, Pause, Volume2, Headphones, Wind, Coffee, Trees, Sparkles, CloudRain, Waves, TreePine, Ghost, Zap } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { Howl } from 'howler';
 import { toast } from 'sonner';
+import {
+  startAmbience, stopAmbience, setAmbienceVolume, stopAllAmbience,
+  type AmbienceId,
+} from '../lib/ambience';
 
 interface StudyMusicProps {
   onClose: () => void;
@@ -40,11 +43,20 @@ const CATEGORY_ICONS: Record<MusicCategory, React.ReactNode> = {
   'Ambient': <Trees size={16} />,
 };
 
-const AMBIENT_SOUNDS = [
-  { id: 'rain', name: 'Rain', icon: <CloudRain size={16} />, url: 'https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3' },
-  { id: 'waves', name: 'Waves', icon: <Waves size={16} />, url: 'https://assets.mixkit.co/active_storage/sfx/1113/1113-preview.mp3' },
-  { id: 'forest', name: 'Forest', icon: <TreePine size={16} />, url: 'https://assets.mixkit.co/active_storage/sfx/1117/1117-preview.mp3' },
-  { id: 'white-noise', name: 'Static', icon: <Zap size={16} />, url: 'https://assets.mixkit.co/active_storage/sfx/2357/2357-preview.mp3' },
+/*
+  Generated, not downloaded.
+
+  These used to be four hotlinked MP3s from mixkit's sound-EFFECT preview
+  endpoint. Measured: 7 KB to 42 KB each, i.e. between half a second and two
+  seconds of audio. Set to loop, a half-second forest clip restarts twice a
+  second and every seam is a click — which is precisely how they sounded.
+  See src/lib/ambience.ts.
+*/
+const AMBIENT_SOUNDS: { id: AmbienceId; name: string; icon: React.ReactNode }[] = [
+  { id: 'rain', name: 'Rain', icon: <CloudRain size={16} /> },
+  { id: 'waves', name: 'Waves', icon: <Waves size={16} /> },
+  { id: 'forest', name: 'Forest', icon: <TreePine size={16} /> },
+  { id: 'white-noise', name: 'Static', icon: <Zap size={16} /> },
 ];
 
 export default function StudyMusic({ onClose }: StudyMusicProps) {
@@ -57,65 +69,71 @@ export default function StudyMusic({ onClose }: StudyMusicProps) {
     'white-noise': { active: false, volume: 0.5 },
   });
   
-  const howlsRef = useRef<Record<string, Howl>>({});
+  const playerFrameRef = useRef<HTMLIFrameElement>(null);
+  /** Track id -> why it would not play. Empty when everything is fine. */
+  const [failedTracks, setFailedTracks] = useState<Record<string, string>>({});
 
+  /*
+    YouTube reports embed failures by posting a message to the parent, but only
+    once the player has been told to listen. Without this the iframe fails
+    completely silently.
+  */
   useEffect(() => {
-    // Cleanup howls on unmount
-    return () => {
-      Object.values(howlsRef.current).forEach(h => h.stop());
+    const onMessage = (e: MessageEvent) => {
+      if (!/^https:\/\/(www\.)?youtube(-nocookie)?\.com$/.test(e.origin)) return;
+      let payload: any;
+      try { payload = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch { return; }
+
+      if (payload?.event === 'onReady') {
+        // Ask for events; YouTube stays quiet until it is asked.
+        playerFrameRef.current?.contentWindow?.postMessage(
+          JSON.stringify({ event: 'listening', id: 1 }), 'https://www.youtube.com'
+        );
+        return;
+      }
+
+      if (payload?.event === 'onError' && activeTrackIdRef.current) {
+        // 101 and 150 are the same thing: the owner disallowed embedding.
+        const code = Number(payload.info);
+        const why = code === 2 ? 'The link for this track is wrong — please report it.'
+                  : code === 5 ? 'This browser cannot play it.'
+                  : code === 100 ? 'The video has been removed from YouTube.'
+                  : (code === 101 || code === 150) ? 'The owner does not allow it to play inside other sites.'
+                  : 'It would not load. Some school and office networks block YouTube.';
+        setFailedTracks((prev) => ({ ...prev, [activeTrackIdRef.current!]: why }));
+      }
     };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
   }, []);
 
-  const toggleAmbient = (id: string) => {
-    const sound = AMBIENT_SOUNDS.find(s => s.id === id);
-    if (!sound) return;
+  useEffect(() => {
+    // Leaving the panel stops the sound. A layer still playing after the player
+    // is closed has no control anywhere on screen.
+    return () => stopAllAmbience();
+  }, []);
 
-    const isCurrentlyActive = activeAmbients[id].active;
-    
-    if (!isCurrentlyActive) {
-      if (!howlsRef.current[id]) {
-        /*
-          The button used to light up whether or not a single byte arrived.
-
-          A blocked school network, an offline phone or a moved file all produced
-          the same thing: an "on" toggle and silence, which is why the music looked
-          broken rather than unavailable. Howler reports both failures — the file
-          not loading, and the browser refusing to play it — so both now switch the
-          toggle back off and say what happened.
-        */
-        const fail = (what: string) => {
-          setActiveAmbients(prev => ({ ...prev, [id]: { ...prev[id], active: false } }));
-          toast.error(`${sound.name} could not ${what}. Check your connection — some networks block it.`);
-        };
-        howlsRef.current[id] = new Howl({
-          src: [sound.url],
-          loop: true,
-          volume: activeAmbients[id].volume,
-          html5: true,
-          onloaderror: () => fail('load'),
-          onplayerror: () => fail('play'),
-        });
-      }
-      howlsRef.current[id].play();
-    } else {
-      howlsRef.current[id]?.pause();
+  const toggleAmbient = (id: AmbienceId) => {
+    const wasActive = activeAmbients[id].active;
+    try {
+      if (wasActive) stopAmbience(id);
+      else startAmbience(id, activeAmbients[id].volume);
+    } catch (err) {
+      // Only reachable on a browser with no Web Audio at all.
+      console.warn('[ambience]', err);
+      toast.error('Your browser will not play ambient sound.');
+      return;
     }
-
-    setActiveAmbients(prev => ({
-      ...prev,
-      [id]: { ...prev[id], active: !isCurrentlyActive }
-    }));
+    setActiveAmbients(prev => ({ ...prev, [id]: { ...prev[id], active: !wasActive } }));
   };
 
-  const handleVolumeChange = (id: string, volume: number) => {
-    setActiveAmbients(prev => ({
-      ...prev,
-      [id]: { ...prev[id], volume }
-    }));
-    if (howlsRef.current[id]) {
-      howlsRef.current[id].volume(volume);
-    }
+  const handleVolumeChange = (id: AmbienceId, volume: number) => {
+    setActiveAmbients(prev => ({ ...prev, [id]: { ...prev[id], volume } }));
+    setAmbienceVolume(id, volume);
   };
+
+  const activeTrackIdRef = useRef<string | null>(null);
+  useEffect(() => { activeTrackIdRef.current = activeTrackId; }, [activeTrackId]);
 
   const toggleTrack = (id: string) => {
     setActiveTrackId(prev => (prev === id ? null : id));
@@ -174,20 +192,49 @@ export default function StudyMusic({ onClose }: StudyMusicProps) {
         ))}
       </div>
 
-      {/* Now Playing Embed */}
+      {/*
+        Now playing.
+
+        The iframe used to be dropped in with `autoplay=1` and nothing watching
+        it. When YouTube refuses to play a video in an embed — the owner
+        disabled embedding, the stream ended, the network blocks youtube.com, or
+        a phone refuses to autoplay — the result was a silent black rectangle
+        with no explanation and no way out, which is why "the music doesn't
+        work" covered four completely different causes.
+
+        The player now reports. `enablejsapi` plus an origin lets YouTube post
+        errors back, and anything that goes wrong is named, with a link out to
+        the track so the student can still listen to it.
+      */}
       {activeTrack && (
         <div className="p-4 aspect-video bg-black/40 relative group">
-          <iframe
-            key={activeTrack.id}
-            width="100%"
-            height="100%"
-            src={`https://www.youtube.com/embed/${activeTrack.id}?autoplay=1&controls=1&showinfo=0&rel=0&modestbranding=1`}
-            title={activeTrack.title}
-            frameBorder="0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowFullScreen
-            className="rounded-2xl"
-          ></iframe>
+          {failedTracks[activeTrack.id] ? (
+            <div className="w-full h-full rounded-2xl border border-border-main flex flex-col items-center justify-center text-center gap-3 p-6">
+              <Music className="text-text-dim" size={28} />
+              <p className="text-sm font-bold text-text-main">{activeTrack.title} will not play here</p>
+              <p className="text-xs text-text-dim max-w-xs">{failedTracks[activeTrack.id]}</p>
+              <a
+                href={`https://www.youtube.com/watch?v=${activeTrack.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs font-bold text-brand-purple hover:underline"
+              >
+                Open it on YouTube
+              </a>
+            </div>
+          ) : (
+            <iframe
+              key={activeTrack.id}
+              ref={playerFrameRef}
+              width="100%"
+              height="100%"
+              src={`https://www.youtube.com/embed/${activeTrack.id}?autoplay=1&controls=1&rel=0&modestbranding=1&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`}
+              title={activeTrack.title}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              className="rounded-2xl w-full h-full border-0"
+            />
+          )}
         </div>
       )}
 

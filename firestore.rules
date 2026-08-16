@@ -219,6 +219,10 @@ service cloud.firestore {
                         && (!('role' in resource.data) || request.resource.data.role == resource.data.role)
                         && budgetUnchanged()
                         && (paidFieldsUnchanged() || redeemedWithMyKey()));
+      // There was NO delete rule here, so "Delete Account" was rejected by the
+      // rules every single time and reported as "something went wrong". You are
+      // allowed to delete your own account; that is what the button is for.
+      allow delete: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
     }
 
     match /exams/{examId} {

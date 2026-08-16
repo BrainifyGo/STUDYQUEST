@@ -11,6 +11,10 @@ import {
 import { cn } from '../lib/utils';
 import { db, auth, collection, query, where, getDocs, doc, getDoc, handleFirestoreError, OperationType } from '../lib/firebase';
 import { levelProgress } from '../lib/progress';
+import {
+  bucketSessions, sessionsInPeriod, summarise, PERIODS,
+  type Period, type SessionRow,
+} from '../lib/studyPeriods';
 
 const COLORS = ['#7c7cff', '#f87171', '#fbbf24', '#34d399', '#a78bfa', '#f472b6'];
 
@@ -63,14 +67,9 @@ export default function Analytics() {
   const progress = levelProgress(xp);
   const { isReady: activityReady, containerRef: activityRef } = useContainerReady();
   const { isReady: subjectReady, containerRef: subjectRef } = useContainerReady();
-  const [studyData, setStudyData] = useState<any[]>([]);
+  const [period, setPeriod] = useState<Period>('weekly');
+  const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [subjectData, setSubjectData] = useState<any[]>([]);
-  const [stats, setStats] = useState({
-    totalHours: 0,
-    avgScore: 0,
-    totalSessions: 0,
-    goalProgress: 0
-  });
 
   useEffect(() => {
     const fetchData = async () => {
@@ -86,48 +85,25 @@ export default function Analytics() {
           return;
         }
 
-        // Process Study Activity (last 7 days)
-        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        const activityMap: any = {};
-        days.forEach(d => activityMap[d] = { day: d, hours: 0, sessions: 0, score: 0 });
+        // The rows are kept as they are. Everything the chart shows is derived
+        // from them below, so switching period is a re-render rather than a
+        // refetch — and the three period buttons finally do something.
+        setSessions(sessions as SessionRow[]);
 
-        let totalHours = 0;
-        let totalScore = 0;
-        const subjects: any = {};
-
-        sessions.forEach(s => {
-          const date = new Date(s.date);
-          const dayName = days[date.getDay()];
-          activityMap[dayName].hours += s.duration;
-          activityMap[dayName].sessions += 1;
-          activityMap[dayName].score += s.score;
-
-          totalHours += s.duration;
-          totalScore += s.score;
-
-          if (s.subject) {
-            subjects[s.subject] = (subjects[s.subject] || 0) + s.duration;
-          }
-        });
-
-        const processedActivity = Object.values(activityMap);
-        setStudyData(processedActivity);
-
-        // Process Subject Breakdown
-        const totalSubjectHours = Object.values(subjects).reduce((a: any, b: any) => a + b, 0) as number;
-        const processedSubjects = Object.entries(subjects).map(([name, value], i) => ({
-          name,
-          value: Math.round(((value as number) / totalSubjectHours) * 100),
-          color: COLORS[i % COLORS.length]
-        }));
-        setSubjectData(processedSubjects);
-
-        setStats({
-          totalHours: Math.round(totalHours * 10) / 10,
-          avgScore: Math.round(totalScore / sessions.length),
-          totalSessions: sessions.length,
-          goalProgress: Math.min(Math.round((totalHours / 40) * 100), 100) // Goal is 40 hours
-        });
+        const subjects: Record<string, number> = {};
+        for (const row of sessions as SessionRow[]) {
+          if (row.subject) subjects[row.subject] = (subjects[row.subject] || 0) + (Number(row.duration) || 0);
+        }
+        const totalSubjectHours = Object.values(subjects).reduce((a, b) => a + b, 0);
+        setSubjectData(
+          totalSubjectHours > 0
+            ? Object.entries(subjects).map(([name, value], i) => ({
+                name,
+                value: Math.round((value / totalSubjectHours) * 100),
+                color: COLORS[i % COLORS.length],
+              }))
+            : []
+        );
 
         // The player's real XP, for the level bar and the badges. Previously the
         // bar was a hardcoded 85% and the numbers beneath it were invented.
@@ -168,17 +144,13 @@ export default function Analytics() {
     );
   }
 
-  const hasData = studyData.length > 0;
+  const hasData = sessions.length > 0;
 
-  const displayStudyData = studyData.length > 0 ? studyData : [
-    { day: 'Mon', hours: 0, sessions: 0, score: 0 },
-    { day: 'Tue', hours: 0, sessions: 0, score: 0 },
-    { day: 'Wed', hours: 0, sessions: 0, score: 0 },
-    { day: 'Thu', hours: 0, sessions: 0, score: 0 },
-    { day: 'Fri', hours: 0, sessions: 0, score: 0 },
-    { day: 'Sat', hours: 0, sessions: 0, score: 0 },
-    { day: 'Sun', hours: 0, sessions: 0, score: 0 },
-  ];
+  // Derived, not stored. Changing the period changes the chart AND the four
+  // headline cards, which is what makes the buttons mean anything: "12h" under
+  // Weekly and "12h" under All Time would just be a relabelled tab.
+  const displayStudyData = bucketSessions(sessions, period);
+  const stats = summarise(sessionsInPeriod(sessions, period));
 
   const displaySubjectData = subjectData.length > 0 ? subjectData : [
     { name: 'No Data', value: 100, color: '#ffffff10' }
@@ -202,9 +174,22 @@ export default function Analytics() {
         </div>
         
         <div className="flex items-center gap-3 p-1.5 bg-glass-bg rounded-2xl border border-border-main">
-          <button className="px-4 py-2 rounded-xl text-xs font-bold bg-glass-bg text-text-main shadow-lg">Weekly</button>
-          <button className="px-4 py-2 rounded-xl text-xs font-bold text-text-dim hover:text-text-main transition-all">Monthly</button>
-          <button className="px-4 py-2 rounded-xl text-xs font-bold text-text-dim hover:text-text-main transition-all">All Time</button>
+          {/* These three had no onClick and no state behind them. */}
+          {PERIODS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setPeriod(p.id)}
+              aria-pressed={period === p.id}
+              className={cn(
+                'px-4 py-2 rounded-xl text-xs font-bold transition-all',
+                period === p.id
+                  ? 'bg-brand-purple text-white shadow-lg'
+                  : 'text-text-dim hover:text-text-main'
+              )}
+            >
+              {p.label}
+            </button>
+          ))}
         </div>
       </div>
 

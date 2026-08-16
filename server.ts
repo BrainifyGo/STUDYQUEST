@@ -243,6 +243,13 @@ async function startServer() {
       socket.to(roomId).emit("receive-message", message);
     });
 
+    // Typing indicator, ported from GhostChat. Relayed rather than stored: a
+    // "typing" that outlives the socket is worse than none, and the client
+    // times its own out anyway.
+    socket.on("typing", ({ roomId, userName, typing }) => {
+      socket.to(roomId).emit("typing", { userName, typing: !!typing });
+    });
+
     socket.on("notes-update", ({ roomId, notes }) => {
       socket.to(roomId).emit("notes-update", notes);
     });

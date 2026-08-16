@@ -470,3 +470,210 @@ These are from the same report but are features, not defects:
 | Colour scheme | Design decision, wants Ola and Daniel to agree a direction first. |
 | Tailored questions from wrong answers | Depends on the mistakes store existing. After the quiz generator. |
 | Daily progress test | Depends on the same. After the quiz generator. |
+
+---
+
+## [2026-08-16] — Second round of fixes
+
+**Editor:** Claude Code (Opus 5)
+
+Everything below was reported by Ola after testing the live site. From here on, every fix lands in this
+file.
+
+---
+
+### The study kit only ever made summaries
+
+The single biggest one. `generateStudyKit` built one prompt for every mode:
+
+> *"Generate a `${studyMode}` from the following content. Format clearly using Markdown with sections
+> and bullet points."*
+
+followed by a fixed output format — **Key Concepts / Summary / Quick Facts / Exam Tips** — that
+applied whatever you had picked. Two reported bugs fall straight out of that:
+
+**Flashcards could never have worked.** The model was told to write Markdown, and the reply was then
+handed to `JSON.parse`. It threw every single time. The flashcard tab was not slow or unreliable — it
+was impossible.
+
+**"Make it shorter", "Exam focused" and "Bullet points" did nothing.** They were passed to the model
+as one line of trivia, `Options: Shorter: true, Exam Focused: false, ...`, with nothing anywhere
+explaining what to do about it — while the output format directly beneath insisted on the same four
+headings regardless. The format won. All three options, and all five modes, produced the same
+summary, which is exactly what was reported.
+
+There is now one prompt builder, `src/lib/studyPrompts.ts`, shared by both generate paths (there were
+two, with different prompts, which is its own reason for things behaving differently depending on
+where you started from):
+
+- **Each mode states its own contract.** Flashcards and quizzes ask for JSON and say so about four
+  different ways, because a model that adds a ```` ```json ```` fence breaks the parse and empties the
+  tab. Explain is explicitly told *not* to open with "Key Concepts". Only summary asks for headings.
+- **The options are instructions, placed last, and marked as overriding** what came before — because
+  a model follows the most recent instruction when two conflict. "Shorter" halves the length and bans
+  paragraphs over three sentences. "Exam focused" asks for command words, common mistakes and what
+  earns the marks. "Bullet points" bans prose — and is *not* sent to the JSON modes, where "every line
+  is a bullet" would be a broken parse.
+- **Pro gets more**: 10 quiz questions and 20 flashcards, against 5 and 10.
+
+Reading the reply back is no longer brittle either. `parseJsonReply` strips a code fence rather than
+hoping there isn't one, and falls back to the outermost bracketed span so a stray *"Sure! Here are
+your flashcards:"* does not cost you the whole deck. `normaliseFlashcards` accepts `front`/`back` and
+`term`/`definition` as well as `question`/`answer`, since models return all three whatever the prompt
+says. `normaliseQuiz` fixes the one that mattered most: a `correctAnswer` of `"B"` instead of
+`"Paris"` would have marked **every answer wrong**, because marking compares against the option text.
+
+### Delete Account always failed
+
+Not an intermittent fault — it could never succeed. `firestore.rules` had `read`, `create` and
+`update` rules for `/users/{userId}` and **no `allow delete` at all**, so the very first line of the
+handler was rejected by the server every time and surfaced as "Something went wrong".
+
+The rule now exists and is deployed. The handler was rebuilt around it, because the order was also
+wrong: it deleted the Firestore profile **first** and the login second, so when the login step failed
+with `requires-recent-login` — which it does for anyone signed in more than a few minutes, i.e. nearly
+everyone — the profile was already gone, and you were left able to log in to an account with no data
+and no way to finish deleting.
+
+`deleteMyAccount` now re-authenticates **first** (password field for email accounts, popup for Google
+and GitHub), and only starts destroying things once the last step is known to be possible. It also
+clears `study_sessions`, `study_tasks`, `study_history`, `study_mistakes` and `exams` — deleting the
+profile alone left all of that behind, which is not what "delete my account" means. Every failure now
+has its own message instead of one catch-all.
+
+### Password reset — the actual answer
+
+Checked against the live Firebase project rather than guessed at, twice.
+
+**One:** a reset request for `definitely-not-a-real-user@example.invalid` returns **HTTP 200**. Email
+enumeration protection is on, so Firebase reports success for addresses that cannot exist. The API can
+never tell us whether an email was really sent.
+
+**Two, and this is the answer:** there are four accounts on the project. **Three of them, including
+Ola's own, are `google.com` only.** They have no password. A Google account has nothing for Firebase
+to reset, so it sends nothing — correctly. Only one account (`fer***`) has a password at all.
+
+So the reset was not broken. It was being tested on accounts that have no password to reset. The app
+now says so up front rather than showing "Email Sent!" and leaving you to search your inbox:
+
+> *You sign in with Google, so there is no StudyQuest password to reset. Change it in your Google
+> account.*
+
+Alongside that: the Settings handler used to swallow every failure into `console.error`, so a failed
+send and a successful one looked identical. Errors are named now, and the confirmation says where the
+email went and that it often lands in spam.
+
+### The ambient sounds were half a second long
+
+"They all sound like clicks" — measured, and that is exactly what they were.
+
+The four ambient layers were hotlinked from mixkit's sound-**effect** preview endpoint. The files are
+**7 KB, 12 KB, 15 KB and 42 KB**: between roughly half a second and two and a half seconds of audio.
+They are one-shot effects, not loops. Set to `loop: true`, a 0.45-second forest clip restarts twice a
+second forever and every seam is a discontinuity — a click, permanently.
+
+Longer files would have fixed the clicking and kept three other problems: they are someone else's
+URLs (the Classical track had already died), they are a download on a phone data plan, and
+`assets.mixkit.co` is blocked on plenty of school networks.
+
+So the ambience is **generated in the browser** now — `src/lib/ambience.ts`, Web Audio, no files at
+all:
+
+| Layer | How it is made |
+|---|---|
+| **Rain** | Pink noise, high-passed at 900 Hz, with the top end drifting over ~30 s so it moves between heavier and lighter |
+| **Waves** | Brown noise through a low-pass, with a 0.09 Hz swell — a wave about every eleven seconds |
+| **Forest** | A quiet filtered wind bed, plus randomly-timed bird chirps built from short sine sweeps |
+| **Static** | Flat white noise |
+
+It never loops, because there is no loop point. It cannot 404. It uses no bandwidth and cannot be
+blocked. Every start, stop and volume change is a ramp rather than a jump, since a gain that jumps
+from 0 to full **is** a click — the thing we were fixing.
+
+The volume slider is squared on its way to gain, because loudness is not linear in amplitude, and
+each layer carries a trim: white noise at the same gain as rain is painfully brighter.
+
+### The music player did not report failure
+
+"Some of the music is unavailable" covered at least four different causes, all of which looked
+identical: a black rectangle.
+
+The iframe was dropped in with `autoplay=1` and nothing watching it. When YouTube refuses to play in
+an embed — embedding disabled by the owner, video removed, a stream that ended, a network blocking
+youtube.com, or a phone declining to autoplay — nothing was reported and there was no way out.
+
+The player now uses `enablejsapi` with an origin and listens for YouTube's error events, so each cause
+gets named: *"The owner does not allow it to play inside other sites"*, *"The video has been removed
+from YouTube"*, *"Some school and office networks block YouTube"* — with a link to open the track on
+YouTube directly.
+
+Worth being straight about: all six video ids were re-checked and every one currently reports
+`playableInEmbed: true` from here, so the failures cannot be reproduced from this machine. That is
+precisely why the player now has to report for itself rather than us guessing which id died.
+
+### Weekly / Monthly / All Time did nothing
+
+Same class of bug as the View Badges button last round: three `<button>` elements with **no onClick,
+no state and no second dataset**. They could not have worked.
+
+And the chart behind them was wrong in its own right. It bucketed sessions by `date.getDay()` with no
+date range at all — so a session from three months ago was drawn on *this* Tuesday. The "last 7 days"
+chart was really "every session ever, stacked by weekday".
+
+`src/lib/studyPeriods.ts` does it properly: seven real days for Weekly, four calendar weeks for
+Monthly, twelve months for All Time. Empty buckets are kept, because dropping them draws a flat busy
+week that never happened. The four headline cards recompute per period too — "12h" under both Weekly
+and All Time would make the buttons a relabelling exercise. Scores are averaged rather than summed,
+which is why the average score used to be able to read over 100%.
+
+### Study rooms
+
+- **The sidebar collapses on the way in** and is restored on the way out, so someone who keeps it
+  collapsed does not find it expanded again.
+- **The chat can be minimised.** On a phone it was `absolute bottom-0 h-96` with no control of any
+  kind, permanently covering the shared notes — the thing you joined the room to write in. Minimised
+  it becomes a bar with an unread count.
+- **Typing indicators**, ported from GhostChat. Relayed through the socket rather than stored, since a
+  "typing" that outlives the socket is worse than none.
+
+### Smaller things
+
+- **"Recent Sessions" removed from the sidebar.** It showed the newest five of exactly the list the
+  Library shows in full — a worse copy of a screen one click away, and the reason the sidebar needed
+  its own scrollbar.
+- **The sidebar level bar was still on the old rules.** It read `xp % 100` out of 100, the flat
+  100-XP-per-level scheme the app stopped using, so it disagreed with every other level bar on screen.
+  It uses the shared curve now.
+- **`npm test` only ran six named files.** The list was hardcoded in `package.json`, so a new test file
+  was silently never run — the tests written this session would not have executed. It now runs
+  everything except the emulator suite.
+
+### Verification
+
+- **119 tests passing** (31 new), across 8 files; `tsc` clean; `npm run build` clean; rules deployed.
+- New tests pin: every mode produces a different prompt; flashcards ask for JSON and not for Markdown
+  headings; each of the three options changes the prompt, and all four combinations differ; bullet
+  points are never sent to a JSON mode; a fenced reply, a chatty preamble and an object reply all
+  parse; `front`/`back` and `term`/`definition` are accepted; a `correctAnswer` of `"B"` resolves to
+  the option text; an answer that is not among the options is rejected rather than shipped.
+- And for periods: seven/four/twelve buckets per period; a session 84 days old does **not** land on
+  this week's Thursday; each period counts a different number of sessions; scores average rather than
+  sum; a broken date is ignored rather than crashing; Sunday belongs to the week that started the
+  previous Monday.
+- The ambient file sizes and the Firebase account providers were both measured against the real
+  services, not assumed.
+
+### Files
+
+`src/lib/studyPrompts.ts` (new), `src/lib/studyPeriods.ts` (new), `src/lib/ambience.ts` (new),
+`tests/studyPrompts.test.ts` (new), `tests/studyPeriods.test.ts` (new), `src/lib/firebase.ts`,
+`src/components/Settings.tsx`, `src/components/Analytics.tsx`, `src/components/StudyMusic.tsx`,
+`src/components/CollaborativeRoom.tsx`, `src/App.tsx`, `server.ts`, `firestore.rules`, `package.json`.
+
+### Still to do
+
+| Asked for | Standing |
+|---|---|
+| Reminders that actually send a notification and an email | Not started. Needs a scheduled sender; the free Firebase plan has no Cloud Functions, so this needs a decision about where the job runs. |
+| Arcade games | The modes exist; there are still no questions to play them with. Blocked on the mistakes quiz generator. |
+| More of GhostChat in study rooms | Typing indicators are in. Reactions, pinned messages and attachments are each their own piece of work. |

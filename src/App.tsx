@@ -121,9 +121,12 @@ import { useDocumentTitle } from './hooks/useDocumentTitle';
 import { YoutubeTranscript } from 'youtube-transcript';
 import { Howl } from 'howler';
 import { callAI } from './lib/aiService';
+import {
+  buildStudyPrompt, isJsonMode, parseJsonReply, normaliseFlashcards, normaliseQuiz,
+} from './lib/studyPrompts';
 import { getMonthlyLimit, getDailyLimit } from './lib/tokenService';
 import { limitAdvice } from './lib/tokenService';
-import { levelFromXP } from './lib/progress';
+import { levelFromXP, levelProgress } from './lib/progress';
 import { describeAuthError } from './lib/authErrors';
 import { recordMistake, retireMistake, listMistakes, asQuiz, type Mistake } from './lib/mistakes';
 
@@ -270,6 +273,31 @@ export default function App() {
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
   const [lastRequestTime, setLastRequestTime] = useState(0);
   const { uploadPdf, progress: pdfProgress, isProcessing: isPdfProcessing, extractedText: pdfExtractedText } = usePdfUpload();
+
+  // One source of truth for the sidebar level bar, which used to run its own
+  // (wrong) sums. See src/lib/progress.ts.
+  const sidebarProgress = levelProgress(userData?.xp || 0);
+
+  /*
+    Get out of the way in a study room.
+
+    A room is its own workspace — participants, chat, a shared kit — and it does
+    not need the app's navigation competing for the left edge of a laptop screen.
+    The sidebar collapses on the way in and is restored to whatever it was on the
+    way out, so someone who likes it collapsed does not find it expanded again.
+  */
+  const sidebarBeforeRoom = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (activeView === 'collab') {
+      if (sidebarBeforeRoom.current === null) {
+        sidebarBeforeRoom.current = sidebarCollapsed;
+        setSidebarCollapsed(true);
+      }
+    } else if (sidebarBeforeRoom.current !== null) {
+      setSidebarCollapsed(sidebarBeforeRoom.current);
+      sidebarBeforeRoom.current = null;
+    }
+  }, [activeView, sidebarCollapsed, setSidebarCollapsed]);
 
   /**
    * Bank XP earned in the arcade.
@@ -921,7 +949,16 @@ export default function App() {
     const testProMode = localStorage.getItem('brainify_test_pro') === 'true';
     const userPlan = testProMode || userData?.isPro ? 'pro' : 'free';
 
-    const prompt = `You are StudyQuest, a professional study assistant. Generate a ${studyMode} from the following content. Format clearly using Markdown with sections and bullet points.\n\nCONTENT:\n${inputText}`;
+    // One prompt per mode, and options that are instructions rather than a line
+    // of trivia the model was free to ignore. See src/lib/studyPrompts.ts for
+    // what the old single prompt actually did to flashcards.
+    const prompt = buildStudyPrompt({
+      mode: studyMode,
+      content: inputText,
+      options,
+      isPro: userPlan === 'pro',
+      source: inputMethod,
+    });
 
     const response = await fetch('/api/generate', {
       method: 'POST',
@@ -932,17 +969,15 @@ export default function App() {
         userId: user?.uid || 'guest'
       })
     });
-    
+
     const { result } = await response.json();
 
     let parsedResult = result;
-    if (studyMode === 'flashcards' || studyMode === 'quiz' || studyMode === 'mindmap') {
-      try {
-        parsedResult = JSON.parse(result);
-      } catch (e) {
-        const jsonMatch = result.match(/\[[\s\S]*\]/);
-        parsedResult = JSON.parse(jsonMatch ? jsonMatch[0] : result);
-      }
+    if (isJsonMode(studyMode)) {
+      const data = parseJsonReply(result);
+      parsedResult = studyMode === 'flashcards' ? normaliseFlashcards(data)
+                   : studyMode === 'quiz' ? normaliseQuiz(data)
+                   : data;
     }
 
     const newOutput = { ...outputModes, [studyMode]: parsedResult };
@@ -1128,89 +1163,34 @@ export default function App() {
     try {
       const isUrlInput = inputMethod === 'youtube' || inputMethod === 'article';
       
-      const systemPrompt = `
-You are StudyQuest, a professional study assistant.
-Your job is to transform study notes into structured, high-quality revision content.
+      /*
+        Both generate paths now share ONE prompt builder.
 
-STRICT RULES:
-- Always format clearly using Markdown
-- Never output messy paragraphs
-- Use sections and bullet points
-- Keep it concise but useful
-- Focus on helping students revise faster
+        This path used to carry its own hand-written system prompt with a fixed
+        OUTPUT FORMAT block (Key Concepts / Summary / Quick Facts / Exam Tips)
+        that applied to every mode. Flashcards were asked for that Markdown and
+        then JSON.parsed, which is why the flashcard tab never filled, and the
+        three Smart Options were passed as `Shorter: true` with nothing telling
+        the model what that meant — so every option produced the same summary.
+      */
+      const testProMode = localStorage.getItem('brainify_test_pro') === 'true';
+      const userPrompt = buildStudyPrompt({
+        mode: studyMode,
+        content: finalInputText,
+        options,
+        isPro: testProMode || userData?.isPro || false,
+        source: inputMethod,
+      });
 
-OUTPUT FORMAT:
-### Key Concepts:
-...
-### Summary:
-...
-### Quick Facts:
-...
-### Exam Tips:
-...
-`;
-
-      // Add quiz-specific enhancements
-      let enhancedSystemPrompt = systemPrompt;
-      if (studyMode === 'quiz') {
-        const randomSeed = Math.floor(Math.random() * 99999);
-        const timestamp = Date.now();
-        const testProMode = localStorage.getItem('brainify_test_pro') === 'true';
-        const isPro = testProMode || userData?.isPro || false;
-        
-        enhancedSystemPrompt = `
-You are StudyQuest, a professional study assistant.
-Your job is to transform study notes into structured, high-quality revision content.
-
-UNIQUENESS SEED: ${randomSeed}-${timestamp}. 
-You MUST generate completely different questions every single time. Never repeat previous questions.
-
-QUIZ REQUIREMENTS:
-- Generate EXACTLY ${isPro ? 10 : 5} multiple choice questions
-- Each question must have 4 options labeled A, B, C, D
-- Include the correct answer and a brief explanation for each question
-- Questions must be completely different from any previous generation
-- Return ONLY a valid JSON array with no markdown, no code blocks, no extra text
-
-JSON FORMAT:
-[
-  {
-    question: string,
-    options: [string, string, string, string],
-    correctAnswer: string,
-    explanation: string
-  }
-]
-
-STRICT RULES:
-- Always format clearly using Markdown
-- Never output messy paragraphs
-- Use sections and bullet points
-- Keep it concise but useful
-- Focus on helping students revise faster
-`;
-      }
-
-      const userPrompt = `
-USER REQUEST:
-Mode: ${studyMode}
-Options: Shorter: ${options.shorter}, Exam Focused: ${options.examFocused}, Bullet Points: ${options.bulletPoints}
-
-CONTENT:
-${inputMethod === 'youtube' ? `The following is a transcript from a YouTube video. ${studyMode === 'summary' ? 'Analyze it and provide a summary and key takeaways.' : studyMode === 'flashcards' ? 'Generate flashcards from this content.' : studyMode === 'quiz' ? 'Generate a quiz from this content.' : 'Explain this content simply.'} Transcript: ${inputText}` : inputText}
-`;
-
-      const result = await callAI(userPrompt, enhancedSystemPrompt);
+      const result = await callAI(userPrompt);
       if (!result) throw new Error('Empty response from AI');
 
-      let parsedResult = result;
-      if (studyMode === 'flashcards' || studyMode === 'quiz' || studyMode === 'mindmap') {
-        try {
-          parsedResult = JSON.parse(result);
-        } catch (e) {
-          const jsonMatch = result.match(/\[[\s\S]*\]/);
-          parsedResult = JSON.parse(jsonMatch ? jsonMatch[0] : result);
-        }
+      let parsedResult: any = result;
+      if (isJsonMode(studyMode)) {
+        const data = parseJsonReply(result);
+        parsedResult = studyMode === 'flashcards' ? normaliseFlashcards(data)
+                     : studyMode === 'quiz' ? normaliseQuiz(data)
+                     : data;
       }
 
       const newOutput = { ...outputModes, [studyMode]: parsedResult };
@@ -2021,42 +2001,10 @@ ${inputMethod === 'youtube' ? `The following is a transcript from a YouTube vide
                 />
               </GuestGuard>
 
-              {!sidebarCollapsed && <div className="pt-8 text-[10px] font-bold text-text-dim uppercase tracking-[0.2em] mb-4 px-3">Recent Sessions</div>}
-              <div className="space-y-1">
-                {history.length > 0 ? (
-                  history.slice(0, 5).map((item) => (
-                    <div key={item.id} className="group relative">
-                      <SidebarItem 
-                        icon={<Clock size={14} />}
-                        label={item.subject}
-                        onClick={() => {
-                          setInputText(item.content || '');
-                          setDetectedSubject(item.subject);
-                          setStudyMode(item.mode);
-                          if (item.outputModes) {
-                            setOutputModes(item.outputModes);
-                            setActiveOutputTab(item.mode);
-                          }
-                        }}
-                        collapsed={sidebarCollapsed}
-                      />
-                      {!sidebarCollapsed && (
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteHistoryItem(item.id);
-                          }}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-red-500/10 text-red-400 opacity-0 group-hover:opacity-100 transition-all hover:bg-red-500 hover:text-white"
-                        >
-                          <X size={14} />
-                        </button>
-                      )}
-                    </div>
-                  ))
-                ) : (
-                  !sidebarCollapsed && <div className="px-3 py-2 text-xs text-text-dim italic">No recent activity</div>
-                )}
-              </div>
+              {/* "Recent Sessions" lived here. Removed: it showed the newest five
+                  of exactly the same list the Library shows in full, so it was a
+                  worse copy of a screen one click away, and it was the reason the
+                  sidebar needed its own scrollbar. */}
             </nav>
 
             <div className="p-4 border-t border-border-main space-y-4">
@@ -2064,13 +2012,15 @@ ${inputMethod === 'youtube' ? `The following is a transcript from a YouTube vide
               {!sidebarCollapsed && (
                 <div className="px-2 space-y-2">
                   <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-text-dim">
-                    <span>Level {userData?.level || 1}</span>
-                    <span>{(userData?.xp || 0) % 100}/100 XP</span>
+                    {/* Was `xp % 100` out of 100 — the flat rule the app stopped
+                        using. It disagreed with every other level bar in the app. */}
+                    <span>Level {sidebarProgress.level}</span>
+                    <span>{sidebarProgress.into.toLocaleString()}/{sidebarProgress.needed.toLocaleString()} XP</span>
                   </div>
                   <div className="h-1.5 w-full bg-glass-bg rounded-full overflow-hidden">
-                    <motion.div 
+                    <motion.div
                       initial={{ width: 0 }}
-                      animate={{ width: `${(userData?.xp || 0) % 100}%` }}
+                      animate={{ width: `${sidebarProgress.percent}%` }}
                       className="h-full bg-brand-purple shadow-[0_0_10px_rgba(124,124,255,0.5)]"
                     />
                   </div>

@@ -13,6 +13,10 @@ import {
   sendPasswordResetEmail,
   RecaptchaVerifier,
   signInWithPhoneNumber,
+  reauthenticateWithCredential,
+  reauthenticateWithPopup,
+  EmailAuthProvider,
+  deleteUser,
 } from 'firebase/auth';
 import { 
   initializeFirestore, 
@@ -97,6 +101,72 @@ export const signInWithEmail = async (
     auth, email, password
   );
   return result.user;
+};
+
+/**
+ * Every collection that stores rows belonging to one person, keyed by `userId`.
+ *
+ * Deleting the profile alone used to leave all of these behind, still readable
+ * by their rules and counted by nothing — a deleted account whose sessions,
+ * mistakes and history were all still in the database. "Delete my account" has
+ * to mean the data too.
+ */
+const USER_OWNED_COLLECTIONS = [
+  'study_sessions', 'study_tasks', 'study_history', 'study_mistakes', 'exams',
+];
+
+/**
+ * Delete the signed-in account, its data, and its login.
+ *
+ * ORDER MATTERS, and the old code had it backwards. It deleted the Firestore
+ * profile first and then the auth account — so when the auth step failed with
+ * `requires-recent-login` (which it does for anyone signed in more than a few
+ * minutes, i.e. nearly everyone), the profile was already gone and the person was
+ * left able to log in to an account with no data and no way to finish deleting.
+ *
+ * So: re-authenticate FIRST, and only start deleting once we know the last step
+ * can succeed.
+ *
+ * @param password  Required for accounts created with an email and password.
+ *                  Google and GitHub accounts re-authenticate with a popup.
+ */
+export const deleteMyAccount = async (password?: string): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('You are not signed in.');
+
+  // 1. Prove it is really you, before anything is destroyed.
+  const providers = user.providerData.map((p) => p.providerId);
+  if (providers.includes('password')) {
+    if (!password) {
+      const err: any = new Error('Enter your password to confirm.');
+      err.code = 'studyquest/password-required';
+      throw err;
+    }
+    const cred = EmailAuthProvider.credential(user.email || '', password);
+    await reauthenticateWithCredential(user, cred);
+  } else if (providers.includes('google.com')) {
+    await reauthenticateWithPopup(user, googleProvider);
+  } else if (providers.includes('github.com')) {
+    await reauthenticateWithPopup(user, new GithubAuthProvider());
+  }
+  // A phone-only account cannot be re-authenticated without another SMS round
+  // trip; deleteUser below will report requires-recent-login if it needs to.
+
+  // 2. The data. Done while still signed in, because the rules check the uid.
+  for (const name of USER_OWNED_COLLECTIONS) {
+    try {
+      const snap = await getDocs(query(collection(db, name), where('userId', '==', user.uid)));
+      await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+    } catch (err) {
+      // One collection refusing must not strand the account half-deleted, and
+      // the profile and login below matter more than a leftover session row.
+      console.warn(`[delete] could not clear ${name}:`, err);
+    }
+  }
+
+  // 3. The profile, then the login itself.
+  await deleteDoc(doc(db, 'users', user.uid));
+  await deleteUser(user);
 };
 
 export const resetPassword = async (email: string) => {

@@ -10,7 +10,7 @@
     "lint": "eslint src",
     "preview": "vite preview",
     "start": "cross-env NODE_ENV=production tsx server.ts",
-    "test": "vitest run tests/progress.test.ts tests/gameModes.test.ts tests/bosses.test.ts tests/authErrors.test.ts tests/mistakes.test.ts tests/rules-structure.test.ts",
+    "test": "vitest run --exclude tests/rules.test.ts --exclude \"**/node_modules/**\" --exclude \"**/dist/**\"",
     "test:rules": "firebase emulators:exec --only firestore \"vitest run tests/rules.test.ts\"",
     "typecheck": "tsc --noEmit"
   },

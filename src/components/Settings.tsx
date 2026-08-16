@@ -17,7 +17,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { useUserStore } from '../store/useUserStore';
-import { auth, db, doc, updateDoc, deleteDoc, resetPassword } from '../lib/firebase';
+import { auth, db, doc, updateDoc, deleteDoc, resetPassword, deleteMyAccount } from '../lib/firebase';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { TokenUsageBar } from './TokenUsageBar';
@@ -31,12 +31,14 @@ export const Settings: React.FC = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deletePassword, setDeletePassword] = useState('');
   const [displayName, setDisplayName] = useState(userData?.displayName || '');
   const [notifications, setNotifications] = useState(userData?.notifications ?? true);
   const [studyReminders, setStudyReminders] = useState(userData?.studyReminders ?? true);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<SettingsTab>('notifications');
   const [resetEmailSent, setResetEmailSent] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
 
   const handleSaveProfile = async () => {
     if (!user || isGuest) return;
@@ -77,13 +79,33 @@ export const Settings: React.FC = () => {
   };
 
   const handleChangePassword = async () => {
-    if (!user?.email) return;
+    if (!user?.email) {
+      setResetError('This account has no email address to send a reset link to.');
+      return;
+    }
+    // A Google account has no password, so there is nothing for Firebase to
+    // reset and it sends nothing. Saying so beats a confirmation that never
+    // turns into an email.
+    if (!needsPassword) {
+      setResetError('You sign in with Google, so there is no StudyQuest password to reset. Change it in your Google account.');
+      return;
+    }
+    setResetError(null);
     try {
       await resetPassword(user.email);
       setResetEmailSent(true);
-      setTimeout(() => setResetEmailSent(false), 5000);
-    } catch (error) {
-      console.error('Error sending password reset email:', error);
+      setTimeout(() => setResetEmailSent(false), 8000);
+    } catch (error: any) {
+      // This used to be swallowed into console.error, so a failed send looked
+      // exactly like a successful one: nothing happened either way.
+      console.error('Error sending password reset email:', error?.code, error);
+      setResetError(
+        error?.code === 'auth/too-many-requests'
+          ? 'Too many attempts. Wait a few minutes and try again.'
+          : error?.code === 'auth/network-request-failed'
+          ? 'No connection. Check your internet and try again.'
+          : 'Could not send the reset email. Try again shortly.'
+      );
     }
   };
 
@@ -93,25 +115,48 @@ export const Settings: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'brainify-my-data.json';
+    a.download = 'studyquest-my-data.json';
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  /** True when this account signs in with an email and password, not Google. */
+  const needsPassword = (auth.currentUser?.providerData ?? []).some(
+    (p) => p.providerId === 'password'
+  );
 
   const handleDeleteAccount = async () => {
     if (!auth.currentUser) return;
     setIsDeleting(true);
     setDeleteError(null);
     try {
-      await deleteDoc(doc(db, 'users', auth.currentUser.uid));
-      await auth.currentUser.delete();
+      // Re-authenticates first, then clears the data, then the login. See
+      // deleteMyAccount — the old order deleted the profile before the login
+      // and stranded the account when the login step needed a fresh sign-in.
+      await deleteMyAccount(deletePassword);
       window.location.reload();
     } catch (error: any) {
-      console.error('Error deleting account:', error);
-      if (error.code === 'auth/requires-recent-login') {
-        setDeleteError('For security, please log out and log back in, then try again.');
-      } else {
-        setDeleteError('Something went wrong deleting your account. Please try again.');
+      console.error('Error deleting account:', error?.code, error);
+      switch (error?.code) {
+        case 'studyquest/password-required':
+          setDeleteError('Enter your password to confirm.');
+          break;
+        case 'auth/wrong-password':
+        case 'auth/invalid-credential':
+          setDeleteError('That password is not right.');
+          break;
+        case 'auth/requires-recent-login':
+          setDeleteError('For security, log out and back in, then try again.');
+          break;
+        case 'auth/popup-closed-by-user':
+        case 'auth/cancelled-popup-request':
+          setDeleteError('Confirmation was cancelled — nothing has been deleted.');
+          break;
+        case 'permission-denied':
+          setDeleteError('The server refused the deletion. Tell us and we will sort it.');
+          break;
+        default:
+          setDeleteError(error?.message || 'Something went wrong deleting your account.');
       }
     } finally {
       setIsDeleting(false);
@@ -310,6 +355,17 @@ export const Settings: React.FC = () => {
               </button>
             </div>
 
+            {resetError && (
+              <p className="text-xs text-red-400 -mt-2">{resetError}</p>
+            )}
+            {resetEmailSent && (
+              // Named because "Email Sent!" on a button is what people believed
+              // last time, and then went looking in the wrong folder.
+              <p className="text-xs text-text-dim -mt-2">
+                Sent to {user?.email}. It can take a minute, and it often lands in spam.
+              </p>
+            )}
+
             <div className="flex items-center justify-between py-2 border-t border-border-main pt-4">
               <div className="space-y-0.5">
                 <div className="text-sm font-bold text-text-main">Export My Data</div>
@@ -408,7 +464,26 @@ export const Settings: React.FC = () => {
                   <Trash2 size={32} />
                 </div>
                 <h2 className="text-2xl font-black text-text-main tracking-tight">Delete Account?</h2>
-                <p className="text-text-dim">This permanently deletes your account and all study data. This cannot be undone.</p>
+                <p className="text-text-dim">This permanently deletes your account, your study sessions, your saved mistakes and your history. This cannot be undone.</p>
+
+                {/* Asked for BEFORE anything is deleted. Firebase requires a
+                    recent sign-in to delete a login, and the old flow only found
+                    that out after it had already deleted the profile. */}
+                {needsPassword && (
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    placeholder="Confirm your password"
+                    disabled={isDeleting}
+                    className="w-full px-4 py-3 rounded-xl bg-glass-bg border border-border-main text-text-main placeholder:text-text-dim/60 focus:outline-none focus:border-red-500/50 transition-all"
+                  />
+                )}
+
+                {deleteError && (
+                  <p className="text-sm text-red-400 w-full text-left">{deleteError}</p>
+                )}
 
                 <div className="flex gap-3 w-full pt-4">
                   <button
@@ -420,7 +495,7 @@ export const Settings: React.FC = () => {
                   </button>
                   <button
                     onClick={handleDeleteAccount}
-                    disabled={isDeleting}
+                    disabled={isDeleting || (needsPassword && !deletePassword)}
                     className="flex-1 py-3 rounded-xl bg-red-500 text-white font-bold hover:bg-red-600 transition-all shadow-lg shadow-red-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
                   >
                     {isDeleting ? (

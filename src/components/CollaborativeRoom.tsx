@@ -5,7 +5,7 @@ import {
   Video, Mic, MicOff, VideoOff, Settings, X, 
   Sparkles, Brain, Zap, Target, Award, Calendar, 
   ChevronRight, Activity, Plus, Search, MoreVertical,
-  Clock, Trash2, Edit2, Grid, List,
+  Clock, Trash2, Edit2, Grid, List, ChevronDown,
   Filter, Star, Download, ExternalLink, User, Bot
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
@@ -40,9 +40,33 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(true);
   const [sharedNotes, setSharedNotes] = useState('');
+  /*
+    Chat can be put away.
+
+    On a phone the chat panel was `absolute bottom-0 h-96` with no control of any
+    kind, so it sat permanently over the shared notes — the thing you joined the
+    room to write in. Minimised, it becomes a bar with an unread count.
+  */
+  const [chatMinimised, setChatMinimised] = useState(false);
+  const [unread, setUnread] = useState(0);
+  /** Who else is typing right now — from GhostChat. */
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
 
   const socketRef = useRef<Socket | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const chatMinimisedRef = useRef(false);
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => { chatMinimisedRef.current = chatMinimised; }, [chatMinimised]);
+
+  /** Tell the room you are typing, and stop saying so a second after you stop. */
+  const signalTyping = () => {
+    socketRef.current?.emit('typing', { roomId: activeRoomId, userName, typing: true });
+    if (typingTimer.current) clearTimeout(typingTimer.current);
+    typingTimer.current = setTimeout(() => {
+      socketRef.current?.emit('typing', { roomId: activeRoomId, userName, typing: false });
+    }, 1200);
+  };
 
   const handleCreateRoom = () => setActiveRoomId(generateRoomId());
 
@@ -87,8 +111,19 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
       setUsers(prev => prev.filter(u => u.id !== userId));
     });
 
+    socketRef.current.on('typing', ({ userName: who, typing }: { userName: string; typing: boolean }) => {
+      setTypingUsers((prev) => {
+        const without = prev.filter((n) => n !== who);
+        return typing ? [...without, who] : without;
+      });
+    });
+
     socketRef.current.on('receive-message', (msg: ChatMessage) => {
       setMessages(prev => [...prev, { ...msg, isMe: false }]);
+      // Read through a ref, not the state value — the handler is bound once and
+      // would otherwise be counting against whatever `chatMinimised` was at the
+      // moment the room was joined.
+      if (chatMinimisedRef.current) setUnread((n) => n + 1);
     });
 
     socketRef.current.on('room-users', (roomUsers: { id: string, name: string }[]) => {
@@ -362,11 +397,34 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
           </div>
         </div>
 
-        {/* Chat Overlay (Mobile Toggleable or Desktop Sidebar) */}
-        <div className="h-96 md:h-auto md:w-96 glass border-t md:border-t-0 md:border-l border-white/10 flex flex-col absolute bottom-0 right-0 md:relative md:inset-auto shadow-2xl">
+        {/* Chat. Minimised it is a bar; open it is the panel it always was. */}
+        {chatMinimised ? (
+          <button
+            onClick={() => { setChatMinimised(false); setUnread(0); }}
+            className="absolute bottom-0 right-0 left-0 md:left-auto md:w-96 glass-panel border-t md:border-l border-white/10 p-4 flex items-center gap-2 text-white hover:bg-white/5 transition-all shadow-2xl"
+          >
+            <MessageSquare size={16} className="text-brand-purple" />
+            <span className="text-xs font-black uppercase tracking-widest">Live Chat</span>
+            {unread > 0 && (
+              <span className="ml-auto min-w-[1.5rem] px-2 py-0.5 rounded-full bg-brand-purple text-white text-[11px] font-black">
+                {unread > 99 ? '99+' : unread}
+              </span>
+            )}
+            <ChevronRight size={16} className={unread > 0 ? 'rotate-[-90deg]' : 'ml-auto rotate-[-90deg]'} />
+          </button>
+        ) : (
+        <div className="h-[60vh] md:h-auto md:w-96 glass-panel border-t md:border-t-0 md:border-l border-white/10 flex flex-col absolute bottom-0 left-0 right-0 md:relative md:inset-auto shadow-2xl">
           <div className="p-4 border-b border-white/10 bg-white/5 flex items-center gap-2">
             <MessageSquare size={16} className="text-brand-purple" />
             <span className="text-xs font-black uppercase tracking-widest text-white">Live Chat</span>
+            <button
+              onClick={() => setChatMinimised(true)}
+              aria-label="Minimise chat"
+              title="Minimise chat"
+              className="ml-auto p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-all"
+            >
+              <ChevronDown size={16} />
+            </button>
           </div>
 
           <div 
@@ -400,11 +458,23 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
           </div>
 
           <div className="p-4 border-t border-white/10 bg-white/5">
+            {typingUsers.length > 0 && (
+              <div className="flex items-center gap-1.5 pb-2 text-[11px] text-white/40">
+                <span className="w-1 h-1 rounded-full bg-brand-purple animate-bounce [animation-delay:-0.3s]" />
+                <span className="w-1 h-1 rounded-full bg-brand-purple animate-bounce [animation-delay:-0.15s]" />
+                <span className="w-1 h-1 rounded-full bg-brand-purple animate-bounce" />
+                <span className="ml-1">
+                  {typingUsers.length === 1
+                    ? `${typingUsers[0]} is typing`
+                    : `${typingUsers.length} people are typing`}
+                </span>
+              </div>
+            )}
             <div className="relative">
-              <input 
-                type="text" 
+              <input
+                type="text"
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => { setInput(e.target.value); signalTyping(); }}
                 onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                 placeholder="Type a message..."
                 className="w-full bg-black/20 border border-white/5 rounded-xl py-3 pl-4 pr-12 text-sm focus:outline-none focus:border-brand-purple/50 transition-all text-white placeholder:text-white/10"
@@ -422,6 +492,7 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
             </div>
           </div>
         </div>
+        )}
       </div>
     </div>
   );
