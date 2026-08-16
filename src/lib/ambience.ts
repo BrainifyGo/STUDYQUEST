@@ -247,6 +247,30 @@ function buildLayer(ac: AudioContext, id: AmbienceId, out: GainNode): Layer {
 /** Everything currently playing. */
 const playing = new Map<AmbienceId, Layer>();
 
+/*
+  Who wants to know what is playing.
+
+  The audio engine is a module singleton, which is exactly why the sound keeps
+  going when the music panel unmounts. But that also means no component owns the
+  state, so anything that wants to draw a "now playing" bar has to be told.
+*/
+type Listener = () => void;
+const listeners = new Set<Listener>();
+
+export function onAmbienceChange(fn: Listener): () => void {
+  listeners.add(fn);
+  return () => { listeners.delete(fn); };
+}
+
+function announce(): void {
+  for (const fn of listeners) fn();
+}
+
+/** Which layers are on, for a "now playing" line. */
+export function activeAmbience(): AmbienceId[] {
+  return Array.from(playing.keys());
+}
+
 /** Start a layer, or adjust it if it is already running. Fades in, never clicks. */
 export function startAmbience(id: AmbienceId, volume: number): void {
   const ac = audioContext();
@@ -267,6 +291,7 @@ export function startAmbience(id: AmbienceId, volume: number): void {
   layer.gain.gain.setValueAtTime(0.0001, ac.currentTime);
   layer.gain.gain.setTargetAtTime(target, ac.currentTime, 0.25);
   playing.set(id, layer);
+  announce();
 }
 
 export function setAmbienceVolume(id: AmbienceId, volume: number): void {
@@ -279,6 +304,7 @@ export function stopAmbience(id: AmbienceId): void {
   const layer = playing.get(id);
   if (!layer || !ctx) return;
   playing.delete(id);
+  announce();
   layer.gain.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.15);
   // Torn down after the fade, so the last thing heard is silence rather than a cut.
   setTimeout(() => layer.stop(), 600);

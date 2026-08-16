@@ -4,7 +4,7 @@ import { Music, X, Play, Pause, Volume2, Headphones, Wind, Coffee, Trees, Sparkl
 import { cn } from '../lib/utils';
 import { toast } from 'sonner';
 import {
-  startAmbience, stopAmbience, setAmbienceVolume, stopAllAmbience,
+  startAmbience, stopAmbience, setAmbienceVolume,
   type AmbienceId,
 } from '../lib/ambience';
 import {
@@ -112,11 +112,15 @@ export default function StudyMusic({ onClose }: StudyMusicProps) {
     return () => window.removeEventListener('message', onMessage);
   }, []);
 
-  useEffect(() => {
-    // Leaving the panel stops the sound. A layer still playing after the player
-    // is closed has no control anywhere on screen.
-    return () => stopAllAmbience();
-  }, []);
+  /*
+    Closing the panel does NOT stop the sound.
+
+    The engines are module singletons, so audio survives this component being
+    unmounted — which is what lets your rain keep going when you close the player
+    or walk into a study room. The hazard that creates, audio with no control on
+    screen, is answered by <MusicBar />, which appears whenever something is
+    playing and the full player is not open.
+  */
 
   const toggleAmbient = (id: AmbienceId) => {
     const wasActive = activeAmbients[id].active;
@@ -139,8 +143,6 @@ export default function StudyMusic({ onClose }: StudyMusicProps) {
 
   const [activeTone, setActiveTone] = useState<FocusToneId | null>(null);
   const [toneVolume, setToneVolume] = useState(0.5);
-
-  useEffect(() => () => stopFocusTone(), []);
 
   const toggleTone = (id: FocusToneId) => {
     if (activeTone === id) {

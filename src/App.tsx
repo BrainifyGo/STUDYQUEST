@@ -27,6 +27,7 @@ import {
   Lightbulb,
   RotateCcw,
   Users,
+  UserPlus,
   BarChart3,
   FolderOpen,
   MessageSquareText,
@@ -104,6 +105,8 @@ import TimerEngine from './components/TimerEngine';
 import { MindMap } from './components/MindMap';
 const VoiceBuddy = lazy(() => import('./components/VoiceBuddy').then(m => ({ default: m.VoiceBuddy })));
 const StudyMusic = lazy(() => import('./components/StudyMusic'));
+const MusicBar = lazy(() => import('./components/MusicBar'));
+const FriendsView = lazy(() => import('./components/FriendsView'));
 import SnapInput from './components/SnapInput';
 import { GuestGuard } from './components/GuestGuard';
 const ExpandModal = lazy(() => import('./components/ExpandModal'));
@@ -127,6 +130,7 @@ import {
 import { getMonthlyLimit, getDailyLimit } from './lib/tokenService';
 import { limitAdvice } from './lib/tokenService';
 import { levelFromXP, levelProgress } from './lib/progress';
+import { publishProfile } from './lib/friends';
 import { describeAuthError } from './lib/authErrors';
 import { recordMistake, retireMistake, listMistakes, asQuiz, type Mistake } from './lib/mistakes';
 
@@ -277,6 +281,9 @@ export default function App() {
   // One source of truth for the sidebar level bar, which used to run its own
   // (wrong) sums. See src/lib/progress.ts.
   const sidebarProgress = levelProgress(userData?.xp || 0);
+
+  /** A study room is a screen of its own — see the note on the header. */
+  const inRoom = activeView === 'collab';
 
   /*
     Hide the header on the way down, bring it back on the way up.
@@ -543,6 +550,14 @@ export default function App() {
         }, (err) => {
           handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
         });
+
+        // Mirror the two searchable fields into public_profiles, so friends can
+        // find this account. Done on every sign-in rather than only at creation,
+        // so accounts that existed before friends did get one too.
+        publishProfile(
+          firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Student',
+          firebaseUser.email
+        );
 
         setAuthLoading(false);
         return () => unsubUser();
@@ -1909,7 +1924,7 @@ export default function App() {
       {/* --- Sidebar --- */}
       <AnimatePresence>
         {/* Backdrop — mobile only, tap anywhere outside to close sidebar */}
-        {sidebarOpen && (
+        {sidebarOpen && !inRoom && (
           <motion.div
             key="backdrop"
             initial={{ opacity: 0 }}
@@ -1919,7 +1934,7 @@ export default function App() {
             onClick={() => setSidebarOpen(false)}
           />
         )}
-        {sidebarOpen && (
+        {sidebarOpen && !inRoom && (
           <div className="overflow-hidden">
             <motion.aside 
               key="sidebar"
@@ -1966,6 +1981,15 @@ export default function App() {
                   label="Arcade"
                   active={activeView === 'arcade'}
                   onClick={() => setActiveView('arcade')}
+                  collapsed={sidebarCollapsed}
+                />
+              </GuestGuard>
+              <GuestGuard featureName="Friends">
+                <SidebarItem
+                  icon={<UserPlus size={18} />}
+                  label="Friends"
+                  active={activeView === 'friends'}
+                  onClick={() => setActiveView('friends')}
                   collapsed={sidebarCollapsed}
                 />
               </GuestGuard>
@@ -2189,10 +2213,21 @@ export default function App() {
       <main
         className={cn(
           "flex-1 flex flex-col h-screen overflow-hidden relative transition-all duration-300 scrollbar-hide max-w-full",
-          sidebarOpen ? (sidebarCollapsed ? "md:pl-20" : "md:pl-64") : "pl-0"
+          sidebarOpen && !inRoom ? (sidebarCollapsed ? "md:pl-20" : "md:pl-64") : "pl-0"
         )}
       >
         {/* Sticky Header */}
+        {/*
+          NO APP HEADER IN A ROOM.
+
+          The room draws its own header, its own participant list and its own
+          close button. With the app header on top as well, the two collided —
+          "Room: W7TG0A" printed straight through the StudyQuest wordmark, and
+          the music panel floated over the shared quiz. Stacking them and hoping
+          z-index sorts it out is what produced that; a room is a screen, so it
+          gets the screen.
+        */}
+        {!inRoom && (
         <header
           className={cn(
             "sticky top-0 z-40 glass-panel border-b border-border-main px-3 md:px-6 py-2",
@@ -2364,6 +2399,7 @@ export default function App() {
             </button>
           </div>
         </header>
+        )}
 
         <div
           ref={scrollAreaRef}
@@ -2388,6 +2424,10 @@ export default function App() {
             <GameMode
               onBack={() => setActiveView('dashboard')}
               onAwardXP={awardArcadeXP}
+            />
+          ) : activeView === 'friends' ? (
+            <FriendsView
+              onStartRoom={(code) => { setCollabRoomId(code); setActiveView('collab'); }}
             />
           ) : activeView === 'mistakes' ? (
             <MistakesView
@@ -3202,12 +3242,26 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Study Music Overlay */}
+      {/*
+        Study Music.
+
+        In a room the full panel is hidden — it used to float over the shared
+        quiz — but the SOUND carries on, because the audio engines live outside
+        React. The bar below is the control that goes with it.
+      */}
       <AnimatePresence>
-        {showMusic && (
+        {showMusic && !inRoom && (
           <StudyMusic onClose={() => setShowMusic(false)} />
         )}
       </AnimatePresence>
+
+      {/* Whatever is playing, whenever the full player is not on screen. */}
+      {(!showMusic || inRoom) && (
+        <MusicBar
+          onExpand={() => { setActiveView('dashboard'); setShowMusic(true); }}
+          raised={!inRoom}
+        />
+      )}
 
       {/* Voice Buddy Overlay */}
       <AnimatePresence>

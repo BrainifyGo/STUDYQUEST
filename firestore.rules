@@ -304,5 +304,102 @@ service cloud.firestore {
       allow update: if isAuthenticated() && resource.data.user_id == request.auth.uid && isValidStudyHistory(request.resource.data) && request.resource.data.user_id == resource.data.user_id;
       allow delete: if isAuthenticated() && (resource.data.user_id == request.auth.uid || isAdmin());
     }
+
+    /* =====================================================================
+       FRIENDS
+
+       Two collections, and the whole thing turns on one rule: you may create a
+       request FROM yourself, and you may delete one addressed TO you. Nobody can
+       write a request on someone else's behalf, and nobody can put themselves in
+       your friends list.
+       ===================================================================== */
+
+    match /friend_requests/{reqId} {
+      // Visible to the two people involved and nobody else. A request is a small
+      // fact about a child's social life; it is not public.
+      allow read: if isAuthenticated()
+                  && (resource.data.fromUid == request.auth.uid
+                      || resource.data.toUid == request.auth.uid);
+
+      // You may only send a request AS yourself. The document id is pinned to
+      // "{from}__{to}" as well, so one person cannot flood another with requests
+      // under different ids — a second attempt overwrites the first.
+      allow create: if isAuthenticated()
+                    && request.resource.data.fromUid == request.auth.uid
+                    && request.resource.data.toUid is string
+                    && request.resource.data.toUid != request.auth.uid
+                    && reqId == request.auth.uid + '__' + request.resource.data.toUid
+                    && request.resource.data.fromName is string
+                    && request.resource.data.fromName.size() <= 80;
+
+      // A request is never edited. It is accepted or it is deleted.
+      allow update: if false;
+
+      // The recipient declines; the sender withdraws.
+      allow delete: if isAuthenticated()
+                    && (resource.data.toUid == request.auth.uid
+                        || resource.data.fromUid == request.auth.uid);
+    }
+
+    match /friendships/{pairId} {
+      allow read: if isAuthenticated() && request.auth.uid in resource.data.uids;
+
+      /*
+        Creating a friendship requires a real request addressed to you.
+
+        Without the exists() check, anyone could write a friendship document
+        naming themselves and any uid they liked, and appear in that person's
+        friends list uninvited. The check is the entire point of the collection:
+        consent has to be proved, not asserted.
+      */
+      allow create: if isAuthenticated()
+                    && request.auth.uid in request.resource.data.uids
+                    && request.resource.data.uids.size() == 2
+                    && pairId == request.resource.data.uids[0] + '__' + request.resource.data.uids[1]
+                    && request.resource.data.uids[0] < request.resource.data.uids[1]
+                    && exists(/databases/$(database)/documents/friend_requests/$(
+                         (request.resource.data.uids[0] == request.auth.uid
+                            ? request.resource.data.uids[1]
+                            : request.resource.data.uids[0])
+                         + '__' + request.auth.uid));
+
+      // Nothing about an existing friendship may be rewritten — in particular
+      // not `uids`, which would let one side drag a third person in.
+      allow update: if false;
+
+      // Either side may end it, and it ends for both. That is what unfriending
+      // means, and a rule that let only one side leave would be a bug.
+      allow delete: if isAuthenticated() && request.auth.uid in resource.data.uids;
+    }
+
+    /* =====================================================================
+       PUBLIC PROFILES
+
+       Searching for a friend means reading a stranger's document, and the rule
+       on /users correctly refuses that — a user document holds their email,
+       their plan, their token spend and their whole progress. Relaxing it to
+       make search work would have handed every signed-in account the lot.
+
+       So the searchable fields live here instead, and nothing else does: a
+       display name, a username, and the uid. Written only by its owner.
+       ===================================================================== */
+    match /public_profiles/{userId} {
+      allow read: if isAuthenticated();
+
+      allow create, update: if isAuthenticated()
+                            && request.auth.uid == userId
+                            && request.resource.data.uid == userId
+                            && request.resource.data.keys().hasOnly(['uid', 'username', 'displayName', 'emailLower'])
+                            && request.resource.data.displayName is string
+                            && request.resource.data.displayName.size() <= 60
+                            && (!('username' in request.resource.data)
+                                || (request.resource.data.username is string
+                                    && request.resource.data.username.size() <= 32))
+                            && (!('emailLower' in request.resource.data)
+                                || (request.resource.data.emailLower is string
+                                    && request.resource.data.emailLower.size() <= 256));
+
+      allow delete: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+    }
   }
 }

@@ -135,3 +135,63 @@ describe('every collection', () => {
     expect(rules).not.toMatch(/allow write:\s*if true/);
   });
 });
+
+describe('the friends blocks', () => {
+  const requests = block('friend_requests');
+  const friendships = block('friendships');
+  const profiles = block('public_profiles');
+
+  it('only lets you send a request AS yourself', () => {
+    // Without this, anyone could write a request claiming to be from someone
+    // else — and the recipient would accept it believing it came from a friend.
+    expect(requests).toMatch(/fromUid == request\.auth\.uid/);
+  });
+
+  it('pins the request id to the sender and recipient', () => {
+    // Free-form ids would let one person write unlimited requests to another
+    // under different ids. Pinned, a second attempt overwrites the first.
+    expect(requests).toMatch(/reqId == request\.auth\.uid \+ '__' \+ request\.resource\.data\.toUid/);
+  });
+
+  it('never lets a request be edited', () => {
+    expect(requests).toMatch(/allow update: if false/);
+  });
+
+  it('lets both sides delete a request — decline and withdraw', () => {
+    expect(requests).toMatch(/allow delete[\s\S]*toUid == request\.auth\.uid/);
+    expect(requests).toMatch(/allow delete[\s\S]*fromUid == request\.auth\.uid/);
+  });
+
+  it('requires a real request before a friendship can exist', () => {
+    // THE RULE THE WHOLE FEATURE RESTS ON. Without the exists() check anyone
+    // could write a friendship naming themselves and any uid they liked, and
+    // appear in that person's friends list uninvited.
+    expect(friendships).toMatch(/exists\(\/databases\/\$\(database\)\/documents\/friend_requests\//);
+  });
+
+  it('will not let an existing friendship be rewritten', () => {
+    // In particular not `uids`, which would drag a third person in.
+    expect(friendships).toMatch(/allow update: if false/);
+  });
+
+  it('only exposes a friendship to the two people in it', () => {
+    expect(friendships).toMatch(/allow read: if isAuthenticated\(\) && request\.auth\.uid in resource\.data\.uids/);
+  });
+
+  it('keeps public profiles to the searchable fields only', () => {
+    // hasOnly is the guard that stops a token count or a plan flag being
+    // mirrored into the one collection every signed-in user can read.
+    expect(profiles).toMatch(/hasOnly\(\['uid', 'username', 'displayName', 'emailLower'\]\)/);
+  });
+
+  it('only lets you write your own public profile', () => {
+    expect(profiles).toMatch(/allow create, update: if isAuthenticated\(\)\s*&& request\.auth\.uid == userId/);
+  });
+
+  it('does NOT open the users collection up for searching', () => {
+    // The tempting shortcut was to relax /users so friend search could read it.
+    // That would have exposed email, plan, token spend and progress to everyone.
+    const users = block('users');
+    expect(users).not.toMatch(/allow read: if isAuthenticated\(\);/);
+  });
+});

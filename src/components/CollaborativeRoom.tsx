@@ -82,6 +82,16 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
     setActiveRoomId(id);
   };
 
+  /*
+    The room info panel is a slide-over on a phone.
+
+    Stacked with `flex-col`, the participants panel sat above the workspace and
+    took half the screen — so on a phone you opened a study room and saw a room
+    code and a list of names, with the shared notes below the fold. It is a
+    drawer on small screens now, and the column it always was on desktop.
+  */
+  const [showInfo, setShowInfo] = useState(false);
+
   const [roomQuiz, setRoomQuiz] = useState<QuizQuestion[]>([]);
   const [isMakingQuiz, setIsMakingQuiz] = useState(false);
 
@@ -282,9 +292,20 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col md:flex-row bg-bg-dark overflow-hidden">
+    <div className="fixed inset-0 z-[100] flex flex-row bg-bg-dark overflow-hidden">
+      {/* Drawer backdrop, phones only. */}
+      {showInfo && (
+        <div
+          onClick={() => setShowInfo(false)}
+          className="fixed inset-0 bg-black/60 z-[15] md:hidden"
+          aria-hidden="true"
+        />
+      )}
       {/* Sidebar - Users & Info */}
-      <div className="w-full md:w-80 glass border-r border-white/10 flex flex-col">
+      <div className={`glass-panel border-r border-white/10 flex-col w-72 md:w-80 shrink-0
+        ${showInfo
+          ? 'flex fixed inset-y-0 left-0 z-20 shadow-2xl'
+          : 'hidden md:flex'}`}>
         <div className="p-6 border-b border-white/10 flex items-center justify-between bg-white/5">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-brand-purple/20 border border-brand-purple/30 flex items-center justify-center">
@@ -307,13 +328,23 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
               </span>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close study room and return to dashboard"
-            className="p-2 rounded-xl hover:bg-white/10 text-white/50 hover:text-white transition-all"
-          >
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-1">
+            {/* Closes the drawer on a phone; on desktop the panel is permanent. */}
+            <button
+              onClick={() => setShowInfo(false)}
+              aria-label="Close room details"
+              className="p-2 rounded-xl hover:bg-white/10 text-white/50 hover:text-white transition-all md:hidden"
+            >
+              <ChevronDown size={20} className="rotate-90" />
+            </button>
+            <button
+              onClick={onClose}
+              aria-label="Close study room and return to dashboard"
+              className="p-2 rounded-xl hover:bg-white/10 text-white/50 hover:text-white transition-all"
+            >
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-8 scrollbar-hide">
@@ -380,10 +411,40 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
       </div>
 
       {/* Main Content - Collaborative Area */}
-      <div className="flex-1 flex flex-col relative">
+      <div className="flex-1 flex flex-col relative min-w-0">
+        {/*
+          Phone header. The room used to have no controls at all on a small
+          screen once the info panel was scrolled past — no room code, no
+          participant count, and no way out.
+        */}
+        <div className="md:hidden flex items-center gap-3 px-4 py-3 border-b border-white/10 bg-white/5 shrink-0"
+             style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.75rem)' }}>
+          <button
+            onClick={() => setShowInfo(true)}
+            aria-label="Room details and participants"
+            className="p-2 rounded-xl bg-white/5 border border-white/10 text-white"
+          >
+            <Users size={16} />
+          </button>
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-white/40">Room</p>
+            <p className="text-sm font-mono font-bold text-white truncate">{activeRoomId}</p>
+          </div>
+          <span className="text-[10px] font-bold text-white/40 shrink-0">
+            {users.length} online
+          </span>
+          <button
+            onClick={onClose}
+            aria-label="Leave the room"
+            className="p-2 rounded-xl text-white/50 hover:text-white"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
         {/* Collaborative Canvas / Study Material */}
-        <div className="flex-1 p-8 overflow-y-auto scrollbar-hide">
-          <div className="max-w-4xl mx-auto space-y-12">
+        <div className="flex-1 p-4 sm:p-6 md:p-8 overflow-y-auto scrollbar-hide">
+          <div className="max-w-4xl mx-auto space-y-8 sm:space-y-12 pb-28 md:pb-8">
             <div className="text-center space-y-4">
               <motion.div 
                 initial={{ scale: 0.9, opacity: 0 }}
@@ -393,15 +454,15 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
                 <Sparkles size={14} fill="currentColor" />
                 Live Collaboration
               </motion.div>
-              <h2 className="text-4xl font-black text-white tracking-tight">Shared Study Space</h2>
+              <h2 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-tight">Shared Study Space</h2>
               <p className="text-white/40 text-sm max-w-xl mx-auto">
                 Work together on flashcards, summaries, and quizzes in real-time. Changes are synced instantly for everyone.
               </p>
             </div>
 
             {/* Collaborative Content Area */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="glass p-8 rounded-[2.5rem] border border-white/10 space-y-4 min-h-[400px] flex flex-col">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-8">
+              <div className="glass p-5 sm:p-8 rounded-3xl sm:rounded-[2.5rem] border border-white/10 space-y-4 min-h-[280px] sm:min-h-[400px] flex flex-col">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-2xl bg-white/5 flex items-center justify-center text-white/40 shrink-0">
                     <Edit2 size={18} />
@@ -419,7 +480,7 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
                 />
               </div>
 
-              <div className="glass p-8 rounded-[2.5rem] border border-white/10 space-y-6 min-h-[400px] flex flex-col items-center justify-center text-center">
+              <div className="glass p-5 sm:p-8 rounded-3xl sm:rounded-[2.5rem] border border-white/10 space-y-5 min-h-[280px] sm:min-h-[400px] flex flex-col items-center justify-center text-center">
                 <div className="w-20 h-20 rounded-[2rem] bg-white/5 flex items-center justify-center text-white/10">
                   <Brain size={40} />
                 </div>

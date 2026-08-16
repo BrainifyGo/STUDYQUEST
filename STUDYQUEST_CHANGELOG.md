@@ -841,3 +841,132 @@ leaving both sitting there.
 |---|---|
 | Reminders that send a notification and an email | Still blocked on a decision, not on code. There is no Blaze plan, so no Cloud Functions; the Render service is the only place a scheduled job could run, and Render's free tier sleeps. Needs Ola and Daniel to pick: pay for one of the two, or accept in-app reminders only. |
 | Lo-Fi and Classical tracks | Still YouTube, and still subject to the same failures. The player names the cause now. Making these generated is not realistic — nobody wants synthesised lo-fi. |
+
+---
+
+## [2026-08-16] — Friends, and the study room stops fighting the app
+
+**Editor:** Claude Code (Opus 5)
+
+---
+
+### The study room was fighting the app for the screen
+
+Ola sent a screenshot, and it showed the problem better than any description: **"Room: W7TG0A"
+printed straight through the StudyQuest wordmark**, the app's icon rail down the left of the room's
+own participant panel, and the music player floating over the Shared Quiz card.
+
+The cause is that the room was built as an overlay — `fixed inset-0 z-[100]` — laid on top of a
+running app that still had a header, a sidebar and a music panel of its own, each with its own
+z-index. Stacking two full interfaces and hoping the z-indexes sort it out is what produced that
+picture, and no amount of adjusting the numbers makes it a good layout.
+
+**A room is a screen, so it now gets the screen.** Inside a room the app header, the app sidebar and
+the full music panel are not rendered at all. The room draws its own header, its own participant
+list and its own way out. Nothing to collide with.
+
+### The music keeps playing
+
+This is the half of "everything collapses" that matters: collapsing must not mean stopping.
+
+The audio engines are module singletons, so sound already survived the panel unmounting — except the
+panel was killing it on the way out with a `stopAllAmbience` in its cleanup. That is gone. Closing the
+player, or walking into a study room, now leaves your rain running.
+
+Which creates the hazard that cleanup existed to prevent: audio playing with no control anywhere on
+screen. So **`MusicBar`** — a slim bar showing what is playing, with a control to expand the player
+and one to stop everything. It appears only when something is playing *and* the full panel is closed,
+so it is never a second copy of a panel already open.
+
+It replaces `MusicMiniPlayer.tsx`, which read from a `musicPlayerState` exported by
+`pages/MusicPage.tsx`. Neither was imported by anything else in the app — a dead pair, wired to an
+audio system that no longer exists. Both deleted.
+
+### The room on a phone
+
+`flex-col` on small screens stacked the participants panel **above** the workspace, so opening a
+study room on a phone showed a room code and a list of names, with the shared notes below the fold.
+
+The info panel is a slide-over drawer on phones now and the column it always was on desktop. The
+workspace gets its own compact header — room code, how many people are online, a button for the
+drawer, and a way out — because once you scrolled past the old stacked panel there were no controls
+at all. Padding, headings and card heights all scale down rather than being desktop sizes squeezed
+into 390 pixels.
+
+### Friends
+
+Ported from GhostChat as a **design**, not as code: GhostChat is Supabase with SQL row-level security
+and `SECURITY DEFINER` functions; this is Firestore. Two decisions carried over, and both are load
+bearing:
+
+**A request is not a friendship.** Adding someone creates a pending request they have to accept.
+Anything else lets a stranger put themselves in a child's friends list.
+
+**A friendship is one document with a deducible id** — the two uids sorted and joined — rather than a
+row each. `areFriends(a, b)` is one `get` with no query and no index, and two people cannot end up
+half-friends because one of a pair of writes failed.
+
+**The rules are the feature.** In particular:
+
+    allow create: if ... && exists(/databases/$(database)/documents/friend_requests/$(...))
+
+Without that `exists()` check, anyone could write a friendship document naming themselves and any uid
+they liked, and appear in that person's list uninvited. Consent has to be *proved*, not asserted.
+Requests can only be created with `fromUid == request.auth.uid`, their document id is pinned to
+`{from}__{to}` so one person cannot flood another under many ids, and `allow update: if false` on
+both collections — a friendship is made or ended, never edited.
+
+**Search needed a new collection, not a relaxed rule.** Finding a friend means reading a stranger's
+document, and the rule on `/users` correctly refuses that. The tempting shortcut — loosening `/users`
+so search works — would have handed every signed-in account everyone else's email, plan, token spend
+and full progress. Instead `public_profiles` holds a display name, a username and a lower-cased
+email, and `hasOnly` in the rule stops anything else being mirrored in. Profiles are published on
+every sign-in, so accounts that existed before friends did get one without doing anything.
+
+Search is by **exact** username or email, and the "not found" message is identical whether or not the
+account exists — a browsable directory of every child using the app is not something we are going to
+build, and neither is an oracle for checking who has signed up.
+
+From the friends list, **Study together** opens a room and copies the code to your clipboard, because
+the step everyone forgets is telling the other person. The room is where shared notes, the shared
+quiz and live chat already live, so studying with a friend is a room invite rather than a second
+parallel system.
+
+### On the music, honestly
+
+The screenshot also caught the Lo-Fi track failing with *"This live stream recording is not
+available"* — which is the player's new error reporting doing its job, and confirms the track is
+dead. `jfKfPfyJRdk` is a 24/7 livestream, and an ended livestream has no recording to embed.
+
+I could not replace it with confidence. Every method tried from this machine — oEmbed, the innertube
+player API, and scraping the embed page for `lengthSeconds` — either reported all six videos fine or
+reported all six broken, including ones known to work. **I cannot verify YouTube embeds from here**,
+and picking a new id I cannot check is how the last three replacements were chosen. So it stays as it
+is, reporting the failure honestly, and the recommendation below stands instead.
+
+### Verification
+
+- **137 tests passing** (10 new); `tsc` clean; `npm run build` clean; rules compiled and deployed.
+- The new rules tests pin: a request can only be sent as yourself; the request id is pinned to the
+  pair; requests are never editable; both sides can delete one; **a friendship cannot exist without a
+  matching request**; a friendship is never rewritable; only the two people in it can read it;
+  `public_profiles` is restricted to four fields by `hasOnly`; and — the regression that would matter
+  most — **`/users` has not been opened up for searching**.
+
+### Files
+
+`src/lib/friends.ts` (new), `src/components/FriendsView.tsx` (new), `src/components/MusicBar.tsx`
+(new), `src/components/MusicMiniPlayer.tsx` (deleted), `src/pages/MusicPage.tsx` (deleted),
+`src/components/CollaborativeRoom.tsx`, `src/components/StudyMusic.tsx`, `src/lib/ambience.ts`,
+`src/lib/focusTones.ts`, `src/App.tsx`, `firestore.rules`, `tests/rules-structure.test.ts`.
+
+### What is NOT built yet
+
+**Voice and video calls.** This is the largest single piece left and it is genuinely large: WebRTC
+peer connections, an offer/answer/ICE signalling path through the Render socket server, device
+pickers, ringing, and a call UI. GhostChat has all of it (`services/webrtc`, `components/call`) but
+against Supabase realtime, so the signalling has to be rewritten for Socket.IO. It is a piece of work
+in its own right, not a follow-on from this.
+
+**Direct messages between friends.** Chat currently exists only inside a room. Worth doing after
+calls, or instead of them.

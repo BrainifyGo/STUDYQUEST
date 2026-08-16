@@ -94,6 +94,20 @@ export function toneGain(volume: number): number {
 let ctx: AudioContext | null = null;
 let current: { id: FocusToneId; stop: () => void; gain: GainNode } | null = null;
 
+// Same reason as in ambience.ts: the engine outlives the panel, so anything
+// drawing a "now playing" bar has to be told when this changes.
+type Listener = () => void;
+const listeners = new Set<Listener>();
+
+export function onFocusChange(fn: Listener): () => void {
+  listeners.add(fn);
+  return () => { listeners.delete(fn); };
+}
+
+function announce(): void {
+  for (const fn of listeners) fn();
+}
+
 function audioContext(): AudioContext {
   if (!ctx) {
     const Ctor = window.AudioContext || (window as any).webkitAudioContext;
@@ -179,6 +193,7 @@ export function playFocusTone(id: FocusToneId, volume: number): void {
 
   out.gain.setTargetAtTime(toneGain(volume), ac.currentTime, 0.4);
 
+  announceLater();
   current = {
     id,
     gain: out,
@@ -198,10 +213,17 @@ export function stopFocusTone(): void {
   if (!current || !ctx) return;
   const dying = current;
   current = null;
+  announce();
   dying.gain.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.2);
   setTimeout(() => dying.stop(), 800);
 }
 
 export function playingFocusTone(): FocusToneId | null {
   return current?.id ?? null;
+}
+
+// `current` is assigned after the graph is built, so listeners are told on the
+// next tick — otherwise they read the old value and the bar lags by one track.
+function announceLater(): void {
+  setTimeout(announce, 0);
 }
