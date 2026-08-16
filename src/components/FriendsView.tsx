@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import {
-  UserPlus, Users, Check, X, Search, Loader2, Sparkles, MessageSquare, AtSign,
+  UserPlus, Users, Check, X, Search, Loader2, Sparkles, MessageSquare, AtSign, Clock,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../store/useUserStore';
 import {
   findPeople, sendRequest, acceptRequest, declineRequest, removeFriend,
-  watchFriends, watchIncoming, claimUsername, usernameProblem, isUsernameFree,
+  watchFriends, watchIncoming, watchOutgoing, cancelRequest,
+  claimUsername, usernameProblem, isUsernameFree,
   myProfile, normaliseUsername,
   type Friend, type FriendRequest, type Person,
 } from '../lib/friends';
@@ -37,12 +38,12 @@ export const FriendsView: React.FC<FriendsViewProps> = ({ onStartRoom }) => {
 
   const [friends, setFriends] = useState<Friend[]>([]);
   const [incoming, setIncoming] = useState<FriendRequest[]>([]);
+  const [outgoing, setOutgoing] = useState<FriendRequest[]>([]);
   const [openChat, setOpenChat] = useState<Friend | null>(null);
 
   const [term, setTerm] = useState('');
   const [results, setResults] = useState<Person[] | null>(null);
   const [searching, setSearching] = useState(false);
-  const [sent, setSent] = useState<Set<string>>(new Set());
 
   const [username, setUsername] = useState('');
   const [claimed, setClaimed] = useState<string | undefined>();
@@ -51,8 +52,9 @@ export const FriendsView: React.FC<FriendsViewProps> = ({ onStartRoom }) => {
   useEffect(() => {
     const offF = watchFriends(setFriends);
     const offR = watchIncoming(setIncoming);
+    const offO = watchOutgoing(setOutgoing);
     myProfile().then((p) => { setClaimed(p?.username); setUsername(p?.username || ''); });
-    return () => { offF(); offR(); };
+    return () => { offF(); offR(); offO(); };
   }, []);
 
   const saveUsername = async () => {
@@ -91,7 +93,6 @@ export const FriendsView: React.FC<FriendsViewProps> = ({ onStartRoom }) => {
   const add = async (person: Person) => {
     try {
       const outcome = await sendRequest(person.uid, myName, claimed);
-      setSent((prev) => new Set(prev).add(person.uid));
       toast.success(outcome === 'accepted'
         ? `You and ${person.name} are now friends — they had already asked you.`
         : `Request sent to ${person.name}.`);
@@ -128,6 +129,10 @@ export const FriendsView: React.FC<FriendsViewProps> = ({ onStartRoom }) => {
   }
 
   const alreadyFriends = new Set(friends.map((f) => f.uid));
+  // Read from the live list rather than a local Set, so it survives a refresh
+  // and cannot disagree with what the server actually holds.
+  const pendingOut = new Set(outgoing.map((r) => r.toUid));
+  const pendingIn = new Set(incoming.map((r) => r.fromUid));
 
   return (
     <div className="max-w-3xl mx-auto space-y-8 py-6 sm:py-8">
@@ -220,8 +225,15 @@ export const FriendsView: React.FC<FriendsViewProps> = ({ onStartRoom }) => {
                   </div>
                   {alreadyFriends.has(p.uid) ? (
                     <span className="text-[11px] font-bold text-text-dim shrink-0">Already friends</span>
-                  ) : sent.has(p.uid) ? (
-                    <span className="text-[11px] font-bold text-brand-purple shrink-0">Request sent</span>
+                  ) : pendingOut.has(p.uid) ? (
+                    <button
+                      onClick={async () => { await cancelRequest(p.uid); toast.success('Request withdrawn.'); }}
+                      className="px-3 py-2 rounded-lg bg-glass-bg border border-border-main text-text-dim text-xs font-bold hover:text-red-400 hover:border-red-500/40 transition-all shrink-0"
+                    >
+                      Withdraw
+                    </button>
+                  ) : pendingIn.has(p.uid) ? (
+                    <span className="text-[11px] font-bold text-brand-purple shrink-0">Already asked you</span>
                   ) : (
                     <button
                       onClick={() => add(p)}
@@ -237,6 +249,38 @@ export const FriendsView: React.FC<FriendsViewProps> = ({ onStartRoom }) => {
           )
         )}
       </section>
+
+      {/*
+        Requests you have sent.
+
+        There was nowhere to see these. A request left the screen the moment it
+        was sent, with no way to tell whether it had arrived and no way to take
+        it back — `cancelRequest` existed in the library with nothing able to
+        call it.
+      */}
+      {outgoing.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-xs font-black uppercase tracking-widest text-text-dim">
+            Sent, waiting for a reply ({outgoing.length})
+          </h2>
+          {outgoing.map((req) => (
+            <div key={req.id} className="glass p-4 rounded-2xl border border-border-main flex items-center gap-3">
+              <span className="w-10 h-10 rounded-xl bg-glass-bg border border-border-main flex items-center justify-center shrink-0">
+                <Clock size={16} className="text-text-dim" />
+              </span>
+              <p className="flex-1 min-w-0 text-sm text-text-dim truncate">
+                Waiting for them to accept
+              </p>
+              <button
+                onClick={async () => { await cancelRequest(req.toUid); toast.success('Request withdrawn.'); }}
+                className="px-3 py-2 rounded-xl bg-glass-bg border border-border-main text-text-dim text-xs font-bold hover:text-red-400 hover:border-red-500/40 transition-all shrink-0"
+              >
+                Withdraw
+              </button>
+            </div>
+          ))}
+        </section>
+      )}
 
       {/* Waiting for you */}
       {incoming.length > 0 && (

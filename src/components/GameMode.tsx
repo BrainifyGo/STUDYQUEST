@@ -30,9 +30,28 @@ import { buildStudyPrompt, parseJsonReply, normaliseQuiz } from '../lib/studyPro
  * on the spot. Your mistakes are still the default pool whenever you have one.
  */
 
+export interface RoundSummary {
+  modeName: string;
+  score: number;
+  accuracy: number;
+  correct: number;
+  answered: number;
+}
+
 interface GameModeProps {
   onBack: () => void;
   onAwardXP: (xp: number) => void;
+  /**
+   * Questions to play, instead of your saved mistakes.
+   *
+   * Used by study rooms, where everyone plays the same deck — the room's quiz.
+   * Left out, the Arcade behaves exactly as before and drills your own mistakes.
+   */
+  questions?: QuizQuestion[];
+  /** Subject for the injected deck, so the right boss turns up. */
+  subject?: string;
+  /** Called once when a round ends, for anything that wants the result. */
+  onFinished?: (summary: RoundSummary) => void;
 }
 
 const shuffle = <T,>(a: T[]): T[] => {
@@ -44,7 +63,7 @@ const shuffle = <T,>(a: T[]): T[] => {
   return out;
 };
 
-export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
+export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP, questions, subject, onFinished }) => {
   const [mistakes, setMistakes] = useState<Mistake[] | null>(null);
   const [state, setState] = useState<ModeState | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
@@ -55,7 +74,19 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
     listMistakes().then(setMistakes);
   }, []);
 
-  const pool = useMemo(() => (mistakes ? asQuiz(mistakes) : null), [mistakes]);
+  /*
+    An injected deck wins.
+
+    A room round has to be the SAME questions for everyone, so when questions are
+    passed in they replace the mistakes pool rather than being added to it —
+    otherwise each player would be quizzed on their own mistakes and the scores
+    would not compare.
+  */
+  const injected = questions && questions.length > 0 ? questions : null;
+  const pool = useMemo(
+    () => injected ?? (mistakes ? asQuiz(mistakes) : null),
+    [injected, mistakes]
+  );
 
   /**
    * Which subject you get quizzed on most — that decides which boss turns up.
@@ -91,7 +122,16 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
     if (!state?.over || awarded) return;
     setAwarded(true);
     onAwardXP(state.xp + completionBonus(state));
-  }, [state?.over, awarded, state, onAwardXP]);
+    // Behind the same guard as the XP, so a re-render after the round cannot
+    // announce the score to the room twice.
+    onFinished?.({
+      modeName: state.mode.name,
+      score: state.score,
+      accuracy: accuracy(state),
+      correct: state.correct,
+      answered: state.answered,
+    });
+  }, [state?.over, awarded, state, onAwardXP, onFinished]);
 
   /** Start a round from any deck. Shared by the mistakes pool and Quick Play. */
   const startRound = useCallback((id: ModeId, deck: QuizQuestion[], subject: string) => {
@@ -108,8 +148,8 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
 
   const begin = useCallback((id: ModeId) => {
     if (!pool?.length) return;
-    startRound(id, pool, dominantSubject);
-  }, [pool, dominantSubject, startRound]);
+    startRound(id, pool, injected ? (subject || '') : dominantSubject);
+  }, [pool, dominantSubject, startRound, injected, subject]);
 
   /* ── Quick Play ───────────────────────────────────────
      Generated questions, for when there is nothing to drill yet. */
@@ -227,7 +267,9 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
         <p className="text-xs uppercase tracking-[0.18em] text-brand-purple font-bold mb-1">Arcade</p>
         <h1 className="text-3xl font-bold text-text-main mb-2">Four games. Same questions.</h1>
         <p className="text-text-dim mb-8">
-          {enough
+          {injected
+            ? `Everyone in the room plays the same ${pool.length} questions. Your score goes in the chat.`
+            : enough
             ? `Every mode quizzes you on the ${pool.length} question${pool.length === 1 ? '' : 's'} you have got wrong. Get one right and it leaves your list.`
             : 'Nothing saved to drill yet — so pick a topic below and it will make you a round.'}
         </p>
@@ -240,6 +282,7 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
           behind the thing they existed to make appealing, so a new account saw
           an empty room. Name a topic and it builds a round on the spot.
         */}
+        {!injected && (
         <div className="rounded-2xl border border-border-main bg-glass-bg p-6 mb-8">
           <div className="flex items-center gap-2 mb-2">
             <Sparkles className="w-4 h-4 text-brand-purple" />
@@ -257,6 +300,7 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
             className="w-full px-4 py-3 rounded-xl bg-black/20 border border-border-main text-text-main placeholder:text-text-dim/50 focus:outline-none focus:border-brand-purple/60 transition-all"
           />
         </div>
+        )}
 
         <div className="grid gap-4 sm:grid-cols-2">
           {MODE_ORDER.map((id) => {
@@ -265,7 +309,7 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
             const busy = isGenerating && pendingMode === id;
             // Saved mistakes are the better pool, so they win when there are
             // enough of them. Otherwise the topic box drives the round.
-            const useMistakes = enough;
+            const useMistakes = !!injected || enough;
             const ready = useMistakes || topic.trim().length >= 3;
 
             return (

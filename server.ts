@@ -414,9 +414,30 @@ async function startServer() {
     try {
       const { uid, isPro } = await verifyUserAndBudget(req.headers.authorization);
 
-      const analysisPrompt = prompt || (isPro
-        ? 'Analyse this image of study material in detail. Extract ALL text, equations, diagrams and key concepts visible in the image. Provide a comprehensive and structured summary of everything you can see.'
-        : 'Analyse this image and extract the key study content. Summarise the main points you can see in the image.');
+      /*
+        TRANSCRIBE, DO NOT SUMMARISE.
+
+        This used to ask for "a comprehensive and structured summary of
+        everything you can see" (and, on the free tier, just "summarise the main
+        points"). The result was then fed into the study-kit generator as the
+        source material — so a photo of a page of notes became a summary, and the
+        kit was a summary OF a summary. Details the student photographed
+        specifically because they mattered were gone before the kit was written,
+        which is exactly the "it doesn't read properly" report.
+
+        The summarising belongs in the kit step, which already does it properly
+        and knows which mode you asked for. This step's only job is to get the
+        page into text faithfully.
+      */
+      const analysisPrompt = prompt || `Transcribe this photo of study material into text.
+
+RULES:
+- Copy the text EXACTLY as written. Do not summarise, shorten, correct or explain it.
+- Keep the structure: headings stay headings, lists stay lists, and the order on the page is the order you write.
+- Write equations and formulae in plain readable notation, for example x^2 for x squared and (a+b)/c for a fraction.
+- Where a diagram, graph or table carries information, describe it in enough detail to work from${isPro ? ', including axis labels, units and any values you can read' : ''}. Do not describe decoration.
+- If part of the page is genuinely unreadable, write [unclear] there rather than guessing at it.
+- Output only the transcription. No preamble, no commentary, no "here is the text".`;
 
       const text = await analyzeImage(imageBase64, mimeType, analysisPrompt);
 

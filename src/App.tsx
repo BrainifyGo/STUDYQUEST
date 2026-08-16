@@ -35,6 +35,8 @@ import {
   Star,
   ArrowRight,
   Mic,
+  MoreHorizontal,
+  Bot,
   Music,
   Calendar,
   Trophy,
@@ -284,6 +286,30 @@ export default function App() {
 
   /** A study room is a screen of its own — see the note on the header. */
   const inRoom = activeView === 'collab';
+
+  /*
+    COLLAPSING IS A DESKTOP IDEA.
+
+    `sidebarCollapsed` was applied at every width, so on a phone the menu could
+    open as an 80px strip with every label hidden — which reads as "the sidebar
+    does not open". Entering a study room sets collapsed, so anyone who had
+    opened a room once got that strip from then on. `railCollapsed` is the value
+    the sidebar actually draws with, and it is false on mobile whatever the
+    stored preference says.
+  */
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const onChange = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  const railCollapsed = isDesktop && sidebarCollapsed;
+
+  /** The mobile tools sheet. Header-local, so it stays out of the store. */
+  const [showTools, setShowTools] = useState(false);
 
   /*
     Hide the header on the way down, bring it back on the way up.
@@ -1935,36 +1961,36 @@ export default function App() {
           />
         )}
         {sidebarOpen && !inRoom && (
-          <div className="overflow-hidden">
+          <div>
             <motion.aside 
               key="sidebar"
               initial={{ x: -300 }}
               animate={{ 
                 x: 0,
-                width: sidebarCollapsed ? 80 : 256
+                width: railCollapsed ? 80 : 256
               }}
               exit={{ x: -300 }}
               className={`glass-panel border-r border-border-main flex flex-col z-50 fixed h-full transition-all duration-300 overflow-hidden ${!sidebarOpen ? 'border-r-0' : ''}`}
             >
             <div className="p-6 flex items-center gap-2">
               <button 
-                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                onClick={() => setSidebarCollapsed(!railCollapsed)}
                 className="p-2 hover:bg-glass-bg rounded-lg text-text-muted hidden md:flex ml-auto"
-                aria-label={sidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
-                title={sidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+                aria-label={railCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+                title={railCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
               >
-                <ChevronRight size={20} className={sidebarCollapsed ? "" : "rotate-180"} />
+                <ChevronRight size={20} className={railCollapsed ? "" : "rotate-180"} />
               </button>
             </div>
 
             <nav className="flex-1 px-4 space-y-2 overflow-y-auto py-4 scrollbar-hide">
-              {!sidebarCollapsed && <div className="text-[10px] font-bold text-text-dim uppercase tracking-[0.2em] mb-4 px-3">Main</div>}
+              {!railCollapsed && <div className="text-[10px] font-bold text-text-dim uppercase tracking-[0.2em] mb-4 px-3">Main</div>}
               <SidebarItem 
                 icon={<Layout size={18} />} 
                 label="Dashboard" 
                 active={activeView === 'dashboard'} 
                 onClick={() => setActiveView('dashboard')}
-                collapsed={sidebarCollapsed}
+                collapsed={railCollapsed}
               />
               <GuestGuard featureName="Library">
                 <SidebarItem
@@ -1972,7 +1998,7 @@ export default function App() {
                   label="Library"
                   active={activeView === 'library'}
                   onClick={() => setActiveView('library')}
-                  collapsed={sidebarCollapsed}
+                  collapsed={railCollapsed}
                 />
               </GuestGuard>
               <GuestGuard featureName="Arcade">
@@ -1981,7 +2007,7 @@ export default function App() {
                   label="Arcade"
                   active={activeView === 'arcade'}
                   onClick={() => setActiveView('arcade')}
-                  collapsed={sidebarCollapsed}
+                  collapsed={railCollapsed}
                 />
               </GuestGuard>
               <GuestGuard featureName="Friends">
@@ -1990,7 +2016,7 @@ export default function App() {
                   label="Friends"
                   active={activeView === 'friends'}
                   onClick={() => setActiveView('friends')}
-                  collapsed={sidebarCollapsed}
+                  collapsed={railCollapsed}
                 />
               </GuestGuard>
               <GuestGuard featureName="My Mistakes">
@@ -1999,7 +2025,7 @@ export default function App() {
                   label="My Mistakes"
                   active={activeView === 'mistakes'}
                   onClick={() => setActiveView('mistakes')}
-                  collapsed={sidebarCollapsed}
+                  collapsed={railCollapsed}
                 />
               </GuestGuard>
               <GuestGuard featureName="Analytics">
@@ -2008,7 +2034,7 @@ export default function App() {
                   label="Analytics"
                   active={activeView === 'analytics'}
                   onClick={() => setActiveView('analytics')}
-                  collapsed={sidebarCollapsed}
+                  collapsed={railCollapsed}
                 />
               </GuestGuard>
               <GuestGuard featureName="Study Planner">
@@ -2017,7 +2043,7 @@ export default function App() {
                   label="Study Planner"
                   active={activeView === 'planner'}
                   onClick={() => setActiveView('planner')}
-                  collapsed={sidebarCollapsed}
+                  collapsed={railCollapsed}
                 />
               </GuestGuard>
               <GuestGuard featureName="Leaderboard">
@@ -2026,7 +2052,7 @@ export default function App() {
                   label="Leaderboard"
                   active={activeView === 'leaderboard'}
                   onClick={() => setActiveView('leaderboard')}
-                  collapsed={sidebarCollapsed}
+                  collapsed={railCollapsed}
                 />
               </GuestGuard>
               <SidebarItem
@@ -2034,21 +2060,21 @@ export default function App() {
                 label="Focus Timer"
                 active={activeView === 'focus'}
                 onClick={() => setActiveView('focus')}
-                collapsed={sidebarCollapsed}
+                collapsed={railCollapsed}
               />
               {timerIsRunning && activeView !== 'focus' && (
                 <button
                   onClick={() => setActiveView('focus')}
                   className={cn(
                     "w-full flex items-center gap-3 px-3 py-2 rounded-xl bg-brand-purple/10 border border-brand-purple/20 text-brand-purple text-xs font-black transition-all hover:bg-brand-purple/20",
-                    sidebarCollapsed ? "justify-center" : "justify-between"
+                    railCollapsed ? "justify-center" : "justify-between"
                   )}
                   title="Focus session in progress — click to return"
                 >
                   <span className="flex items-center gap-1.5">
-                    🍅 {!sidebarCollapsed && `${Math.floor(timerTimeLeft / 60).toString().padStart(2, '0')}:${(timerTimeLeft % 60).toString().padStart(2, '0')} remaining`}
+                    🍅 {!railCollapsed && `${Math.floor(timerTimeLeft / 60).toString().padStart(2, '0')}:${(timerTimeLeft % 60).toString().padStart(2, '0')} remaining`}
                   </span>
-                  {sidebarCollapsed && (
+                  {railCollapsed && (
                     <span className="sr-only">
                       {`${Math.floor(timerTimeLeft / 60).toString().padStart(2, '0')}:${(timerTimeLeft % 60).toString().padStart(2, '0')} remaining`}
                     </span>
@@ -2061,7 +2087,7 @@ export default function App() {
                   label="Study Rooms"
                   active={activeView === 'collab'}
                   onClick={() => setActiveView('collab')}
-                  collapsed={sidebarCollapsed}
+                  collapsed={railCollapsed}
                 />
               </GuestGuard>
 
@@ -2073,7 +2099,7 @@ export default function App() {
 
             <div className="p-4 border-t border-border-main space-y-4">
               {/* Gamification Stats */}
-              {!sidebarCollapsed && (
+              {!railCollapsed && (
                 <div className="px-2 space-y-2">
                   <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-text-dim">
                     {/* Was `xp % 100` out of 100 — the flat rule the app stopped
@@ -2102,12 +2128,12 @@ export default function App() {
 
               <div className={cn(
                 "flex items-center gap-3 p-2 rounded-xl hover:bg-glass-bg transition-colors cursor-pointer group",
-                sidebarCollapsed && "justify-center"
+                railCollapsed && "justify-center"
               )}>
                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-brand-purple to-brand-purple-dark flex items-center justify-center font-bold text-white shrink-0">
                   {user?.email?.[0].toUpperCase() || 'G'}
                 </div>
-                {!sidebarCollapsed && (
+                {!railCollapsed && (
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium truncate text-text-main">{user?.email?.split('@')[0] || (isGuest ? 'Guest' : 'User')}</div>
                     <div className="text-xs text-text-dim truncate">
@@ -2115,7 +2141,7 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {!sidebarCollapsed && (
+                {!railCollapsed && (
                   <button
                     onClick={() => setActiveView('settings')}
                     title="Settings"
@@ -2124,7 +2150,7 @@ export default function App() {
                     <Settings size={16} />
                   </button>
                 )}
-                {!sidebarCollapsed && !isGuest && (
+                {!railCollapsed && !isGuest && (
                   <button
                     onClick={handleLogout}
                     className="text-text-dim group-hover:text-red-400 transition-colors"
@@ -2213,7 +2239,7 @@ export default function App() {
       <main
         className={cn(
           "flex-1 flex flex-col h-screen overflow-hidden relative transition-all duration-300 scrollbar-hide max-w-full",
-          sidebarOpen && !inRoom ? (sidebarCollapsed ? "md:pl-20" : "md:pl-64") : "pl-0"
+          sidebarOpen && !inRoom ? (railCollapsed ? "md:pl-20" : "md:pl-64") : "pl-0"
         )}
       >
         {/* Sticky Header */}
@@ -2250,10 +2276,10 @@ export default function App() {
               </button>
             )}
             
-            {/* The ml-64 that used to be here was compensating for the sidebar
-                overlapping main. Main is padded properly now, so the logo sits
-                where it belongs. */}
-            <Logo size={62} />
+            {/* 62px of logo inside a py-2 header is most of a phone's header
+                height. Full wordmark on desktop, mark only on mobile. */}
+            <span className="hidden sm:block"><Logo size={62} /></span>
+            <span className="sm:hidden"><Logo size={34} showText={false} /></span>
 
             <div className="hidden sm:flex items-center gap-2 bg-glass-bg px-3 py-1.5 rounded-full border border-border-main shrink-0">
               <Flame size={16} className={(userData?.studyDays || []).includes(localDateStr()) ? "text-orange-500 animate-pulse" : "text-text-dim"} />
@@ -2277,11 +2303,30 @@ export default function App() {
 
           {/* RIGHT: icon buttons + upgrade — compact on mobile */}
           <div className="flex items-center gap-1 md:gap-2 flex-shrink-0 min-w-fit">
-            {/* Voice Buddy — icon only on mobile */}
+            {/* Everything hidden above, on one button. */}
+            <button
+              onClick={() => setShowTools(true)}
+              aria-label="Study tools"
+              className="md:hidden p-2 rounded-xl bg-glass-bg border border-border-main text-text-muted"
+            >
+              <MoreHorizontal size={18} />
+            </button>
+
+            {/*
+              THE TOOLS ARE DESKTOP-ONLY UP HERE.
+
+              On a phone this row held Voice Buddy, Music, a theme toggle, a
+              token counter, AI Tutor and Upgrade, next to a 62px logo — six
+              controls fighting for about 200px, which is the "header is packed"
+              report. The app already has a bottom nav on mobile, so the header
+              only needs to carry what is not navigation: the menu, the mark, how
+              many tokens are left, and Upgrade. The rest moved into the sheet
+              behind the "..." button below.
+            */}
             <button
               onClick={() => setShowVoiceBuddy(true)}
               className={cn(
-                "p-2 md:p-2.5 rounded-xl border transition-all flex items-center gap-2",
+                "hidden md:flex p-2 md:p-2.5 rounded-xl border transition-all items-center gap-2",
                 showVoiceBuddy 
                   ? "bg-brand-purple/10 border-brand-purple/20 text-brand-purple"
                   : "bg-glass-bg border-border-main text-text-muted hover:text-text-main"
@@ -2303,7 +2348,7 @@ export default function App() {
             <button
               onClick={() => setShowMusic(true)}
               className={cn(
-                "p-2 md:p-2.5 rounded-xl border transition-all flex items-center gap-2 relative",
+                "hidden md:flex p-2 md:p-2.5 rounded-xl border transition-all items-center gap-2 relative",
                 showMusic
                   ? "bg-brand-purple/10 border-brand-purple/20 text-brand-purple"
                   : "bg-glass-bg border-border-main text-text-muted hover:text-text-main"
@@ -2317,7 +2362,7 @@ export default function App() {
             {/* Theme toggle */}
             <button
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className="p-2 rounded-xl bg-glass-bg border border-border-main text-text-muted hover:text-text-main transition-all"
+              className="hidden md:block p-2 rounded-xl bg-glass-bg border border-border-main text-text-muted hover:text-text-main transition-all"
               title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
             >
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
@@ -2369,7 +2414,7 @@ export default function App() {
             <button
               onClick={() => setShowTutor(!showTutor)}
               className={cn(
-                "p-2 rounded-xl border transition-all flex items-center gap-2",
+                "hidden md:flex p-2 rounded-xl border transition-all items-center gap-2",
                 showTutor
                   ? "bg-brand-purple text-white border-brand-purple shadow-lg shadow-brand-purple/20"
                   : "bg-glass-bg border-border-main text-text-muted hover:text-text-main"
@@ -3239,6 +3284,53 @@ export default function App() {
               setActiveView('upgrade');
             }}
           />
+        )}
+      </AnimatePresence>
+
+
+      {/*
+        The tools sheet — mobile only.
+
+        Four controls that used to sit in the header on a 390px screen. A sheet
+        gives each one a full-width row with its name next to it, which is both
+        readable and a legal tap target; crammed into the header they were 32px
+        icons with no labels.
+      */}
+      <AnimatePresence>
+        {showTools && (
+          <div className="fixed inset-0 z-[85] md:hidden">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setShowTools(false)}
+              className="absolute inset-0 bg-black/60"
+            />
+            <motion.div
+              initial={{ y: 300 }} animate={{ y: 0 }} exit={{ y: 300 }}
+              className="absolute bottom-0 left-0 right-0 glass-panel border-t border-border-main rounded-t-3xl p-4 space-y-2"
+              style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+            >
+              <div className="w-10 h-1 rounded-full bg-border-main mx-auto mb-3" />
+              {([
+                { label: 'Study Music', icon: <Music size={18} />, run: () => setShowMusic(true) },
+                { label: 'AI Tutor', icon: <Bot size={18} />, run: () => setShowTutor(true) },
+                { label: 'Voice Buddy', icon: <Mic size={18} />, run: () => setShowVoiceBuddy(true) },
+                {
+                  label: theme === 'dark' ? 'Light mode' : 'Dark mode',
+                  icon: theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />,
+                  run: () => setTheme(theme === 'dark' ? 'light' : 'dark'),
+                },
+              ]).map((tool) => (
+                <button
+                  key={tool.label}
+                  onClick={() => { tool.run(); setShowTools(false); }}
+                  className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl bg-glass-bg border border-border-main text-text-main font-bold text-sm hover:border-brand-purple/40 transition-all"
+                >
+                  <span className="text-brand-purple">{tool.icon}</span>
+                  {tool.label}
+                </button>
+              ))}
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 

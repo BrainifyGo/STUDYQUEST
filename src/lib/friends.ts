@@ -319,6 +319,25 @@ export function watchFriends(onChange: (friends: Friend[]) => void): () => void 
   );
 }
 
+/**
+ * Live list of requests YOU have sent and nobody has answered.
+ *
+ * Without this, sending a request was a dead end: it vanished from the screen,
+ * there was no way to tell whether it had gone, and `cancelRequest` existed with
+ * nothing anywhere able to call it. You could also send the same person a second
+ * request without ever seeing the first.
+ */
+export function watchOutgoing(onChange: (reqs: FriendRequest[]) => void): () => void {
+  const uid = auth.currentUser?.uid;
+  if (!uid) { onChange([]); return () => {}; }
+
+  return onSnapshot(
+    query(collection(db, 'friend_requests'), where('fromUid', '==', uid)),
+    (snap) => onChange(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))),
+    (err) => { console.warn('[friends] outgoing watch failed:', err); onChange([]); }
+  );
+}
+
 /** Live list of requests waiting for YOU. Returns an unsubscribe. */
 export function watchIncoming(onChange: (reqs: FriendRequest[]) => void): () => void {
   const uid = auth.currentUser?.uid;

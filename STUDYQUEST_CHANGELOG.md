@@ -1089,3 +1089,118 @@ an open filter instead.
 (new), `tests/friends.test.ts` (new), `tests/generativeMusic.test.ts` (new), `src/lib/friends.ts`,
 `src/components/FriendsView.tsx`, `src/components/StudyMusic.tsx`, `src/components/MusicBar.tsx`,
 `firestore.rules`, `tests/rules-structure.test.ts`.
+
+---
+
+## [2026-08-17] — Daniel's second report
+
+**Editor:** Claude Code (Opus 5)
+
+---
+
+### The image reader was summarising instead of reading
+
+`/api/analyze-image` asked the model for *"a comprehensive and structured summary of everything you
+can see"* — and on the free tier, just *"summarise the main points"*.
+
+That reply then went into the study-kit generator **as the source material**. So a photo of a page of
+notes became a summary, and the kit was a summary of a summary. Every detail the student
+photographed *because it mattered* was thrown away before the kit was written. That is the whole of
+"it doesn't read properly": the pipeline was lossy by design, one step too early.
+
+The prompt is now a transcription task. Copy the text exactly, keep the structure and the order,
+write equations in readable notation, describe a diagram only where it carries information, and mark
+genuinely unreadable parts `[unclear]` rather than guessing. Summarising belongs in the kit step,
+which already does it properly and knows which mode you asked for.
+
+### Removing an exam now removes its plan
+
+Deleting an exam left every task generated for it sitting in the schedule, with nothing marking which
+entries those were.
+
+The care is in the fallback, and it is why this rule moved out of the component into
+`src/lib/schedule.ts` where it can be tested. Tasks were originally linked to an exam by **subject
+alone**, which is not a link: two Maths exams produce indistinguishable tasks. So tasks generated
+from now on are stamped with `examId` and deleted unambiguously — while an *unstamped* task is
+matched by subject **only when no other exam still covers that subject**.
+
+Deleting one of two Maths exams must not wipe the revision for the other. Keeping a task too long is
+untidy; deleting one wrongly is lost work, so where the two are in tension the rule keeps.
+
+The exam is deleted first and its tasks with `Promise.allSettled` after: a task that fails to delete
+is a tidiness problem, whereas the exam is the thing that was actually asked for. Failures are
+reported rather than silently rolled back.
+
+### The room chat is in the corner
+
+On desktop the chat was `md:relative` — a full-height column filling the right of the workspace. It
+had the same visual weight as the shared notes and the shared quiz, and pushed both into the middle
+of the screen, which is what "dead center" was describing.
+
+It is a floating card in the bottom-right corner now — the shape people expect a chat to be — and the
+workspace gets its width back. Minimised, it is a small pill in the same corner rather than a bar
+across the whole bottom edge. On a phone it stays a bottom sheet with a backdrop, which is right
+there.
+
+### The Arcade is in study rooms
+
+The games and the room's questions already existed; they were just in different places, so "let's
+play" meant everyone leaving the room.
+
+`GameMode` now takes an optional deck. Passed one, it plays those questions instead of your saved
+mistakes — **the same questions for everyone**, which is the point: if each player were quizzed on
+their own mistakes the scores would not compare. Passed nothing, the Arcade behaves exactly as
+before.
+
+When a round ends, the score and accuracy are posted into the room chat. That is what makes it a
+competition rather than four people playing alone in the same tab. The announcement sits behind the
+same once-only guard as the XP award, so a re-render after the round cannot post the score twice.
+Room rounds pay no XP — they are for the scoreboard.
+
+### Mobile
+
+**The sidebar did open — as an 80px strip with every label hidden.** `sidebarCollapsed` was applied
+at every screen width, and collapsing is a desktop idea: it is the trade you make when you want the
+navigation *and* the content at once, which never applies on a phone. Worse, entering a study room
+sets collapsed — so anyone who had opened a room once got that strip from then on, everywhere. The
+sidebar now draws at full width on mobile whatever the stored preference says.
+
+**The header was carrying six controls on a 390px screen** — Voice Buddy, Music, a theme toggle, a
+token counter, AI Tutor and Upgrade — next to a 62px logo, which is most of a phone header's height
+on its own. The app already has a bottom nav on mobile, so the header only needs what is *not*
+navigation. Voice Buddy, Music, AI Tutor and the theme toggle moved into a sheet behind a single
+button, where each gets a full-width row with its name next to it — readable, and a legal tap target,
+which they were not as unlabelled 32px icons. The logo is the mark alone below `sm`.
+
+### Add a friend
+
+The gap was not the search — it was that **a sent request vanished**. It left the screen, there was
+no way to tell whether it had arrived, no way to take it back, and nothing stopped you sending the
+same person another one. `cancelRequest` had been written and nothing anywhere could call it.
+
+There is now a "Sent, waiting for a reply" section with a Withdraw button, and a search result shows
+`Withdraw` when you have already asked them, `Already asked you` when the request is the other way
+round, and `Already friends` when it is done. All of it reads from the live Firestore query rather
+than a local `Set`, so it survives a refresh and cannot disagree with what the server holds.
+
+### Verification
+
+- **165 tests passing** (8 new), 11 files; `tsc` clean; `npm run build` clean.
+- The new tests pin the deletion rule specifically: a stamped task goes with its exam even when
+  another exam shares the subject; an unstamped task is **kept** when another exam still covers that
+  subject (the one that would otherwise destroy work); other subjects are untouched; case and stray
+  spaces do not change the answer; a missing exam deletes nothing; and an exam with a blank subject
+  cannot claim every unstamped task.
+
+### Files
+
+`src/lib/schedule.ts` (new), `tests/schedule.test.ts` (new), `src/components/StudyPlanner.tsx`,
+`src/components/CollaborativeRoom.tsx`, `src/components/GameMode.tsx`,
+`src/components/FriendsView.tsx`, `src/lib/friends.ts`, `src/App.tsx`, `server.ts`.
+
+### Still open
+
+| | |
+|---|---|
+| Voice and video calls | Not started. Signalling through the Render socket, then STUN, then TURN if the failure rate justifies the bandwidth cost. |
+| The rest of the mobile pass | The header, sidebar and room are done. Dashboard, Arcade, Analytics and Settings still need going through on a real phone. |

@@ -13,6 +13,8 @@ import { cn } from '../lib/utils';
 import { toast } from 'sonner';
 import { callAI } from '../lib/aiService';
 import { buildStudyPrompt, parseJsonReply, normaliseQuiz } from '../lib/studyPrompts';
+import { GameMode } from './GameMode';
+import { MODE_ORDER, MODES } from '../lib/gameModes';
 import type { QuizQuestion } from '../App';
 
 interface ChatMessage {
@@ -91,6 +93,17 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
     drawer on small screens now, and the column it always was on desktop.
   */
   const [showInfo, setShowInfo] = useState(false);
+
+  /*
+    THE ARCADE, INSIDE THE ROOM.
+
+    The games already exist and the room already has questions once someone has
+    made a quiz from the notes — they were just in two different places, so
+    "let's play" meant everyone leaving the room. Playing here keeps the room
+    together, and posting the result into the chat is what makes it a
+    competition rather than four people playing alone in the same tab.
+  */
+  const [playingGame, setPlayingGame] = useState(false);
 
   const [roomQuiz, setRoomQuiz] = useState<QuizQuestion[]>([]);
   const [isMakingQuiz, setIsMakingQuiz] = useState(false);
@@ -293,6 +306,29 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-row bg-bg-dark overflow-hidden">
+      {/* A round, played over the room. Leaving it drops you straight back in. */}
+      {playingGame && (
+        <div className="fixed inset-0 z-[30] bg-bg-dark overflow-y-auto">
+          <GameMode
+            questions={roomQuiz}
+            subject="Room quiz"
+            onBack={() => setPlayingGame(false)}
+            onAwardXP={() => { /* Room rounds are for the scoreboard, not for XP. */ }}
+            onFinished={(summary) => {
+              // Announced to everyone, which is the point of playing in a room.
+              const line = `${userName} scored ${summary.score} (${summary.accuracy}% accuracy) on ${summary.modeName}`;
+              addSystemMessage(line);
+              socketRef.current?.emit('send-message', {
+                roomId: activeRoomId,
+                message: {
+                  id: Date.now().toString(), user: 'System', content: line,
+                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                },
+              });
+            }}
+          />
+        </div>
+      )}
       {/* Drawer backdrop, phones only. */}
       {showInfo && (
         <div
@@ -531,6 +567,28 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
                   </button>
                 </div>
               </div>
+
+              {/* Arcade */}
+              <div className="glass p-5 sm:p-8 rounded-3xl sm:rounded-[2.5rem] border border-white/10 space-y-5 min-h-[220px] flex flex-col items-center justify-center text-center lg:col-span-2">
+                <div className="w-16 h-16 rounded-[1.5rem] bg-white/5 flex items-center justify-center text-brand-purple">
+                  <Zap size={32} />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-xl font-bold text-white">Arcade</h3>
+                  <p className="text-sm text-white/40 max-w-md">
+                    {roomQuiz.length > 0
+                      ? `Play ${MODE_ORDER.map((m) => MODES[m].name).join(', ')} on the room's ${roomQuiz.length} questions. Your score goes in the chat.`
+                      : 'Make a quiz from the shared notes first, then race each other through it.'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setPlayingGame(true)}
+                  disabled={roomQuiz.length < 4}
+                  className="btn-primary px-8 py-3 rounded-2xl font-bold shadow-2xl shadow-brand-purple/20 disabled:opacity-40 disabled:grayscale"
+                >
+                  Play together
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -539,7 +597,7 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
         {chatMinimised ? (
           <button
             onClick={() => { setChatMinimised(false); setUnread(0); }}
-            className="absolute bottom-0 right-0 left-0 md:left-auto md:w-96 glass-panel border-t md:border-l border-white/10 p-4 flex items-center gap-2 text-white hover:bg-white/5 transition-all shadow-2xl"
+            className="absolute bottom-0 left-0 right-0 md:bottom-5 md:right-5 md:left-auto md:w-64 md:rounded-2xl md:border glass-panel border-t border-white/10 p-4 flex items-center gap-2 text-white hover:bg-white/5 transition-all shadow-2xl"
           >
             <MessageSquare size={16} className="text-brand-purple" />
             <span className="text-xs font-black uppercase tracking-widest">Live Chat</span>
@@ -560,7 +618,17 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
           className="fixed inset-0 bg-black/50 z-[5] md:hidden"
           aria-hidden="true"
         />
-        <div className="h-[45vh] md:h-auto md:w-96 glass-panel border-t md:border-t-0 md:border-l border-white/10 flex flex-col absolute bottom-0 left-0 right-0 z-10 md:z-auto md:relative md:inset-auto shadow-2xl rounded-t-3xl md:rounded-none">
+        {/*
+          A CORNER, NOT A COLUMN.
+
+          On desktop this was `md:relative`, which made it a full-height column
+          filling the right of the workspace — so the chat had the same visual
+          weight as the shared notes and the quiz, and pushed them into the
+          middle of the screen. It is a floating card in the bottom-right corner
+          now, the shape people expect a chat to be, and the workspace gets its
+          width back. On a phone it stays a bottom sheet with a backdrop.
+        */}
+        <div className="h-[45vh] md:h-[28rem] md:w-[22rem] glass-panel border-t md:border border-white/10 flex flex-col absolute bottom-0 left-0 right-0 z-10 md:bottom-5 md:right-5 md:left-auto md:top-auto shadow-2xl rounded-t-3xl md:rounded-3xl overflow-hidden">
           <div className="p-4 border-b border-white/10 bg-white/5 flex items-center gap-2">
             <MessageSquare size={16} className="text-brand-purple" />
             <span className="text-xs font-black uppercase tracking-widest text-white">Live Chat</span>

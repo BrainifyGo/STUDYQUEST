@@ -18,6 +18,7 @@ import { cn } from '../lib/utils';
 import { db, auth, collection, query, where, getDocs, addDoc, deleteDoc, doc, updateDoc, handleFirestoreError, OperationType } from '../lib/firebase';
 import { callAI } from '../lib/aiService';
 import { buildStudyPrompt, parseJsonReply, normaliseQuiz } from '../lib/studyPrompts';
+import { tasksToRemove } from '../lib/schedule';
 import Markdown from 'react-markdown';
 import { toast } from 'sonner';
 
@@ -36,6 +37,15 @@ interface StudyTask {
   duration: number; // minutes
   date: string;
   completed: boolean;
+  /**
+   * Which exam this task was generated for.
+   *
+   * Tasks used to be linked to an exam only by SUBJECT, which is not a link —
+   * two Maths exams produce indistinguishable tasks, and deleting one of them
+   * cannot tell which plans belonged to it. Written on every task generated from
+   * now on; deletion falls back to subject for tasks made before this existed.
+   */
+  examId?: string;
 }
 
 export default function StudyPlanner() {
@@ -97,10 +107,47 @@ export default function StudyPlanner() {
     }
   };
 
+  /**
+   * Delete an exam, and the study plan that existed for it.
+   *
+   * Leaving the tasks behind means a schedule full of revision for an exam you
+   * are no longer sitting, with no way to tell which entries those are.
+   *
+   * The care is in the fallback. Tasks generated before `examId` existed are
+   * matched by subject — but ONLY when no other exam still covers that subject.
+   * Deleting one of two Maths exams must not wipe the revision for the other,
+   * and getting that wrong destroys work the student cannot get back.
+   */
   const deleteExam = async (id: string) => {
+    const exam = exams.find(e => e.id === id);
+    if (!exam) return;
+
+    // The rule lives in src/lib/schedule.ts, where it can be tested — this
+    // decides what gets deleted, and getting it wrong destroys revision the
+    // student cannot get back.
+    const doomed = tasksToRemove(id, exams, tasks);
+
     try {
       await deleteDoc(doc(db, 'exams', id));
+      // The exam is gone whatever happens to the tasks below; a task that fails
+      // to delete is untidy, an exam that fails to delete is the thing they asked
+      // for. Failures are reported rather than rolled back.
+      const results = await Promise.allSettled(
+        doomed.map(t => deleteDoc(doc(db, 'study_tasks', t.id)))
+      );
+      const failed = results.filter(r => r.status === 'rejected').length;
+
       setExams(exams.filter(e => e.id !== id));
+      const removedIds = new Set(doomed.map(t => t.id));
+      setTasks(tasks.filter(t => !removedIds.has(t.id)));
+
+      if (failed) {
+        toast.error(`Exam removed, but ${failed} of its tasks could not be deleted.`);
+      } else if (doomed.length) {
+        toast.success(`Removed ${exam.subject} and ${doomed.length} task${doomed.length === 1 ? '' : 's'} for it.`);
+      } else {
+        toast.success(`Removed ${exam.subject}.`);
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `exams/${id}`);
     }
@@ -189,16 +236,22 @@ export default function StudyPlanner() {
         throw new Error('The AI did not return a usable plan.');
       }
 
-      // Save tasks to Firestore
+      // Save tasks to Firestore, each stamped with the exam it belongs to, so
+      // deleting that exam can take its plan with it. The model returns a
+      // subject, not an id, so the id is resolved here rather than trusted from
+      // the reply — an id the AI invented would point at nothing.
       const savedTasks = [];
       for (const task of generatedTasks) {
-        const docRef = await addDoc(collection(db, 'study_tasks'), {
+        const owner = exams.find(e => e.subject?.toLowerCase() === String(task.subject || '').toLowerCase());
+        const row = {
           userId: auth.currentUser.uid,
           ...task,
+          ...(owner ? { examId: owner.id } : {}),
           completed: false,
-          createdAt: new Date().toISOString()
-        });
-        savedTasks.push({ id: docRef.id, ...task, completed: false });
+          createdAt: new Date().toISOString(),
+        };
+        const docRef = await addDoc(collection(db, 'study_tasks'), row);
+        savedTasks.push({ id: docRef.id, ...task, ...(owner ? { examId: owner.id } : {}), completed: false });
       }
       
       setTasks([...tasks, ...savedTasks]);
