@@ -9,7 +9,7 @@
 import type { QuizQuestion } from '../App';
 import { type Boss, pickBoss, phaseFor, playerDamageFor, justEnraged } from './bosses';
 
-export type ModeId = 'speed-run' | 'boss-battle';
+export type ModeId = 'speed-run' | 'boss-battle' | 'sudden-death' | 'marathon';
 
 export interface ModeRules {
   id: ModeId;
@@ -23,9 +23,11 @@ export interface ModeRules {
   rightBonus: number;
   /** Boss health. 0 means there is no boss. */
   bossHP: number;
-  /** Lives (boss mode). */
+  /** Lives. 0 means mistakes do not end the round. */
   playerHP: number;
   scoreLabel: string;
+  /** Stop after this many questions. 0 means play until some other rule ends it. */
+  questionLimit?: number;
 }
 
 export const MODES: Record<ModeId, ModeRules> = {
@@ -53,7 +55,51 @@ export const MODES: Record<ModeId, ModeRules> = {
     playerHP: 3,
     scoreLabel: 'damage',
   },
+
+  /*
+    Two more games, because "the Arcade" was two modes.
+
+    Both reuse the same engine rather than introducing a second one — a mode is a
+    row of rules here, so adding one is data, not a new component to keep in step.
+  */
+  'sudden-death': {
+    id: 'sudden-death',
+    name: 'Sudden Death',
+    blurb: 'One life. One wrong answer ends it. How far can you get?',
+    duration: 0,
+    wrongPenalty: 0,
+    rightBonus: 0,
+    bossHP: 0,
+    // A single life is the entire mode. Everything else is the standard engine.
+    playerHP: 1,
+    scoreLabel: 'streak',
+  },
+  marathon: {
+    id: 'marathon',
+    name: 'Marathon',
+    blurb: '20 questions. No clock, no lives — accuracy is the whole score.',
+    duration: 0,
+    wrongPenalty: 0,
+    rightBonus: 0,
+    bossHP: 0,
+    /*
+      NO LIVES, deliberately.
+
+      This started with three, and a test caught that it made the payout tiers
+      unreachable: three lives over twenty questions means you are ejected on the
+      third mistake, so the worst accuracy you can FINISH with is 18/20 = 90% —
+      and every completed marathon paid the top rate. Marathon is the mode where
+      you go the distance and are judged on how well; being thrown out for three
+      mistakes is Sudden Death's job.
+    */
+    playerHP: 0,
+    scoreLabel: 'correct',
+    questionLimit: 20,
+  },
 };
+
+/** The modes, in the order the Arcade lists them. */
+export const MODE_ORDER: ModeId[] = ['speed-run', 'boss-battle', 'sudden-death', 'marathon'];
 
 export interface ModeState {
   mode: ModeRules;
@@ -138,6 +184,10 @@ export function applyAnswer(state: ModeState, correct: boolean): ModeState {
     if (next.mode.duration) {
       next.score += 1;
       next.timeLeft += next.mode.rightBonus;
+    } else if (!maxHP) {
+      // Untimed, bossless modes score on answers: the streak in Sudden Death,
+      // the tally in Marathon.
+      next.score += 1;
     }
     if (maxHP) {
       const dmg = bossDamage(next.combo);
@@ -147,6 +197,11 @@ export function applyAnswer(state: ModeState, correct: boolean): ModeState {
   } else {
     next.combo = 0;
     if (next.mode.duration) next.timeLeft = Math.max(0, next.timeLeft - next.mode.wrongPenalty);
+    // Lives outside a boss fight — Sudden Death has one, Marathon has three.
+    // Boss modes keep their own rule below, where the phase decides the damage.
+    if (!maxHP && next.mode.playerHP > 0) {
+      next.playerHP = Math.max(0, next.playerHP - 1);
+    }
     if (maxHP) {
       // An enraged boss hits twice as hard, so the last third of the fight is
       // where runs are actually lost. The damage is read from the phase BEFORE
@@ -175,6 +230,19 @@ export function applyAnswer(state: ModeState, correct: boolean): ModeState {
     next.outcome = 'Time!';
   }
 
+  // Out of lives, in a mode that has them but no boss.
+  if (!next.over && !maxHP && next.mode.playerHP > 0 && next.playerHP <= 0) {
+    next.over = true;
+    next.outcome = next.mode.id === 'sudden-death' ? 'Sudden death' : 'Out of lives';
+  }
+
+  // Marathon is a fixed length; finishing it is the win condition.
+  if (!next.over && next.mode.questionLimit && next.answered >= next.mode.questionLimit) {
+    next.over = true;
+    next.won = true;
+    next.outcome = 'Marathon complete';
+  }
+
   // Running out of questions ends the round rather than looping forever. The pool
   // is reshuffled by the caller when it can be; this is the backstop.
   if (!next.over && next.index >= next.questions.length) {
@@ -197,10 +265,24 @@ export function tickClock(state: ModeState): ModeState {
 export function completionBonus(state: ModeState): number {
   // Reads `won` rather than re-deriving it: a fight that ended because the
   // questions ran out with the boss on 1 HP is not a victory.
+  if (state.mode.id === 'marathon') {
+    // Paid on accuracy, not on turning up: a completed marathon at 30% should
+    // not pay the same as a clean one.
+    if (!state.won) return 0;
+    const acc = accuracy(state);
+    if (acc >= 90) return 500;
+    if (acc >= 70) return 300;
+    return 120;
+  }
   if (state.won) return 400;
   if (state.mode.duration) {
     if (state.score >= 15) return 250;
     if (state.score >= 8) return 100;
+  }
+  if (state.mode.id === 'sudden-death') {
+    if (state.score >= 15) return 400;
+    if (state.score >= 8) return 180;
+    if (state.score >= 4) return 60;
   }
   return 0;
 }

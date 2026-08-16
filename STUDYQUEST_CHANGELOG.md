@@ -677,3 +677,167 @@ which is why the average score used to be able to read over 100%.
 | Reminders that actually send a notification and an email | Not started. Needs a scheduled sender; the free Firebase plan has no Cloud Functions, so this needs a decision about where the job runs. |
 | Arcade games | The modes exist; there are still no questions to play them with. Blocked on the mistakes quiz generator. |
 | More of GhostChat in study rooms | Typing indicators are in. Reactions, pinned messages and attachments are each their own piece of work. |
+
+---
+
+## [2026-08-16] — Third round: the Arcade gets games, and the dashboard gets its uploads back
+
+**Editor:** Claude Code (Opus 5)
+
+---
+
+### The file upload was throwing the file away
+
+The PDF was read correctly, every page of it — and then the text went nowhere.
+
+`usePdfUpload` returns `extractedText`, and `App.tsx` destructured it as `pdfExtractedText`. Nothing
+in the file ever read that variable again. The promise from `uploadPdf(file)` was ignored too. So the
+spinner ran, the worker did the work, and the textarea stayed empty: an upload that appeared to do
+nothing because it genuinely did nothing with the result.
+
+Two more faults in the same twenty lines:
+
+- **The progress bar could not move.** `progress` is an object — `{ progress, currentPage,
+  totalPages }` — and it was interpolated whole. The label read *"Extracting PDF... [object
+  Object]%"*, and the bar underneath was given `width: "[object Object]%"`, which is not a length, so
+  it sat at zero for the entire extraction.
+- **One failure killed the input.** The `<input type="file">` was never reset, so after a failed or
+  cancelled pick, choosing *the same file* again fired no `onChange` at all.
+
+All three fixed. The text now lands in the box, the page counter is real, failures say what went
+wrong, and a PDF with no extractable text is told to use Snap instead of failing silently.
+
+### The flashcard buttons were not inactive — they were invisible
+
+Again / Hard / Good / Easy ran the entire spaced-repetition calculation and saved it to Firestore.
+They just changed nothing you could see: same card, same face, no message, no movement. A button with
+no visible effect is indistinguishable from a broken one, and there is no arguing with that.
+
+Each rating now says when the card is next due, and the card carries its review date underneath.
+
+### The Arcade had no games because it could not have any
+
+The Arcade needed **four saved mistakes** to unlock, and the only way to earn a mistake was to sit a
+quiz and get a question wrong — while quizzes themselves were broken until the last round of fixes.
+The games were locked behind the exact thing the games existed to make appealing, so a new account
+opened the Arcade and found an empty room with a note explaining that it was empty.
+
+**Quick Play** breaks the circle. Type any topic — *photosynthesis*, *trig*, *Macbeth* — and it
+writes a round on the spot through the same prompt builder as everything else. Your saved mistakes are
+still the preferred pool whenever you have enough of them; they are better questions, because they are
+questions you actually got wrong.
+
+**And there are four games now, not two.** Both new ones are rows of rules in `gameModes.ts` rather
+than new components, so they run through the same tested engine:
+
+| Mode | The rule that makes it a different game |
+|---|---|
+| **Speed Run** | 60 seconds; a wrong answer costs time, not the run |
+| **Boss Battle** | Three lives against a boss that enrages in its last third |
+| **Sudden Death** | One life. One wrong answer ends it |
+| **Marathon** | Twenty questions, no clock, no lives — accuracy is the whole score |
+
+**Marathon shipped with three lives, and a test caught that this was broken.** Three lives across
+twenty questions means you are ejected on the third mistake — so the worst accuracy you could
+*finish* with was 18/20, or 90%, and every completed marathon paid the top rate while the 70% and
+lower tiers were unreachable code. Marathon has no lives now. Going the distance and being judged on
+how well is the mode; throwing you out after three mistakes is Sudden Death's job.
+
+The health counter also only rendered when `bossHP > 0`, which hid the lives in Sudden Death — the one
+mode where the single life *is* the tension.
+
+### The daily study plan produced homework it could not help you with
+
+The planner generated tasks like *"Revise photosynthesis"* and stopped there. A title, a subject, a
+duration, and a tick box for work you had to go and do somewhere else. There was no way to revise from
+inside the plan at all.
+
+Every task now has **Practise** and **Help me**. Practise writes exam-focused questions for that task
+and marks them inline, with the explanation shown after you answer. Help me writes a short revision
+guide for it. Both go through the shared prompt builder, so a planner question is the same quality as
+a dashboard one.
+
+The planner also had its own hand-rolled `JSON.parse` with the same fragility the study kit used to
+have — a ```` ```json ```` fence broke the whole plan. It uses the shared, fence-tolerant parser now.
+
+### Study rooms can make their own quiz
+
+The only route to a shared quiz was to leave the room, generate one on the dashboard, and come back.
+A room with people in it and notes on the screen could not produce a single question.
+
+**Quiz from notes** builds one from whatever the room has written together, and pushes it to everyone
+over the socket — a "shared" quiz that exists only on the machine that made it is not shared.
+
+### The chat sheet, again
+
+Minimising worked; opening was still wrong. On a phone it came up as a 60%-tall panel welded to the
+bottom of the screen with no backdrop, so it swallowed the bottom of the room and there was nothing
+obvious to tap to get rid of it.
+
+It is a proper sheet now: 45% tall, rounded, with a backdrop that dismisses it — and on a small screen
+it **starts** minimised, because the room is the point and the chat is the accompaniment.
+
+### The sidebar was covering every page
+
+The sidebar is `position: fixed`, so it is out of the document flow, and `<main>` began at x = 0
+directly underneath it. Only the **logo** had been pushed clear, with an `ml-64`. That is why the
+header looked correct and every page below it was sitting under the sidebar.
+
+`<main>` is padded by the sidebar's real width on desktop now — 64 open, 20 collapsed — and the logo's
+compensating margin is gone. On mobile the sidebar stays an overlay with its backdrop, which is
+correct there.
+
+### The header no longer sits there forever
+
+It was `sticky top-0` with nothing to move it, so it cost the same strip of every screen permanently —
+about a fifth of the page on a phone. It now slides away as you read down and returns the instant you
+scroll up, with an 8-pixel threshold so scroll jitter cannot make it flicker.
+
+### Music
+
+**The Focus tab no longer uses YouTube at all.** Deep Focus and Alpha Waves were embeds, and embeds
+have now failed here for three separate reasons — a deleted video, refused autoplay, and networks that
+block youtube.com — all of which look identical to a student. Focus audio is the one category that
+does not need a video: it is defined by its frequencies. Four generated tracks now (Deep Focus, Alpha
+Waves, Flow State, Deep Work), built from two detuned sine tones and a filtered noise bed, with a
+volume slider. No network, no licence, nothing to break.
+
+**On what they are called:** binaural beats are widely sold as making you concentrate. The evidence
+for that is weak and contested, so nothing in the UI claims a cognitive effect — each track is
+described by what it sounds like, and the panel says outright that we make no claim about
+concentration. Inventing neuroscience to sell a study app to fourteen-year-olds is not something we
+are going to do.
+
+**Forest was playing all along, three times too quietly to hear.** Its trim was 0.5 and its wind bed
+was attenuated a further 0.35 inside the graph, so at a half-way slider it came out around 0.04 —
+against rain's 0.14. Trim raised to 0.8, bed to 0.85, and the birds are louder and more frequent,
+since the birds are the only thing that separates a forest from rain with the treble rolled off.
+
+### Delete account
+
+Working, per Ola — the remaining fault was cosmetic: the error message rendered **twice at once**,
+once on the Danger Zone panel and again inside the dialog covering it. The panel copy is now hidden
+while the dialog is open, and cancelling clears the typed password and the stale error instead of
+leaving both sitting there.
+
+### Verification
+
+- **127 tests passing** (8 new), 8 files; `tsc` clean; `npm run build` clean.
+- The new mode tests pin: Sudden Death ends on the first mistake and pays nothing for a short run;
+  Marathon stops at exactly 20 and pays 500 / 300 / 120 by accuracy; a Marathon abandoned early pays
+  nothing; and — the one that matters most — **a wrong answer in Speed Run still costs time rather
+  than a life**, because the lives rule added for the new modes runs through all four.
+
+### Files
+
+`src/lib/focusTones.ts` (new), `src/lib/gameModes.ts`, `src/lib/ambience.ts`,
+`src/components/GameMode.tsx`, `src/components/StudyPlanner.tsx`, `src/components/StudyMusic.tsx`,
+`src/components/CollaborativeRoom.tsx`, `src/components/Settings.tsx`, `src/App.tsx`, `server.ts`,
+`tests/gameModes.test.ts`.
+
+### Still outstanding
+
+| Asked for | Standing |
+|---|---|
+| Reminders that send a notification and an email | Still blocked on a decision, not on code. There is no Blaze plan, so no Cloud Functions; the Render service is the only place a scheduled job could run, and Render's free tier sleeps. Needs Ola and Daniel to pick: pay for one of the two, or accept in-app reminders only. |
+| Lo-Fi and Classical tracks | Still YouTube, and still subject to the same failures. The player names the cause now. Making these generated is not realistic — nobody wants synthesised lo-fi. |

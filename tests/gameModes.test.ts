@@ -157,3 +157,109 @@ describe('both modes', () => {
     expect(completionBonus(killed)).toBe(400);
   });
 });
+
+/**
+ * The two modes added so the Arcade is an arcade rather than a pair.
+ *
+ * Both reuse the same engine, which is exactly why they need pinning: a rule
+ * added for one mode is a rule the other three now run through.
+ */
+describe('sudden death', () => {
+  const q: QuizQuestion = {
+    question: '2 + 2?', options: ['3', '4', '5', '6'],
+    correctAnswer: '4', explanation: 'It is 4.',
+  };
+  const deck = (n: number) => Array.from({ length: n }, () => q);
+  const run = () => startState(MODES['sudden-death'], deck(50), 'Maths');
+
+  it('ends on the first wrong answer', () => {
+    const s = applyAnswer(run(), false);
+    expect(s.over).toBe(true);
+    expect(s.outcome).toBe('Sudden death');
+    expect(s.playerHP).toBe(0);
+  });
+
+  it('keeps going while you are right', () => {
+    let s = run();
+    for (let i = 0; i < 10; i++) s = applyAnswer(s, true);
+    expect(s.over).toBe(false);
+    expect(s.score).toBe(10);
+  });
+
+  it('pays more the further you get, and nothing for a short run', () => {
+    let s = run();
+    for (let i = 0; i < 3; i++) s = applyAnswer(s, true);
+    expect(completionBonus({ ...s, over: true })).toBe(0);
+    for (let i = 0; i < 5; i++) s = applyAnswer(s, true);
+    expect(completionBonus({ ...s, over: true })).toBe(180);
+  });
+});
+
+describe('marathon', () => {
+  const q: QuizQuestion = {
+    question: '2 + 2?', options: ['3', '4', '5', '6'],
+    correctAnswer: '4', explanation: 'It is 4.',
+  };
+  const deck = (n: number) => Array.from({ length: n }, () => q);
+  const run = () => startState(MODES.marathon, deck(50), 'Maths');
+
+  it('ends after exactly 20 questions', () => {
+    let s = run();
+    for (let i = 0; i < 19; i++) s = applyAnswer(s, true);
+    expect(s.over).toBe(false);
+    s = applyAnswer(s, true);
+    expect(s.over).toBe(true);
+    expect(s.won).toBe(true);
+    expect(s.answered).toBe(20);
+  });
+
+  it('does not throw you out for being wrong — that is Sudden Death', () => {
+    // With three lives, the worst accuracy you could FINISH with was 18/20, so
+    // every completed marathon paid the top rate and the lower tiers below were
+    // unreachable. This test is why the mode has no lives.
+    let s = run();
+    for (let i = 0; i < 10; i++) s = applyAnswer(s, false);
+    expect(s.over).toBe(false);
+  });
+
+  it('pays on accuracy, not on merely finishing', () => {
+    let clean = run();
+    for (let i = 0; i < 20; i++) clean = applyAnswer(clean, true);
+    expect(completionBonus(clean)).toBe(500);          // 100%
+
+    let good = run();
+    for (let i = 0; i < 16; i++) good = applyAnswer(good, true);
+    for (let i = 0; i < 4; i++) good = applyAnswer(good, false);
+    expect(good.won).toBe(true);
+    expect(completionBonus(good)).toBe(300);           // 80%
+
+    let scrappy = run();
+    for (let i = 0; i < 8; i++) scrappy = applyAnswer(scrappy, true);
+    for (let i = 0; i < 12; i++) scrappy = applyAnswer(scrappy, false);
+    expect(scrappy.won).toBe(true);
+    expect(completionBonus(scrappy)).toBe(120);        // 40%
+  });
+
+  it('pays nothing for a marathon that was never finished', () => {
+    let s = run();
+    for (let i = 0; i < 5; i++) s = applyAnswer(s, true);
+    expect(completionBonus(s)).toBe(0);
+  });
+});
+
+describe('lives do not leak into the modes without them', () => {
+  const q: QuizQuestion = {
+    question: '2 + 2?', options: ['3', '4', '5', '6'],
+    correctAnswer: '4', explanation: 'It is 4.',
+  };
+
+  it('a wrong answer in Speed Run costs time, never a life', () => {
+    // Speed Run has playerHP 0. The lives rule added for the new modes must not
+    // start ending speed runs on the first mistake.
+    let s = startState(MODES['speed-run'], Array.from({ length: 50 }, () => q), 'Maths');
+    s = applyAnswer(s, false);
+    expect(s.over).toBe(false);
+    expect(s.playerHP).toBe(0);
+    expect(s.timeLeft).toBe(60 - MODES['speed-run'].wrongPenalty);
+  });
+});

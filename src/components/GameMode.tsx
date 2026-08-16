@@ -1,24 +1,33 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, Check, X, Flame, Timer, Target, Heart, Trophy, Zap, Ghost, Loader2,
+  Skull, Mountain, Sparkles,
 } from 'lucide-react';
 import {
-  MODES, startState, applyAnswer, tickClock, completionBonus, accuracy,
+  MODES, MODE_ORDER, startState, applyAnswer, tickClock, completionBonus, accuracy,
   type ModeId, type ModeState,
 } from '../lib/gameModes';
 import { lineFor, pickBoss } from '../lib/bosses';
 import { listMistakes, asQuiz, recordMistake, retireMistake, type Mistake } from '../lib/mistakes';
 import type { QuizQuestion } from '../App';
+import { toast } from 'sonner';
+import { callAI } from '../lib/aiService';
+import { buildStudyPrompt, parseJsonReply, normaliseQuiz } from '../lib/studyPrompts';
 
 /**
  * THE ARCADE — Speed Run and Boss Battle, ported from ReviseGo.
  *
  * The rules live in `lib/gameModes.ts`; this only draws them and owns the clock.
  *
- * QUESTIONS COME FROM YOUR SAVED MISTAKES. That is deliberate: it costs no AI
- * call, it works offline, and it points the fun part of the app at the questions
- * you actually got wrong. A mode that generated fresh questions would burn tokens
- * to quiz you on things you already know.
+ * QUESTIONS COME FROM YOUR SAVED MISTAKES, by preference: it costs no AI call, it
+ * works offline, and it points the fun part of the app at the questions you
+ * actually got wrong.
+ *
+ * But that was ALSO the reason the Arcade was empty. A new account has no
+ * mistakes, and the only way to get one was to sit a quiz and fail a question —
+ * so the games were locked behind the exact thing the games were meant to make
+ * appealing. Quick Play breaks that circle: name a topic and it generates a round
+ * on the spot. Your mistakes are still the default pool whenever you have one.
  */
 
 interface GameModeProps {
@@ -84,17 +93,64 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
     onAwardXP(state.xp + completionBonus(state));
   }, [state?.over, awarded, state, onAwardXP]);
 
-  const begin = useCallback((id: ModeId) => {
-    if (!pool?.length) return;
+  /** Start a round from any deck. Shared by the mistakes pool and Quick Play. */
+  const startRound = useCallback((id: ModeId, deck: QuizQuestion[], subject: string) => {
+    if (!deck.length) return;
     // Enough to keep a 60-second run going without repeating immediately.
-    const deck = shuffle(pool);
-    const filled = deck.length >= 25 ? deck : Array.from(
-      { length: 25 }, (_, i) => deck[i % deck.length]
+    const shuffled = shuffle(deck);
+    const filled = shuffled.length >= 25 ? shuffled : Array.from(
+      { length: 25 }, (_, i) => shuffled[i % shuffled.length]
     );
     setAwarded(false);
     setPicked(null);
-    setState(startState(MODES[id], filled, dominantSubject));
-  }, [pool, dominantSubject]);
+    setState(startState(MODES[id], filled, subject));
+  }, []);
+
+  const begin = useCallback((id: ModeId) => {
+    if (!pool?.length) return;
+    startRound(id, pool, dominantSubject);
+  }, [pool, dominantSubject, startRound]);
+
+  /* ── Quick Play ───────────────────────────────────────
+     Generated questions, for when there is nothing to drill yet. */
+  const [topic, setTopic] = useState('');
+  const [generated, setGenerated] = useState<QuizQuestion[] | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [pendingMode, setPendingMode] = useState<ModeId | null>(null);
+
+  const generateRound = useCallback(async (mode: ModeId) => {
+    const subject = topic.trim();
+    if (subject.length < 3) {
+      toast.error('Type a topic first — "photosynthesis", "trig", "Macbeth".');
+      return;
+    }
+    setIsGenerating(true);
+    setPendingMode(mode);
+    try {
+      const prompt = buildStudyPrompt({
+        mode: 'quiz',
+        content: `Write GCSE-level questions about: ${subject}`,
+        options: { shorter: false, examFocused: true, bulletPoints: false },
+        // Pro-sized deck regardless of plan: a 5-question deck makes a 60-second
+        // Speed Run repeat itself almost immediately.
+        isPro: true,
+        source: 'text',
+      });
+      const raw = await callAI(prompt);
+      if (!raw) throw new Error('The AI returned nothing.');
+      const questions = normaliseQuiz(parseJsonReply(raw));
+      setGenerated(questions);
+      startRound(mode, questions, subject);
+    } catch (err: any) {
+      console.error('[arcade generate]', err);
+      toast.error(err?.message === 'TOKEN_LIMIT_EXCEEDED'
+        ? 'You have hit your AI limit for now. Your saved mistakes still work.'
+        : 'Could not make questions for that. Try a simpler topic.');
+    } finally {
+      setIsGenerating(false);
+      setPendingMode(null);
+    }
+  }, [topic]);
 
   const current = state && !state.over ? state.questions[state.index] : null;
 
@@ -161,50 +217,95 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
   /* ── mode picker ─────────────────────────────────────── */
   if (!state) {
     const enough = pool.length >= 4;
+    const ICONS: Record<ModeId, typeof Zap> = {
+      'speed-run': Zap, 'boss-battle': Ghost, 'sudden-death': Skull, marathon: Mountain,
+    };
+
     return (
       <div className="w-full max-w-4xl mx-auto px-4 py-8">
         {back}
         <p className="text-xs uppercase tracking-[0.18em] text-brand-purple font-bold mb-1">Arcade</p>
-        <h1 className="text-3xl font-bold text-text-main mb-2">Drill your mistakes</h1>
+        <h1 className="text-3xl font-bold text-text-main mb-2">Four games. Same questions.</h1>
         <p className="text-text-dim mb-8">
           {enough
-            ? `Both modes quiz you on the ${pool.length} question${pool.length === 1 ? '' : 's'} you've got wrong. Get one right and it leaves your list.`
-            : 'You need a few saved mistakes to play. Answer some quiz questions wrong first — that is the pool.'}
+            ? `Every mode quizzes you on the ${pool.length} question${pool.length === 1 ? '' : 's'} you have got wrong. Get one right and it leaves your list.`
+            : 'Nothing saved to drill yet — so pick a topic below and it will make you a round.'}
         </p>
 
-        {!enough && (
-          <div className="rounded-2xl border border-dashed border-border-main p-10 text-center text-text-dim">
-            Nothing to drill yet. Generate a quiz and get something wrong.
-          </div>
-        )}
+        {/*
+          QUICK PLAY.
 
-        {enough && (
-          <div className="grid gap-4 sm:grid-cols-2">
-            {(['speed-run', 'boss-battle'] as ModeId[]).map((id) => {
-              const m = MODES[id];
-              const Icon = id === 'speed-run' ? Zap : Ghost;
-              return (
-                <button
-                  key={id}
-                  onClick={() => begin(id)}
-                  className="text-left rounded-2xl border border-border-main bg-glass-bg p-6 hover:border-brand-purple transition-colors"
-                >
-                  <Icon className="w-7 h-7 text-brand-purple mb-3" />
-                  <h2 className="text-lg font-bold text-text-main mb-1">{m.name}</h2>
-                  <p className="text-sm text-text-dim">{m.blurb}</p>
-                  {/* Naming who you are about to face turns a mode into a fight. */}
-                  {id === 'boss-battle' && (
-                    <p className="mt-3 pt-3 border-t border-border-main text-xs text-text-dim">
-                      You face <span className="text-red-400 font-semibold">
-                        {pickBoss(dominantSubject).name}
-                      </span>, {pickBoss(dominantSubject).title}
-                    </p>
-                  )}
-                </button>
-              );
-            })}
+          The Arcade used to be locked until you had four saved mistakes, which
+          you could only earn by failing quiz questions. The games were gated
+          behind the thing they existed to make appealing, so a new account saw
+          an empty room. Name a topic and it builds a round on the spot.
+        */}
+        <div className="rounded-2xl border border-border-main bg-glass-bg p-6 mb-8">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles className="w-4 h-4 text-brand-purple" />
+            <h2 className="text-sm font-bold text-text-main uppercase tracking-widest">Quick Play</h2>
           </div>
-        )}
+          <p className="text-sm text-text-dim mb-4">
+            {generated
+              ? `${generated.length} questions ready on "${topic}". Pick a mode below.`
+              : 'Type any topic and it will write you a round.'}
+          </p>
+          <input
+            value={topic}
+            onChange={(e) => setTopic(e.target.value)}
+            placeholder="e.g. photosynthesis, quadratic equations, Macbeth"
+            className="w-full px-4 py-3 rounded-xl bg-black/20 border border-border-main text-text-main placeholder:text-text-dim/50 focus:outline-none focus:border-brand-purple/60 transition-all"
+          />
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          {MODE_ORDER.map((id) => {
+            const m = MODES[id];
+            const Icon = ICONS[id];
+            const busy = isGenerating && pendingMode === id;
+            // Saved mistakes are the better pool, so they win when there are
+            // enough of them. Otherwise the topic box drives the round.
+            const useMistakes = enough;
+            const ready = useMistakes || topic.trim().length >= 3;
+
+            return (
+              <button
+                key={id}
+                disabled={!ready || isGenerating}
+                onClick={() => {
+                  if (useMistakes) begin(id);
+                  else if (generated) startRound(id, generated, topic.trim());
+                  else generateRound(id);
+                }}
+                className="text-left rounded-2xl border border-border-main bg-glass-bg p-6 hover:border-brand-purple transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-border-main"
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  {busy
+                    ? <Loader2 className="w-7 h-7 text-brand-purple animate-spin" />
+                    : <Icon className="w-7 h-7 text-brand-purple" />}
+                </div>
+                <h2 className="text-lg font-bold text-text-main mb-1">{m.name}</h2>
+                <p className="text-sm text-text-dim">{m.blurb}</p>
+
+                {/* Naming who you are about to face turns a mode into a fight. */}
+                {id === 'boss-battle' && (
+                  <p className="mt-3 pt-3 border-t border-border-main text-xs text-text-dim">
+                    You face <span className="text-red-400 font-semibold">
+                      {pickBoss(useMistakes ? dominantSubject : topic).name}
+                    </span>, {pickBoss(useMistakes ? dominantSubject : topic).title}
+                  </p>
+                )}
+
+                <p className="mt-3 text-[11px] font-bold uppercase tracking-widest text-brand-purple/70">
+                  {busy ? 'Writing questions...'
+                    : useMistakes ? 'From your mistakes'
+                    : generated ? 'From your topic'
+                    : ready ? 'Make a round' : 'Type a topic first'}
+                </p>
+              </button>
+            );
+          })}
+        </div>
       </div>
     );
   }
@@ -268,10 +369,19 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP }) => {
             urgent={state.timeLeft <= 10}
           />
         )}
-        {state.mode.bossHP > 0 && (
-          <Cell icon={<Heart className="w-4 h-4" />} value={state.playerHP} label="health"
+        {/* Lives, in every mode that has them — was `bossHP > 0`, which hid the
+            counter in Sudden Death and Marathon, the two modes where losing a
+            life is the entire tension. */}
+        {state.mode.playerHP > 0 && (
+          <Cell icon={<Heart className="w-4 h-4" />} value={state.playerHP}
+                label={state.mode.bossHP > 0 ? 'health' : state.playerHP === 1 ? 'life' : 'lives'}
                 urgent={state.playerHP <= 1} />
         )}
+        {/* Marathon is a fixed length, so how far through you are IS the progress. */}
+        {state.mode.questionLimit ? (
+          <Cell icon={<Mountain className="w-4 h-4" />}
+                value={`${state.answered}/${state.mode.questionLimit}`} label="done" />
+        ) : null}
         <Cell icon={<Target className="w-4 h-4" />} value={state.score} label={state.mode.scoreLabel} />
         <Cell icon={<Flame className="w-4 h-4" />} value={state.combo} label="combo"
               hot={state.combo >= 3} />

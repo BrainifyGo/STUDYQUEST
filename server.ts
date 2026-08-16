@@ -250,6 +250,12 @@ async function startServer() {
       socket.to(roomId).emit("typing", { userName, typing: !!typing });
     });
 
+    // A quiz built inside a room, shared with everyone in it. Relayed rather
+    // than stored: the room is ephemeral and so is the quiz.
+    socket.on("room-quiz", ({ roomId, quiz }) => {
+      socket.to(roomId).emit("room-quiz", quiz);
+    });
+
     socket.on("notes-update", ({ roomId, notes }) => {
       socket.to(roomId).emit("notes-update", notes);
     });

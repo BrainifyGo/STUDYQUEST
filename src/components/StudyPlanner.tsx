@@ -17,6 +17,8 @@ import {
 import { cn } from '../lib/utils';
 import { db, auth, collection, query, where, getDocs, addDoc, deleteDoc, doc, updateDoc, handleFirestoreError, OperationType } from '../lib/firebase';
 import { callAI } from '../lib/aiService';
+import { buildStudyPrompt, parseJsonReply, normaliseQuiz } from '../lib/studyPrompts';
+import Markdown from 'react-markdown';
 import { toast } from 'sonner';
 
 interface Exam {
@@ -113,6 +115,57 @@ export default function StudyPlanner() {
     }
   };
 
+  /*
+    A task you can actually DO.
+
+    The planner produced titles — "Study Chapter 1", "Revise photosynthesis" —
+    and then stopped. There was no way to revise from inside the plan: no
+    questions, no notes, nothing but a tick box to mark work you had to go and do
+    somewhere else. These two buttons make each task a piece of work rather than
+    a reminder to find one.
+  */
+  const [openTask, setOpenTask] = useState<string | null>(null);
+  const [taskWork, setTaskWork] = useState<Record<string, { kind: 'quiz' | 'help'; quiz?: any[]; text?: string }>>({});
+  const [busyTask, setBusyTask] = useState<string | null>(null);
+  const [revealed, setRevealed] = useState<Record<string, string>>({});
+
+  const workOnTask = async (task: StudyTask, kind: 'quiz' | 'help') => {
+    setBusyTask(task.id + kind);
+    setOpenTask(task.id);
+    try {
+      const topic = `${task.title}${task.subject ? ` (${task.subject})` : ''}`;
+      if (kind === 'quiz') {
+        const prompt = buildStudyPrompt({
+          mode: 'quiz',
+          content: `Write GCSE-level questions for this revision task: ${topic}`,
+          options: { shorter: false, examFocused: true, bulletPoints: false },
+          isPro: false, source: 'text',
+        });
+        const raw = await callAI(prompt);
+        if (!raw) throw new Error('The AI returned nothing.');
+        setTaskWork((prev) => ({ ...prev, [task.id]: { kind: 'quiz', quiz: normaliseQuiz(parseJsonReply(raw)) } }));
+      } else {
+        const prompt = buildStudyPrompt({
+          mode: 'explain',
+          content: `Explain what a GCSE student needs to know for this revision task: ${topic}`,
+          options: { shorter: true, examFocused: true, bulletPoints: false },
+          isPro: false, source: 'text',
+        });
+        const raw = await callAI(prompt);
+        if (!raw) throw new Error('The AI returned nothing.');
+        setTaskWork((prev) => ({ ...prev, [task.id]: { kind: 'help', text: raw } }));
+      }
+    } catch (err: any) {
+      console.error('[planner task]', err);
+      toast.error(err?.message === 'TOKEN_LIMIT_EXCEEDED'
+        ? "That is your AI limit for now."
+        : 'Could not build that. Try again in a moment.');
+      setOpenTask(null);
+    } finally {
+      setBusyTask(null);
+    }
+  };
+
   const generateSchedule = async () => {
     if (exams.length === 0 || !auth.currentUser) return;
     
@@ -129,12 +182,11 @@ export default function StudyPlanner() {
       `;
 
       const result = await callAI(prompt);
-      let generatedTasks;
-      try {
-        generatedTasks = JSON.parse(result);
-      } catch {
-        const jsonMatch = result.match(/\[[\s\S]*\]/);
-        generatedTasks = JSON.parse(jsonMatch ? jsonMatch[0] : result);
+      // Shared, fence-tolerant parsing. The hand-rolled version here threw on a
+      // ```json fence, which is what the model returns roughly half the time.
+      const generatedTasks = parseJsonReply(result) as any[];
+      if (!Array.isArray(generatedTasks) || !generatedTasks.length) {
+        throw new Error('The AI did not return a usable plan.');
       }
 
       // Save tasks to Firestore
@@ -332,8 +384,8 @@ export default function StudyPlanner() {
                     
                     <div className="grid grid-cols-1 gap-3">
                       {tasks.filter(t => t.date === date).map(task => (
-                        <motion.div 
-                          key={task.id}
+                        <React.Fragment key={task.id}>
+                        <motion.div
                           layout
                           className={cn(
                             "glass p-4 rounded-2xl border flex items-center gap-4 transition-all",
@@ -364,7 +416,91 @@ export default function StudyPlanner() {
                               </span>
                             </div>
                           </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              onClick={() => workOnTask(task, 'quiz')}
+                              disabled={!!busyTask}
+                              className="px-3 py-1.5 rounded-lg bg-brand-purple/15 border border-brand-purple/30 text-brand-purple text-[11px] font-bold hover:bg-brand-purple hover:text-white transition-all disabled:opacity-40"
+                            >
+                              {busyTask === task.id + 'quiz' ? '...' : 'Practise'}
+                            </button>
+                            <button
+                              onClick={() => workOnTask(task, 'help')}
+                              disabled={!!busyTask}
+                              className="px-3 py-1.5 rounded-lg bg-glass-bg border border-border-main text-text-dim text-[11px] font-bold hover:text-text-main transition-all disabled:opacity-40"
+                            >
+                              {busyTask === task.id + 'help' ? '...' : 'Help me'}
+                            </button>
+                          </div>
                         </motion.div>
+
+                        {openTask === task.id && taskWork[task.id] && (
+                          <div className="glass p-5 rounded-2xl border border-brand-purple/30 space-y-4">
+                            <div className="flex items-center justify-between">
+                              <h5 className="text-xs font-black uppercase tracking-widest text-brand-purple">
+                                {taskWork[task.id].kind === 'quiz' ? 'Practice questions' : 'What you need to know'}
+                              </h5>
+                              <button
+                                onClick={() => setOpenTask(null)}
+                                className="text-xs font-bold text-text-dim hover:text-text-main"
+                              >
+                                Close
+                              </button>
+                            </div>
+
+                            {taskWork[task.id].kind === 'help' && (
+                              <div className="prose prose-sm prose-invert max-w-none text-text-muted">
+                                <Markdown>{taskWork[task.id].text || ''}</Markdown>
+                              </div>
+                            )}
+
+                            {taskWork[task.id].kind === 'quiz' && (
+                              <div className="space-y-4">
+                                {(taskWork[task.id].quiz || []).map((q: any, qi: number) => {
+                                  const key = task.id + ':' + qi;
+                                  const chosen = revealed[key];
+                                  return (
+                                    <div key={qi} className="space-y-2">
+                                      <p className="text-sm font-bold text-text-main">{qi + 1}. {q.question}</p>
+                                      <div className="grid gap-2">
+                                        {q.options.map((opt: string) => {
+                                          const isRight = opt === q.correctAnswer;
+                                          const isPicked = chosen === opt;
+                                          return (
+                                            <button
+                                              key={opt}
+                                              disabled={!!chosen}
+                                              onClick={() => setRevealed((prev) => ({ ...prev, [key]: opt }))}
+                                              className={cn(
+                                                'text-left px-3 py-2 rounded-xl border text-sm transition-all',
+                                                !chosen && 'border-border-main hover:border-brand-purple/50 text-text-muted',
+                                                // Never colour alone: the tick and cross carry the
+                                                // same information for anyone who cannot separate
+                                                // the two greens and reds.
+                                                chosen && isRight && 'border-green-500/60 bg-green-500/10 text-green-300',
+                                                chosen && isPicked && !isRight && 'border-red-500/60 bg-red-500/10 text-red-300',
+                                                chosen && !isRight && !isPicked && 'border-border-main text-text-dim opacity-60'
+                                              )}
+                                            >
+                                              {chosen && isRight && <span aria-hidden="true">✓ </span>}
+                                              {chosen && isPicked && !isRight && <span aria-hidden="true">✗ </span>}
+                                              {opt}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                      {chosen && q.explanation && (
+                                        <p className="text-xs text-text-dim leading-relaxed pl-1">{q.explanation}</p>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        </React.Fragment>
                       ))}
                     </div>
                   </div>

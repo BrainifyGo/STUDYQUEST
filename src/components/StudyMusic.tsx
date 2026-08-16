@@ -7,6 +7,10 @@ import {
   startAmbience, stopAmbience, setAmbienceVolume, stopAllAmbience,
   type AmbienceId,
 } from '../lib/ambience';
+import {
+  FOCUS_TONES, playFocusTone, stopFocusTone, setFocusVolume,
+  type FocusToneId,
+} from '../lib/focusTones';
 
 interface StudyMusicProps {
   onClose: () => void;
@@ -25,8 +29,9 @@ interface StudyTrack {
 const STUDY_TRACKS: StudyTrack[] = [
   { id: 'jfKfPfyJRdk', title: 'Lofi Hip Hop', category: 'Lo-Fi' },
   { id: '5qap5aO4i9A', title: 'Chill Beats', category: 'Lo-Fi' },
-  { id: 'DWcJFNfaw9c', title: 'Deep Focus', category: 'Focus' },
-  { id: 'lTRiuFIWV54', title: 'Alpha Waves', category: 'Focus' },
+  // Deep Focus and Alpha Waves used to be YouTube embeds here. They are
+  // generated now (src/lib/focusTones.ts) — the whole Focus tab works with no
+  // network at all, which is the only way to stop it breaking again.
   // Was `__eq8T5b4-w`, which is gone from YouTube — checked, it 404s on oEmbed,
   // so the Classical tab had exactly one track and that track was a dead frame.
   // Every id in this list was verified live before shipping.
@@ -130,6 +135,28 @@ export default function StudyMusic({ onClose }: StudyMusicProps) {
   const handleVolumeChange = (id: AmbienceId, volume: number) => {
     setActiveAmbients(prev => ({ ...prev, [id]: { ...prev[id], volume } }));
     setAmbienceVolume(id, volume);
+  };
+
+  const [activeTone, setActiveTone] = useState<FocusToneId | null>(null);
+  const [toneVolume, setToneVolume] = useState(0.5);
+
+  useEffect(() => () => stopFocusTone(), []);
+
+  const toggleTone = (id: FocusToneId) => {
+    if (activeTone === id) {
+      stopFocusTone();
+      setActiveTone(null);
+      return;
+    }
+    try {
+      playFocusTone(id, toneVolume);
+      setActiveTone(id);
+      // A generated tone replaces a video; two things playing at once is a mess.
+      setActiveTrackId(null);
+    } catch (err) {
+      console.warn('[focus]', err);
+      toast.error('Your browser will not play generated audio.');
+    }
   };
 
   const activeTrackIdRef = useRef<string | null>(null);
@@ -270,6 +297,63 @@ export default function StudyMusic({ onClose }: StudyMusicProps) {
               </button>
             );
           })}
+        </div>
+      )}
+
+      {/* Focus tones — generated, so this tab cannot go dark. */}
+      {activeCategory === 'Focus' && (
+        <div className="p-4 space-y-3">
+          <p className="text-[10px] font-black uppercase tracking-widest text-text-dim">
+            Generated in your browser — works offline
+          </p>
+          {FOCUS_TONES.map((tone) => {
+            const isOn = activeTone === tone.id;
+            return (
+              <button
+                key={tone.id}
+                onClick={() => toggleTone(tone.id)}
+                className={cn(
+                  'w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all border',
+                  isOn ? 'bg-brand-purple/20 border-brand-purple'
+                       : 'bg-glass-bg border-border-main hover:border-brand-purple/40'
+                )}
+              >
+                <div className={cn(
+                  'w-9 h-9 rounded-lg flex items-center justify-center shrink-0',
+                  isOn ? 'bg-brand-purple text-white' : 'bg-black/20 text-text-dim'
+                )}>
+                  {isOn ? <Pause size={16} /> : <Play size={16} />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-text-main">{tone.title}</p>
+                  <p className="text-[11px] text-text-dim leading-snug">{tone.blurb}</p>
+                </div>
+              </button>
+            );
+          })}
+
+          {activeTone && (
+            <div className="flex items-center gap-2 pt-1">
+              <Volume2 size={14} className="text-text-dim shrink-0" />
+              <input
+                type="range"
+                min="0" max="1" step="0.01"
+                value={toneVolume}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  setToneVolume(v);
+                  setFocusVolume(v);
+                }}
+                className="w-full h-1 accent-brand-purple"
+                aria-label="Focus tone volume"
+              />
+            </div>
+          )}
+
+          <p className="text-[10px] text-text-dim/70 leading-relaxed pt-1">
+            These are tones and noise, described by how they sound. We make no
+            claim that they change how well you concentrate.
+          </p>
         </div>
       )}
 

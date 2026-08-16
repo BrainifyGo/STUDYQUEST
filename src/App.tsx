@@ -279,6 +279,26 @@ export default function App() {
   const sidebarProgress = levelProgress(userData?.xp || 0);
 
   /*
+    Hide the header on the way down, bring it back on the way up.
+
+    A sticky header that never moves costs the same strip of every screen
+    forever, which on a phone is about a fifth of the page. The threshold stops
+    it flickering: a couple of pixels of scroll jitter should not toggle it, and
+    it always returns near the top.
+  */
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const lastScrollY = useRef(0);
+  const [headerHidden, setHeaderHidden] = useState(false);
+
+  const handleContentScroll = useCallback(() => {
+    const y = scrollAreaRef.current?.scrollTop ?? 0;
+    const delta = y - lastScrollY.current;
+    if (Math.abs(delta) < 8) return;
+    setHeaderHidden(y > 80 && delta > 0);
+    lastScrollY.current = y;
+  }, []);
+
+  /*
     Get out of the way in a study room.
 
     A room is its own workspace — participants, chat, a shared kit — and it does
@@ -1379,6 +1399,21 @@ export default function App() {
     const newOutputModes = { ...outputModes, flashcards: updatedFlashcards };
     setOutputModes(newOutputModes);
 
+    /*
+      Say something.
+
+      These four buttons were reported as "inactive". They were not — they ran
+      the whole spaced-repetition calculation and saved it. They just changed
+      nothing you could see: same card, same face, no message. A button that
+      produces no visible effect is indistinguishable from a broken one, and the
+      only honest fix is to show the result.
+    */
+    toast.success(
+      newInterval === 1
+        ? 'Noted — you will see this card again tomorrow.'
+        : `Got it. Next review in ${newInterval} day${newInterval === 1 ? '' : 's'}.`
+    );
+
     // Update history state
     if (currentHistoryId) {
       setHistory(prev => prev.map(item => 
@@ -1513,6 +1548,11 @@ export default function App() {
           {(content as Flashcard[]).map((card, i) => (
             <div key={i} className="space-y-2">
               <FlashcardComponent card={card} />
+              {card.nextReview && (
+                <p className="text-center text-[10px] font-bold uppercase tracking-widest text-brand-purple">
+                  Next review {card.nextReview}
+                </p>
+              )}
               <div className="flex items-center gap-1 justify-center">
                 <button 
                   onClick={() => handleSRS(i, 1)}
@@ -2138,9 +2178,32 @@ export default function App() {
       </AnimatePresence>
 
       {/* --- Main Content --- */}
-      <main className="flex-1 flex flex-col h-screen overflow-hidden relative transition-all duration-300 scrollbar-hide max-w-full">
+      {/*
+        The sidebar is `fixed`, so it is out of the document flow and <main>
+        started at x=0 underneath it. Only the LOGO was pushed clear, with an
+        ml-64 — so the header looked right and every page below it was sitting
+        under the sidebar. That is the "sidebar hovers over other tabs" report.
+        Main is now padded by the sidebar's real width on desktop; on mobile the
+        sidebar stays a proper overlay with its backdrop.
+      */}
+      <main
+        className={cn(
+          "flex-1 flex flex-col h-screen overflow-hidden relative transition-all duration-300 scrollbar-hide max-w-full",
+          sidebarOpen ? (sidebarCollapsed ? "md:pl-20" : "md:pl-64") : "pl-0"
+        )}
+      >
         {/* Sticky Header */}
-        <header className="sticky top-0 z-40 glass border-b border-border-main px-3 md:px-6 py-2 flex items-center justify-between gap-2">
+        <header
+          className={cn(
+            "sticky top-0 z-40 glass-panel border-b border-border-main px-3 md:px-6 py-2",
+            "flex items-center justify-between gap-2",
+            // Slides away as you read down and comes straight back the moment you
+            // scroll up. It used to sit there permanently, eating the top of every
+            // screen — worst on a phone, where it cost a fifth of the page.
+            "transition-transform duration-300 will-change-transform",
+            headerHidden ? "-translate-y-full" : "translate-y-0"
+          )}
+        >
           {/* LEFT: hamburger + streak (streak hidden on mobile) */}
           <div className="flex items-center gap-2 min-w-0">
             {!sidebarOpen && (
@@ -2152,12 +2215,10 @@ export default function App() {
               </button>
             )}
             
-            <div className={cn(
-              "transition-all duration-300",
-              sidebarOpen ? "ml-64" : "ml-0"
-            )}>
-              <Logo size={62} />
-            </div>
+            {/* The ml-64 that used to be here was compensating for the sidebar
+                overlapping main. Main is padded properly now, so the logo sits
+                where it belongs. */}
+            <Logo size={62} />
 
             <div className="hidden sm:flex items-center gap-2 bg-glass-bg px-3 py-1.5 rounded-full border border-border-main shrink-0">
               <Flame size={16} className={(userData?.studyDays || []).includes(localDateStr()) ? "text-orange-500 animate-pulse" : "text-text-dim"} />
@@ -2304,7 +2365,10 @@ export default function App() {
           </div>
         </header>
 
-        <div className="w-full max-w-7xl mx-auto p-3 sm:p-4 md:p-6 lg:p-8 space-y-6 lg:space-y-12 pb-28 lg:pb-12 overflow-x-hidden overflow-y-auto scrollbar-hide">
+        <div
+          ref={scrollAreaRef}
+          onScroll={handleContentScroll}
+          className="w-full max-w-7xl mx-auto p-3 sm:p-4 md:p-6 lg:p-8 space-y-6 lg:space-y-12 pb-28 lg:pb-12 overflow-x-hidden overflow-y-auto scrollbar-hide">
           {/* One boundary for every route-level view. They are code-split, so each one's
               JavaScript is fetched the first time you open it rather than up front — the whole
               app used to arrive in a single 2.7 MB file before the first flashcard appeared.
@@ -2474,13 +2538,20 @@ export default function App() {
                             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center space-y-4 z-20">
                               <div className="w-10 h-10 border-4 border-brand-purple/20 border-t-brand-purple rounded-full animate-spin"></div>
                               <p className="text-sm font-medium text-brand-purple">
-                                {isPdfProcessing ? `Extracting PDF... ${pdfProgress}%` : 'Processing...'}
+                                {/* pdfProgress is {progress, currentPage, totalPages}, and this
+                                    used to interpolate the whole object — the label read
+                                    "Extracting PDF... [object Object]%" and the bar below it
+                                    was given a width of "[object Object]%", which is not a
+                                    length, so it never moved. */}
+                                {isPdfProcessing
+                                  ? `Extracting page ${pdfProgress?.currentPage ?? 0} of ${pdfProgress?.totalPages ?? '?'}`
+                                  : 'Processing...'}
                               </p>
                               {isPdfProcessing && (
                                 <div className="w-48 h-1.5 bg-white/10 rounded-full overflow-hidden">
                                   <div 
                                     className="h-full bg-brand-purple transition-all duration-300" 
-                                    style={{ width: `${pdfProgress}%` }}
+                                    style={{ width: `${pdfProgress?.progress ?? 0}%` }}
                                   />
                                 </div>
                               )}
@@ -2496,10 +2567,33 @@ export default function App() {
                             type="file"
                             accept=".pdf"
                             className="hidden"
-                            onChange={(e) => {
+                            onChange={async (e) => {
                               const file = e.target.files?.[0];
-                              if (file) {
-                                uploadPdf(file);
+                              // Reset first, so picking the SAME file again re-fires
+                              // onChange. Without this, one failed upload meant the
+                              // input was dead until you chose a different file.
+                              e.target.value = '';
+                              if (!file) return;
+                              try {
+                                /*
+                                  The result was previously dropped on the floor:
+                                  uploadPdf's promise was ignored and the hook's
+                                  `extractedText` was destructured in this component and
+                                  then never read by anything. The PDF was parsed
+                                  correctly and the text went nowhere, which is why the
+                                  upload appeared to do nothing at all.
+                                */
+                                const text = await uploadPdf(file);
+                                if (!text || !text.trim()) {
+                                  toast.error('No text found in that PDF. If it is a scan, use Snap instead.');
+                                  return;
+                                }
+                                setInputText(text);
+                                setCharCount(text.length);
+                                toast.success(`Read ${text.length.toLocaleString()} characters from ${file.name}`);
+                              } catch (err: any) {
+                                console.error('[pdf]', err);
+                                toast.error(err?.message || 'Could not read that PDF.');
                               }
                             }}
                           />

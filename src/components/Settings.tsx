@@ -388,7 +388,9 @@ export const Settings: React.FC = () => {
               <h3 className="font-bold">Danger Zone</h3>
             </div>
             <p className="text-sm text-red-400/70">Once you delete your account, there is no going back. Please be certain.</p>
-            {deleteError && (
+            {/* Only when the dialog is closed. With it open, this and the copy
+                inside the dialog both rendered the same message at once. */}
+            {deleteError && !showDeleteConfirm && (
               <div className="flex items-center gap-2 text-red-400 text-xs font-medium">
                 <AlertCircle size={14} />
                 {deleteError}
@@ -450,7 +452,7 @@ export const Settings: React.FC = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => !isDeleting && setShowDeleteConfirm(false)}
+              onClick={() => { if (!isDeleting) { setShowDeleteConfirm(false); setDeletePassword(''); setDeleteError(null); } }}
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             />
             <motion.div
@@ -487,7 +489,7 @@ export const Settings: React.FC = () => {
 
                 <div className="flex gap-3 w-full pt-4">
                   <button
-                    onClick={() => setShowDeleteConfirm(false)}
+                    onClick={() => { setShowDeleteConfirm(false); setDeletePassword(''); setDeleteError(null); }}
                     disabled={isDeleting}
                     className="flex-1 py-3 rounded-xl bg-glass-bg border border-border-main text-text-muted font-bold hover:text-text-main transition-all disabled:opacity-50"
                   >

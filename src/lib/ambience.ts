@@ -39,7 +39,11 @@ const NOISE_SECONDS = 4;
 export const LAYER_TRIM: Record<AmbienceId, number> = {
   rain: 0.55,
   waves: 0.75,
-  forest: 0.5,
+  // Forest was 0.5, and its wind bed was attenuated a further 0.35 inside the
+  // graph — so at a half-way slider it came out around 0.04, roughly a third of
+  // rain at the same setting. That is why it read as "missing": it was playing,
+  // three times too quietly to hear over anything else.
+  forest: 0.8,
   'white-noise': 0.28,
 };
 
@@ -185,7 +189,7 @@ function buildLayer(ac: AudioContext, id: AmbienceId, out: GainNode): Layer {
       lp.type = 'lowpass';
       lp.frequency.value = 2200;
       const bed = ac.createGain();
-      bed.gain.value = 0.35;
+      bed.gain.value = 0.85;
       src.connect(lp).connect(bed).connect(gain);
       src.start();
       stops.push(src);
@@ -206,15 +210,17 @@ function buildLayer(ac: AudioContext, id: AmbienceId, out: GainNode): Layer {
           osc.frequency.setValueAtTime(base, t);
           osc.frequency.exponentialRampToValueAtTime(base * 1.5, t + 0.07);
           env.gain.setValueAtTime(0.0001, t);
-          env.gain.exponentialRampToValueAtTime(0.08, t + 0.012);
+          env.gain.exponentialRampToValueAtTime(0.22, t + 0.012);
           env.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
           osc.connect(env).connect(gain);
           osc.start(t);
           osc.stop(t + 0.12);
         }
-        timer = setTimeout(chirp, 3500 + Math.random() * 9000);
+        // Was every 3.5–12.5s and near-inaudible, so a forest was rain with the
+        // treble off. Birds are the only thing that make it read as a forest.
+        timer = setTimeout(chirp, 2000 + Math.random() * 5000);
       };
-      timer = setTimeout(chirp, 1500 + Math.random() * 4000);
+      timer = setTimeout(chirp, 600 + Math.random() * 1500);
       stops.push({ stop: () => { if (timer) clearTimeout(timer); } });
       break;
     }

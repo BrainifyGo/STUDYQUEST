@@ -10,6 +10,10 @@ import {
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import { cn } from '../lib/utils';
+import { toast } from 'sonner';
+import { callAI } from '../lib/aiService';
+import { buildStudyPrompt, parseJsonReply, normaliseQuiz } from '../lib/studyPrompts';
+import type { QuizQuestion } from '../App';
 
 interface ChatMessage {
   id: string;
@@ -47,7 +51,9 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
     kind, so it sat permanently over the shared notes — the thing you joined the
     room to write in. Minimised, it becomes a bar with an unread count.
   */
-  const [chatMinimised, setChatMinimised] = useState(false);
+  const [chatMinimised, setChatMinimised] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < 768
+  );
   const [unread, setUnread] = useState(0);
   /** Who else is typing right now — from GhostChat. */
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
@@ -74,6 +80,42 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
     const id = joinInput.trim().toUpperCase();
     if (!id) return;
     setActiveRoomId(id);
+  };
+
+  const [roomQuiz, setRoomQuiz] = useState<QuizQuestion[]>([]);
+  const [isMakingQuiz, setIsMakingQuiz] = useState(false);
+
+  /** Build a quiz from whatever the room has written, and share it with everyone. */
+  const generateRoomQuiz = async () => {
+    const notes = sharedNotes.trim();
+    if (notes.length < 80) {
+      toast.error('Write a bit more in the shared notes first.');
+      return;
+    }
+    setIsMakingQuiz(true);
+    try {
+      const prompt = buildStudyPrompt({
+        mode: 'quiz', content: notes,
+        options: { shorter: false, examFocused: false, bulletPoints: false },
+        isPro: false, source: 'text',
+      });
+      const raw = await callAI(prompt);
+      if (!raw) throw new Error('The AI returned nothing.');
+      const questions = normaliseQuiz(parseJsonReply(raw));
+      setRoomQuiz(questions);
+      // Everyone in the room gets the same questions — a "shared" quiz that only
+      // exists on the machine that made it is not shared.
+      socketRef.current?.emit('room-quiz', { roomId: activeRoomId, quiz: questions });
+      addSystemMessage(userName + ' made a ' + questions.length + '-question quiz from the notes');
+      toast.success(questions.length + ' questions ready');
+    } catch (err: any) {
+      console.error('[room quiz]', err);
+      toast.error(err?.message === 'TOKEN_LIMIT_EXCEEDED'
+        ? "That is this account's AI limit for now."
+        : 'Could not make a quiz from those notes. Try adding more detail.');
+    } finally {
+      setIsMakingQuiz(false);
+    }
   };
 
   const handleNotesChange = (value: string) => {
@@ -132,6 +174,10 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
 
     socketRef.current.on('notes-update', (notes: string) => {
       setSharedNotes(notes);
+    });
+
+    socketRef.current.on('room-quiz', (quiz: QuizQuestion[]) => {
+      setRoomQuiz(Array.isArray(quiz) ? quiz : []);
     });
 
     return () => {
@@ -380,18 +426,49 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
                 <div className="space-y-2">
                   <h3 className="text-xl font-bold text-white">Shared Quiz</h3>
                   <p className="text-sm text-white/40">
-                    {currentStudyKit?.quiz 
-                      ? 'Test each other\'s knowledge with a live multiplayer quiz.' 
-                      : 'Generate a quiz first to start a multiplayer session.'}
+                    {roomQuiz.length > 0
+                      ? `${roomQuiz.length} questions, made from your shared notes.`
+                      : sharedNotes.trim().length >= 80
+                      ? "Turn the shared notes into a quiz for everyone in the room."
+                      : "Write some shared notes first, then make a quiz from them."}
                   </p>
                 </div>
-                <button 
-                  onClick={onStartQuiz}
-                  disabled={!currentStudyKit?.quiz}
-                  className="btn-primary px-8 py-3 rounded-2xl font-bold shadow-2xl shadow-brand-purple/20 disabled:opacity-50 disabled:grayscale"
-                >
-                  Start Quiz
-                </button>
+
+                {/*
+                  You can now build a quiz inside the room.
+
+                  Previously the only route to a shared quiz was to leave, generate
+                  one on the dashboard, and come back — so a room with people in it
+                  and notes on the screen still could not produce a single question.
+                  The notes everyone is already writing are the input.
+                */}
+                <div className="flex flex-col sm:flex-row items-center gap-3">
+                  <button
+                    onClick={generateRoomQuiz}
+                    disabled={isMakingQuiz || sharedNotes.trim().length < 80}
+                    className="px-6 py-3 rounded-2xl font-bold border border-white/10 bg-white/5 text-white hover:border-brand-purple/50 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {isMakingQuiz ? (
+                      <>
+                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Making it...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={16} />
+                        Quiz from notes
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={onStartQuiz}
+                    disabled={!currentStudyKit?.quiz && roomQuiz.length === 0}
+                    className="btn-primary px-8 py-3 rounded-2xl font-bold shadow-2xl shadow-brand-purple/20 disabled:opacity-50 disabled:grayscale"
+                  >
+                    Start Quiz
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -413,7 +490,16 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
             <ChevronRight size={16} className={unread > 0 ? 'rotate-[-90deg]' : 'ml-auto rotate-[-90deg]'} />
           </button>
         ) : (
-        <div className="h-[60vh] md:h-auto md:w-96 glass-panel border-t md:border-t-0 md:border-l border-white/10 flex flex-col absolute bottom-0 left-0 right-0 md:relative md:inset-auto shadow-2xl">
+        <>
+        {/* On a phone the chat is a sheet over the room, so it needs a backdrop
+            and a way out. Without one it just appeared and swallowed the bottom
+            of the screen with nothing to tap. Desktop keeps it as a column. */}
+        <div
+          onClick={() => setChatMinimised(true)}
+          className="fixed inset-0 bg-black/50 z-[5] md:hidden"
+          aria-hidden="true"
+        />
+        <div className="h-[45vh] md:h-auto md:w-96 glass-panel border-t md:border-t-0 md:border-l border-white/10 flex flex-col absolute bottom-0 left-0 right-0 z-10 md:z-auto md:relative md:inset-auto shadow-2xl rounded-t-3xl md:rounded-none">
           <div className="p-4 border-b border-white/10 bg-white/5 flex items-center gap-2">
             <MessageSquare size={16} className="text-brand-purple" />
             <span className="text-xs font-black uppercase tracking-widest text-white">Live Chat</span>
@@ -492,6 +578,7 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
             </div>
           </div>
         </div>
+        </>
         )}
       </div>
     </div>
