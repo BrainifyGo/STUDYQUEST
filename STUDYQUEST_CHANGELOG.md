@@ -1296,3 +1296,89 @@ for a paid product, but it is not a surprise anyone should get from a deploy.
 `localStorage.setItem('brainify_test_pro', 'true')` still unlocks everything client-side for testing,
 and the two accounts that need real Pro can have `isPro: true` set on their user document in the
 Firebase console.
+
+---
+
+## [2026-08-17] — Upgrade keys: two minted, and single-use actually proved
+
+**Editor:** Claude Code (Opus 5)
+
+Two annual Pro keys were minted for Ola and Daniel, and the single-use guarantee behind them was
+tested — which turned up a way to spend the same key twice.
+
+### `scripts/makeKeys.cjs` (new)
+
+Keys are generated with `crypto.randomBytes`, not `Math.random`. A guessable upgrade key is a free
+subscription for anybody willing to try a few, and `Math.random` is not built to resist that.
+
+The alphabet excludes `I`, `O`, `0` and `1`. These get read off a screen and typed by hand, and those
+four are the ones people get wrong. The key string is also the **document id**, which is what lets
+redemption be a direct `getDoc` — and therefore lets the rules deny `list`, so nobody can go fishing
+for an unused key.
+
+Written with `create` rather than `set`, so a collision fails loudly instead of quietly resetting an
+already-redeemed key back to unused.
+
+### The hole: the same account could spend a key twice
+
+Two accounts sharing one key was never possible — that is blocked on the key document itself, which
+only permits `isUsed` false → true and which no client may create or delete.
+
+The same account was a different matter:
+
+1. Redeem key K. The account holds `isPro: true`, `redeemedKey: 'K'`.
+2. The subscription lapses and the Lemon Squeezy webhook sets `isPro: false`. `redeemedKey` is left
+   holding `'K'`.
+3. Write `{ redeemedKey: '' }`. **This was allowed**, because `paidFieldsUnchanged()` only looks at
+   `isPro` and `subscriptionType`, and neither of them moved.
+4. Re-redeem K. The guard `k != resource.data.redeemedKey` now compares against `''` and passes; the
+   key still exists, is still `isUsed`, and is still stamped with this uid. Pro granted again.
+
+Step 3 is the whole bug. The guard against re-pointing at a key compared against a field the user was
+free to clear first. `redeemedKey` is now pinned on every write that is not itself a redemption.
+
+### Proved against the live rules, not the rules file
+
+There is no JDK on this machine, so the Firestore emulator cannot run and the existing tests can only
+read `firestore.rules` as text. That is worth something — the new structural test does fail when the
+fix is removed and pass when it is restored, which was checked both ways — but reading a rules file
+is not the same as exercising it.
+
+So the deployed rules were tested directly: two throwaway accounts, one throwaway key, and every
+bypass attempted through the Firestore REST API, which enforces exactly the same rules a browser
+gets. The Admin SDK was used only for setup and cleanup, because it bypasses rules and would have
+proved nothing.
+
+| Attempt | Result |
+|---|---|
+| A claims the key | 200 — allowed |
+| A grants itself Pro with it | 200 — allowed |
+| B claims the already-used key | **403** |
+| B grants itself Pro with A's key | **403** |
+| A clears `redeemedKey` while free *(the hole)* | **403** |
+| A re-redeems the same key | **403** |
+| B simply writes `isPro: true` | **403** |
+
+All seven as intended. Both throwaway accounts and the throwaway key were deleted afterwards, and the
+deletion was verified rather than assumed.
+
+### Verification
+
+- **184 tests passing** (8 new); `tsc` clean; `npm run build` clean; rules deployed.
+- The new structural tests pin all three layers separately: a key may only go unused → used; it is
+  stamped with the claiming uid; clients may never create or delete one; the plan type cannot be
+  swapped mid-redemption (a monthly key must not grant an annual plan); Pro is only granted for a key
+  stamped with *your* uid; `redeemedKey` is pinned outside a redemption; and the collection cannot be
+  listed.
+- The `redeemedKey` test was confirmed to **fail** with the fix reverted, so it is testing the fix
+  rather than passing by accident.
+
+### Files
+
+`scripts/makeKeys.cjs` (new), `firestore.rules`, `tests/rules-structure.test.ts`.
+
+### Worth knowing
+
+Production now holds **six accounts**, up from four — two people signed up on the 16th and 17th
+without being asked to. That makes the Pro gating from the previous entry live for real users, so the
+two keys should be redeemed before anyone demonstrates the app.

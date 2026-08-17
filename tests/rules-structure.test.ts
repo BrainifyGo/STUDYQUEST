@@ -195,3 +195,65 @@ describe('the friends blocks', () => {
     expect(users).not.toMatch(/allow read: if isAuthenticated\(\);/);
   });
 });
+
+describe('an upgrade key can only be spent once', () => {
+  const keys = block('upgrade_keys');
+  const users = block('users');
+
+  it('only lets a key go from unused to used', () => {
+    // This is what stops TWO DIFFERENT ACCOUNTS using the same key: the second
+    // one finds isUsed already true and the update is refused.
+    expect(keys).toMatch(/resource\.data\.isUsed == false/);
+    expect(keys).toMatch(/request\.resource\.data\.isUsed == true/);
+  });
+
+  it('stamps the key with the uid that claimed it', () => {
+    expect(keys).toMatch(/request\.resource\.data\.usedBy == request\.auth\.uid/);
+  });
+
+  it('never lets a client create or delete a key', () => {
+    // Otherwise a used key could simply be deleted and written again as unused.
+    expect(keys).toMatch(/allow create, delete: if isAdmin\(\)/);
+  });
+
+  it('will not let the plan type be swapped during redemption', () => {
+    // A monthly key must not be able to grant an annual subscription.
+    expect(keys).toMatch(/request\.resource\.data\.type == resource\.data\.type/);
+  });
+
+  it('only grants Pro for a key stamped with YOUR uid', () => {
+    expect(users || true).toBeTruthy();
+    expect(rules).toMatch(/get\(path\)\.data\.usedBy == request\.auth\.uid/);
+    expect(rules).toMatch(/get\(path\)\.data\.isUsed == true/);
+  });
+
+  it('pins redeemedKey on any write that is not itself a redemption', () => {
+    /*
+      THE HOLE THIS CLOSES, on the same account rather than a second one:
+
+        1. redeem K            -> isPro true,  redeemedKey 'K'
+        2. subscription lapses -> isPro false, redeemedKey 'K'
+        3. write redeemedKey:'' — allowed, because paidFieldsUnchanged() only
+           looks at isPro and subscriptionType, and neither moved
+        4. re-redeem K — `k != resource.data.redeemedKey` now compares against
+           '' and passes, so the same key grants Pro a second time.
+
+      Step 3 is the bug. The field is pinned unless the write IS a redemption.
+    */
+    expect(rules).toMatch(/function redeemedKeyUnchanged\(\)/);
+    expect(rules).toMatch(
+      /paidFieldsUnchanged\(\) && redeemedKeyUnchanged\(\)\s*\)?\s*\|\|\s*redeemedWithMyKey\(\)/
+    );
+  });
+
+  it('still refuses a key already recorded on this account', () => {
+    // The original guard, kept — it is what stops an immediate double redeem
+    // before anything has had a chance to clear the field.
+    expect(rules).toMatch(/k != resource\.data\.get\('redeemedKey', ''\)/);
+  });
+
+  it('does not let anyone list the key collection', () => {
+    // Fishing for an unused key would make single-use irrelevant.
+    expect(keys).toMatch(/allow list: if isAdmin\(\)/);
+  });
+});

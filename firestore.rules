@@ -190,6 +190,34 @@ service cloud.firestore {
     //
     // This is the no-Cloud-Functions path: Functions need the Blaze plan, and closing the
     // original holes without a replacement would have left nobody able to upgrade at all.
+    /*
+      `redeemedKey` MAY ONLY CHANGE AS PART OF A REDEMPTION.
+
+      Without this, a key could be spent more than once on the SAME account, in
+      three steps:
+
+        1. Redeem key K. The account holds isPro: true, redeemedKey: 'K'.
+        2. The subscription lapses and the Lemon Squeezy webhook sets isPro back
+           to false. `redeemedKey` is left holding 'K'.
+        3. Write { redeemedKey: '' }. That passed, because paidFieldsUnchanged()
+           only looks at isPro and subscriptionType — and both are unchanged.
+        4. Write { isPro: true, subscriptionType: 'annual', redeemedKey: 'K' }.
+           redeemedWithMyKey() now sees k != '' , the key still exists, is still
+           isUsed, and is still stamped with this uid. It PASSES.
+
+      Step 3 is the whole bug: the check that a key cannot be re-pointed-at was
+      `k != resource.data.redeemedKey`, and that is trivially defeated by first
+      clearing the field it compares against. So the field is now pinned on every
+      write that is not itself a redemption.
+
+      Note this does NOT affect one key being used by two different accounts —
+      that has always been blocked on the key document itself, which only permits
+      isUsed false -> true and can never be reset by a client.
+    */
+    function redeemedKeyUnchanged() {
+      return request.resource.data.get('redeemedKey', '') == resource.data.get('redeemedKey', '');
+    }
+
     function redeemedWithMyKey() {
       let k = request.resource.data.get('redeemedKey', '');
       let path = /databases/$(database)/documents/upgrade_keys/$(k);
@@ -218,7 +246,8 @@ service cloud.firestore {
                         && isValidUser(request.resource.data)
                         && (!('role' in resource.data) || request.resource.data.role == resource.data.role)
                         && budgetUnchanged()
-                        && (paidFieldsUnchanged() || redeemedWithMyKey()));
+                        && ((paidFieldsUnchanged() && redeemedKeyUnchanged())
+                            || redeemedWithMyKey()));
       // There was NO delete rule here, so "Delete Account" was rejected by the
       // rules every single time and reported as "something went wrong". You are
       // allowed to delete your own account; that is what the button is for.
