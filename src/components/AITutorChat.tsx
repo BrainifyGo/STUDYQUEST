@@ -60,13 +60,15 @@ export default function AITutorChat({ context, onClose }: AITutorChatProps) {
         - If the user asks something outside the context, try to relate it back to the study material if possible.
       `;
 
-      const result = await callAI(input, systemPrompt);
+      const result = await callAI(input, systemPrompt, undefined, 'ai-tutor');
 
       const assistantMessage: Message = { role: 'assistant', content: result || "I'm sorry, I couldn't process that. Could you try rephrasing?" };
       setMessages(prev => [...prev, assistantMessage]);
     } catch (error: any) {
       console.error('Chat Error:', error);
-      const message = error?.message === 'TOKEN_LIMIT_EXCEEDED'
+      const message = error?.message === 'PRO_REQUIRED'
+        ? "The AI Tutor is part of Pro. Upgrade to ask follow-up questions and get things explained properly."
+        : error?.message === 'TOKEN_LIMIT_EXCEEDED'
         ? "You've hit your AI usage limit for now. Try again later or upgrade to Pro."
         : "Oops! Something went wrong. Please check your connection and try again.";
       setMessages(prev => [...prev, { role: 'assistant', content: message }]);

@@ -109,6 +109,8 @@ const VoiceBuddy = lazy(() => import('./components/VoiceBuddy').then(m => ({ def
 const StudyMusic = lazy(() => import('./components/StudyMusic'));
 const MusicBar = lazy(() => import('./components/MusicBar'));
 const FriendsView = lazy(() => import('./components/FriendsView'));
+import { ProGate } from './components/ProGate';
+import { canSaveKit, planOf, FREE_SAVED_KITS } from './lib/entitlements';
 import SnapInput from './components/SnapInput';
 import { GuestGuard } from './components/GuestGuard';
 const ExpandModal = lazy(() => import('./components/ExpandModal'));
@@ -1313,6 +1315,31 @@ export default function App() {
       // Cloud Save
       if (user) {
         try {
+          /*
+            THE FREE SAVED-KIT ALLOWANCE.
+
+            A free account keeps its most recent FREE_SAVED_KITS; making a new
+            one past that retires the oldest rather than refusing to generate.
+            Refusing would punish the person for using the app, which is the
+            opposite of what a free tier is for — and the kit they wanted is the
+            new one.
+
+            Enforced in the client only, and that is deliberate rather than an
+            oversight: it costs us nothing to store, so the worst case of a
+            bypass is somebody keeping their own notes. The gates that cost money
+            are on the server. See src/lib/entitlements.ts.
+          */
+          if (!canSaveKit(planOf(userData?.isPro), history.length)) {
+            const oldest = [...history].sort(
+              (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime()
+            )[0];
+            if (oldest?.id) {
+              await deleteDoc(doc(db, 'study_history', String(oldest.id))).catch(() => {});
+              setHistory((prev) => prev.filter((h) => h.id !== oldest.id));
+              toast.info(`Free accounts keep ${FREE_SAVED_KITS} kits — your oldest one was removed to make room.`);
+            }
+          }
+
           const docRef = await addDoc(collection(db, 'study_history'), {
             user_id: user.uid,
             ...historyItem
@@ -2512,21 +2539,25 @@ export default function App() {
           ) : activeView === 'settings' ? (
             <SettingsView />
           ) : activeView === 'collab' ? (
-            <CollaborativeRoom 
-              roomId={collabRoomId || ''} 
-              userName={user?.email?.split('@')[0] || 'Student'} 
-              onClose={() => setActiveView('dashboard')}
-              onPickStudyKit={() => setActiveView('library')}
-              currentStudyKit={outputModes}
-              onStartQuiz={() => {
-                setStudyMode('quiz');
-                setActiveOutputTab('quiz');
-                setActiveView('dashboard');
-                setTimeout(() => {
-                  document.getElementById('study-output')?.scrollIntoView({ behavior: 'smooth' });
-                }, 100);
-              }}
-            />
+            /* The visible half of the gate. The real one is on the socket —
+               see the note on join-room in server.ts. */
+            <ProGate feature="study-rooms">
+              <CollaborativeRoom
+                roomId={collabRoomId || ''}
+                userName={user?.email?.split('@')[0] || 'Student'}
+                onClose={() => setActiveView('dashboard')}
+                onPickStudyKit={() => setActiveView('library')}
+                currentStudyKit={outputModes}
+                onStartQuiz={() => {
+                  setStudyMode('quiz');
+                  setActiveOutputTab('quiz');
+                  setActiveView('dashboard');
+                  setTimeout(() => {
+                    document.getElementById('study-output')?.scrollIntoView({ behavior: 'smooth' });
+                  }, 100);
+                }}
+              />
+            </ProGate>
           ) : (
             <>
               {/* Hero Section */}
@@ -3262,10 +3293,14 @@ export default function App() {
       {/* AI Tutor Chat Overlay */}
       <AnimatePresence>
         {showTutor && (
-          <AITutorChat 
-            context={inputText}
-            onClose={() => setShowTutor(false)}
-          />
+          /* Visible half only — /api/generate refuses a tutor request from a
+             free account, because that is the call that costs money. */
+          <ProGate feature="ai-tutor">
+            <AITutorChat
+              context={inputText}
+              onClose={() => setShowTutor(false)}
+            />
+          </ProGate>
         )}
       </AnimatePresence>
 

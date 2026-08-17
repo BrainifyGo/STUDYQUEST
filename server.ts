@@ -10,6 +10,7 @@ import dotenv from "dotenv";
 import admin from "firebase-admin";
 import { generateWithAI, analyzeImage } from "./src/lib/aiProviders.server";
 import { getMonthlyLimit, getDailyLimit, estimateTokens, getExpandMessageCost, TOKEN_LIMIT_EXCEEDED, TOKEN_MONTHLY_LIMIT_EXCEEDED, currentMonthKey, currentDayKey } from "./src/lib/tokenService";
+import { can, planOf, type Feature } from "./src/lib/entitlements";
 
 dotenv.config();
 
@@ -215,28 +216,75 @@ async function startServer() {
   });
 
   // --- Socket.io Logic ---
-  const rooms = new Map<string, Set<{ id: string, name: string }>>();
+  const rooms = new Map<string, Set<{ id: string, name: string, uid?: string }>>();
 
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
 
-    socket.on("join-room", ({ roomId, userName }) => {
+    /*
+      JOINING A ROOM NOW REQUIRES PROOF OF WHO YOU ARE.
+
+      This used to take a `userName` string and nothing else. Two consequences,
+      and the second is the serious one:
+
+        1. Study Rooms are sold as a Pro feature and every free account had them.
+        2. ANY six-character code let ANYONE into a room. No token, no account,
+           no check at all. Room codes are short and guessable, and the people in
+           these rooms are schoolchildren. That is a safeguarding hole, not a
+           billing one, and it is why this is enforced here and not in the UI.
+
+      The client sends the Firebase ID token it already holds; it is verified
+      against the project, and the plan is read from Firestore — never from
+      anything the client claimed about itself.
+    */
+    socket.on("join-room", async ({ roomId, userName, idToken }) => {
+      if (typeof roomId !== 'string' || !roomId.trim()) {
+        socket.emit("join-denied", { reason: 'BAD_ROOM' });
+        return;
+      }
+
+      let uid: string;
+      try {
+        if (!idToken) throw new Error('no token');
+        const decoded = await admin.auth().verifyIdToken(idToken);
+        uid = decoded.uid;
+      } catch {
+        socket.emit("join-denied", { reason: 'SIGN_IN_REQUIRED' });
+        return;
+      }
+
+      let isPro = false;
+      try {
+        const snap = await admin.firestore().collection('users').doc(uid).get();
+        isPro = !!snap.data()?.isPro;
+      } catch (err) {
+        // Fail CLOSED. A Firestore blip must not hand out the paid feature, and
+        // it must certainly not hand out access to a room full of children.
+        console.error('join-room: could not read plan', err);
+        socket.emit("join-denied", { reason: 'TRY_AGAIN' });
+        return;
+      }
+
+      if (!can(planOf(isPro), 'study-rooms')) {
+        socket.emit("join-denied", { reason: 'PRO_REQUIRED' });
+        return;
+      }
+
       socket.join(roomId);
-      
+
       if (!rooms.has(roomId)) {
         rooms.set(roomId, new Set());
       }
-      
-      const user = { id: socket.id, name: userName };
+
+      // The name is still cosmetic, but it is attached to a verified uid now, so
+      // someone in a room can be identified rather than merely labelled.
+      const user = { id: socket.id, name: String(userName || 'Student').slice(0, 40), uid };
       rooms.get(roomId)?.add(user);
-      
-      // Broadcast to others in room
+
       socket.to(roomId).emit("user-joined", user);
-      
-      // Send current users to the new user
       io.to(roomId).emit("room-users", Array.from(rooms.get(roomId) || []));
-      
-      console.log(`${userName} joined room: ${roomId}`);
+
+      console.log(`${user.name} (${uid}) joined room: ${roomId}`);
     });
 
     socket.on("send-message", ({ roomId, message }) => {
@@ -382,13 +430,28 @@ async function startServer() {
   }
 
   app.post('/api/generate', async (req, res) => {
-    const { prompt, systemPrompt } = req.body;
+    const { prompt, systemPrompt, feature } = req.body;
     if (!prompt) {
       return res.status(400).json({ error: 'Missing prompt' });
     }
 
     try {
       const { uid, isPro } = await verifyUserAndBudget(req.headers.authorization);
+
+      /*
+        THE PAID GATE, ON THE SERVER.
+
+        The AI Tutor is advertised as a Pro feature, and a check in the browser
+        is a suggestion — anyone can post to this route with curl. It is enforced
+        here, against the verified token, because this is the call that spends
+        money with the provider.
+
+        Only named features are gated; a request with no `feature` is ordinary
+        study-kit generation, which Free gets within its token budget.
+      */
+      if (feature && !can(planOf(isPro), feature as Feature)) {
+        return res.status(402).json({ error: 'PRO_REQUIRED', feature });
+      }
 
       const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
       const { text, model } = await generateWithAI(fullPrompt, isPro ? 'pro' : 'free');

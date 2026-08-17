@@ -1204,3 +1204,95 @@ than a local `Set`, so it survives a refresh and cannot disagree with what the s
 |---|---|
 | Voice and video calls | Not started. Signalling through the Render socket, then STUN, then TURN if the failure rate justifies the bandwidth cost. |
 | The rest of the mobile pass | The header, sidebar and room are done. Dashboard, Arcade, Analytics and Settings still need going through on a real phone. |
+
+---
+
+## [2026-08-17] — Pro is actually Pro
+
+**Editor:** Claude Code (Opus 5)
+
+The upgrade page advertised six Pro features. **Five of them were available to every free account.**
+
+The only gate in the app was `GuestGuard`, which separates guests from signed-in users — a different
+question entirely. There was no paid check anywhere: not in the UI, not on the API, not on the socket.
+Anyone who signed up for free got study rooms, multiplayer quizzes, the AI tutor, full analytics and
+unlimited saved kits, all of which were being sold at £5 a month.
+
+### Where each gate lives, and why
+
+This is the part that matters, so it is written down in `src/lib/entitlements.ts` rather than left
+implicit:
+
+| Feature | Enforced | Why there |
+|---|---|---|
+| AI Tutor | **Server** (`/api/generate`) | It spends money with the provider. Anyone can post to that route with curl, so a check in the browser is a suggestion. |
+| Study rooms & multiplayer | **Socket** (`join-room`) | Same reason, plus a worse one — see below. |
+| Detailed analytics | **Client only** | Costs nothing to serve. Worst case of a bypass is somebody seeing their own data in more detail. |
+| Saved-kit allowance | **Client only** | Same. Storage is free; the kits are the user's own notes. |
+
+The last two are a deliberate choice and are labelled as one. Implying a security boundary that is not
+there is worse than not having it.
+
+### Joining a room needed no account at all
+
+Gating rooms turned up something more serious than a billing hole.
+
+`join-room` took a `userName` **string** and nothing else. No token, no account, no check of any
+kind. Any six-character room code let anyone in — and room codes are six characters, generated from
+`Math.random`, and shared over WhatsApp. The people in these rooms are schoolchildren.
+
+That is a safeguarding problem, not a revenue one, and it is why the gate is on the socket rather
+than in the interface. The client now sends the Firebase ID token it already holds; the server
+verifies it against the project and reads the plan from **Firestore**, never from anything the client
+claimed about itself. A Firestore error **fails closed** — a blip must not hand out the paid feature,
+and it certainly must not hand out access to a room.
+
+Participants now carry a verified uid alongside the display name, so someone in a room can be
+identified rather than merely labelled.
+
+### "Unlimited" was not true either
+
+The claim on the page taking card details was **"Unlimited AI Study Kit Generation"**. Pro carries a
+50,000-token daily cap — `PRO_DAILY_LIMIT`, which exists precisely so one account cannot run up an
+unbounded provider bill. A cap that exists has to be described, and a test now fails if any Pro
+selling point uses the word "unlimited".
+
+The comparison table was inaccurate in both directions and has been corrected against the real
+numbers: free is about 8 study kits a day (a 12,000-token budget), not "5 / day"; free history was
+described as "Limited (10 items)" when there was no cap at all until this release.
+
+### The free tier, deliberately
+
+Free keeps its **20 most recent** study kits. Making a twenty-first retires the oldest rather than
+refusing to generate — refusing would punish someone for using the app, which is the opposite of what
+a free tier is for, and the kit they actually want is the new one. They are told what happened.
+
+Twenty is roughly a term of one subject. A free tier nobody can get anything out of never produces a
+Pro customer.
+
+### Verification
+
+- **176 tests passing** (19 new), 12 files; `tsc` clean; `npm run build` clean.
+- The new tests pin: `planOf(undefined)` is free, so an older account without an `isPro` field cannot
+  read as Pro; every feature in `PRO_FEATURES` is refused to free and granted to Pro; the four
+  reported features are named **individually** as well as looped, so deleting one from the list
+  cannot quietly make the suite pass; the saved-kit cap allows exactly up to the limit and never
+  stops Pro; every gated feature has an explanation to show the person who hits it; and **no selling
+  point claims anything is unlimited**.
+
+### Files
+
+`src/lib/entitlements.ts` (new), `src/components/ProGate.tsx` (new),
+`tests/entitlements.test.ts` (new), `server.ts`, `src/lib/aiService.ts`,
+`src/components/AITutorChat.tsx`, `src/components/CollaborativeRoom.tsx`,
+`src/components/Analytics.tsx`, `src/components/UpgradePage.tsx`, `src/App.tsx`.
+
+### Worth knowing before this goes live
+
+There are four real accounts and none of them is Pro, so **everyone including Ola and Daniel loses
+study rooms, the tutor and the analytics detail** the moment this deploys. That is correct behaviour
+for a paid product, but it is not a surprise anyone should get from a deploy.
+
+`localStorage.setItem('brainify_test_pro', 'true')` still unlocks everything client-side for testing,
+and the two accounts that need real Pro can have `isPro: true` set on their user document in the
+Firebase console.

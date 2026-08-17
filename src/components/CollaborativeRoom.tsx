@@ -11,6 +11,7 @@ import {
 import { io, Socket } from 'socket.io-client';
 import { cn } from '../lib/utils';
 import { toast } from 'sonner';
+import { auth } from '../lib/firebase';
 import { callAI } from '../lib/aiService';
 import { buildStudyPrompt, parseJsonReply, normaliseQuiz } from '../lib/studyPrompts';
 import { GameMode } from './GameMode';
@@ -104,6 +105,8 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
     competition rather than four people playing alone in the same tab.
   */
   const [playingGame, setPlayingGame] = useState(false);
+  /** Set when the server refuses the join, and why. */
+  const [denied, setDenied] = useState<'pro' | 'signin' | 'error' | null>(null);
 
   const [roomQuiz, setRoomQuiz] = useState<QuizQuestion[]>([]);
   const [isMakingQuiz, setIsMakingQuiz] = useState(false);
@@ -155,9 +158,20 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
       timeout: 10000,
     });
 
-    socketRef.current.on('connect', () => {
-      console.log('Connected to study room');
-      socketRef.current?.emit('join-room', { roomId: activeRoomId, userName });
+    socketRef.current.on('connect', async () => {
+      // The server verifies this token and reads the plan from Firestore. The
+      // client cannot assert either — see the note on join-room in server.ts.
+      const idToken = await auth.currentUser?.getIdToken().catch(() => null);
+      socketRef.current?.emit('join-room', { roomId: activeRoomId, userName, idToken });
+    });
+
+    socketRef.current.on('join-denied', ({ reason }: { reason: string }) => {
+      setDenied(
+        reason === 'PRO_REQUIRED' ? 'pro'
+        : reason === 'SIGN_IN_REQUIRED' ? 'signin'
+        : 'error'
+      );
+      socketRef.current?.disconnect();
     });
 
     socketRef.current.on('connect_error', (err) => {

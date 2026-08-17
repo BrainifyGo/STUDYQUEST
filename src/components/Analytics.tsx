@@ -9,6 +9,7 @@ import {
   Award, Calendar, ChevronRight, Activity, Sparkles
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { ProGate } from './ProGate';
 import { db, auth, collection, query, where, getDocs, doc, getDoc, handleFirestoreError, OperationType } from '../lib/firebase';
 import { levelProgress } from '../lib/progress';
 import {
@@ -173,6 +174,10 @@ export default function Analytics() {
           <p className="text-text-dim text-sm">Track your study habits and mastery across all subjects.</p>
         </div>
         
+        {/* Costs nothing to serve, so the gate is client-side only and says so
+            in entitlements.ts. Preview mode: seeing the control you are missing
+            is the argument for paying for it. */}
+        <ProGate feature="advanced-analytics" preview>
         <div className="flex items-center gap-3 p-1.5 bg-glass-bg rounded-2xl border border-border-main">
           {/* These three had no onClick and no state behind them. */}
           {PERIODS.map((p) => (
@@ -191,6 +196,7 @@ export default function Analytics() {
             </button>
           ))}
         </div>
+        </ProGate>
       </div>
 
       {!hasData && (
@@ -404,6 +410,7 @@ export default function Analytics() {
         {/* The panel the button had nothing to open. Locked badges stay visible
             with what earns them — a badge you cannot see is not a goal. */}
         {showBadges && (
+          <ProGate feature="advanced-analytics">
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {BADGES.map((b) => {
               const earned = b.earned({ xp, level: progress.level, sessions: stats.totalSessions });
@@ -431,6 +438,7 @@ export default function Analytics() {
               );
             })}
           </div>
+          </ProGate>
         )}
       </div>
     </div>

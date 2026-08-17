@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { db, auth, doc, getDoc, updateDoc } from '../lib/firebase';
 import { cn } from '../lib/utils';
+import { PRO_SELLING_POINTS, FREE_SAVED_KITS } from '../lib/entitlements';
 
 interface UpgradePageProps {
   onBack: () => void;
@@ -125,15 +126,20 @@ const PricingCard = ({ onUpgrade, isSubscribed, billingCycle }: { onUpgrade: () 
         <div className="space-y-6">
           <p className="text-text-muted font-bold text-sm uppercase tracking-widest">Everything in Pro:</p>
           <ul className="grid grid-cols-1 gap-4">
-            {[
-              "Unlimited AI Study Kit Generation",
-              "Full AI Tutor Access (Deep Explanations)",
-              "Save & Access Unlimited Study Kits",
-              "Real-time Collaborative Study Rooms",
-              "Multiplayer Quizzes & Shared Sessions",
-              "Advanced Analytics & Progress Tracking",
-              "Multi-device sync (Coming Soon)"
-            ].map((feature, i) => (
+            {/*
+              WORDED TRUTHFULLY, from src/lib/entitlements.ts.
+
+              This list said "Unlimited AI Study Kit Generation". Pro carries a
+              50,000-token daily cap, which exists so one account cannot run up
+              an unbounded provider bill — a cap that exists has to be described,
+              especially on the page where somebody enters their card details.
+              Five of the six lines were also untrue in the other direction: the
+              features were available to every free account, because the app had
+              a guest check and no paid check at all.
+            */}
+            {PRO_SELLING_POINTS.map((point) => point.headline).concat(
+              "Multi-device sync (coming soon)"
+            ).map((feature, i) => (
               <li key={i} className="flex items-start gap-3 text-sm text-text-main/80 font-medium">
                 <div className="mt-1 w-5 h-5 rounded-full bg-brand-purple/20 flex items-center justify-center shrink-0">
                   <Check className="w-3 h-3 text-brand-purple" strokeWidth={4} />
@@ -230,13 +236,16 @@ const ComparisonTable = () => (
         </thead>
         <tbody className="text-sm">
           {[
-            { label: "AI Generations", free: "5 / day", pro: "Unlimited" },
-            { label: "Study History", free: "Limited (10 items)", pro: "Full History Access" },
-            { label: "Study Rooms", free: "None", pro: "Unlimited Access" },
-            { label: "Multiplayer Quizzes", free: "None", pro: "Unlimited Access" },
-            { label: "AI Tutor Chat", free: "Basic", pro: "Full Deep Access" },
-            { label: "Analytics", free: "Basic", pro: "Advanced Insights" },
-            { label: "Device Sync", free: "None", pro: "Coming Soon" }
+            /* Real numbers. "5 / day" and "Limited (10 items)" were both made
+               up: the free allowance is a token budget worth about 8 kits, and
+               there was no history cap at all until this release. */
+            { label: "AI study kits", free: "~8 / day", pro: "~35 / day" },
+            { label: "Saved study kits", free: `${FREE_SAVED_KITS} most recent`, pro: "Every one" },
+            { label: "Study rooms", free: "None", pro: "Included" },
+            { label: "Multiplayer quizzes & Arcade", free: "None", pro: "Included" },
+            { label: "AI Tutor", free: "None", pro: "Included" },
+            { label: "Progress tracking", free: "This week only", pro: "Weekly, monthly, all-time + badges" },
+            { label: "Device sync", free: "None", pro: "Coming soon" }
           ].map((row, i) => (
             <tr key={i} className="border-b border-border-main last:border-0 hover:bg-glass-bg transition-colors">
               <td className="p-8 text-text-main/80 font-bold">{row.label}</td>
