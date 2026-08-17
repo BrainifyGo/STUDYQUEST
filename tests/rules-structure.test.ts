@@ -313,3 +313,35 @@ describe('friend stats are friends-only and free', () => {
     }
   });
 });
+
+describe('challenges are free, but only between friends', () => {
+  const ch = block('challenges');
+
+  it('requires an existing friendship to create one', () => {
+    // Without this a challenge is a way to push questions and a name at a
+    // stranger. The friends list is the consent step.
+    expect(ch).toMatch(/exists\(friendshipOf\(request\.resource\.data\.uids\)\)/);
+  });
+
+  it('only lets you send one as yourself', () => {
+    expect(ch).toMatch(/request\.resource\.data\.fromUid == request\.auth\.uid/);
+  });
+
+  it('never lets a challenge be edited', () => {
+    // Changing the questions after someone has answered them is the one thing
+    // that would make a score meaningless.
+    expect(ch).toMatch(/allow update: if false/);
+  });
+
+  it('caps the deck size', () => {
+    expect(ch).toMatch(/questions\.size\(\) <= 30/);
+  });
+
+  it('writes each score once and never updates it', () => {
+    // This is what stops replaying a challenge until you beat your friend.
+    const scores = rules.slice(rules.indexOf('match /challenges/{challengeId}/scores/'));
+    expect(scores).toMatch(/playerId == request\.auth\.uid/);
+    expect(scores).toMatch(/allow update: if false/);
+    expect(scores).toMatch(/hasOnly\(\s*\['uid', 'score', 'accuracy', 'correct', 'answered', 'at'\]\)/);
+  });
+});

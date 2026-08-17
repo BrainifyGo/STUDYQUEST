@@ -553,5 +553,85 @@ service cloud.firestore {
 
       allow delete: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
     }
+
+    /* =====================================================================
+       CHALLENGES — race a friend through the same questions. FREE.
+
+       Study rooms are the paid feature. Challenging a friend is the reason to
+       add one, and a friends list where every button leads to a paywall is not
+       a free feature.
+       ===================================================================== */
+    match /challenges/{challengeId} {
+      function amIn(uids) {
+        return request.auth.uid in uids;
+      }
+      function friendshipOf(uids) {
+        return /databases/$(database)/documents/friendships/$(uids[0] + '__' + uids[1]);
+      }
+
+      allow read: if isAuthenticated() && amIn(resource.data.uids);
+
+      /*
+        You may only challenge someone you are ALREADY FRIENDS WITH.
+
+        Without the exists() below, a challenge would be a way to push content
+        at a stranger — questions, and a name, into their app. The friends list
+        is the consent step, and this is where that consent is checked.
+      */
+      allow create: if isAuthenticated()
+                    && request.resource.data.fromUid == request.auth.uid
+                    && amIn(request.resource.data.uids)
+                    && request.resource.data.uids.size() == 2
+                    && request.resource.data.uids[0] < request.resource.data.uids[1]
+                    && request.resource.data.toUid != request.auth.uid
+                    && request.resource.data.questions is list
+                    && request.resource.data.questions.size() > 0
+                    && request.resource.data.questions.size() <= 30
+                    && request.resource.data.topic is string
+                    && request.resource.data.topic.size() <= 80
+                    && exists(friendshipOf(request.resource.data.uids));
+
+      /*
+        Never edited. Changing the questions after somebody has answered them is
+        the one thing that would make a score meaningless, so it is not a rule
+        to get right — it is a thing that cannot happen.
+      */
+      allow update: if false;
+
+      allow delete: if isAuthenticated() && amIn(resource.data.uids);
+    }
+
+    /*
+      One document per player, WRITTEN ONCE.
+
+      `allow update: if false` is what stops someone replaying a challenge until
+      they beat their friend. Keeping each score in its own document is also why
+      the rules never have to reason about which keys of a shared map changed,
+      which is where this sort of thing usually goes wrong.
+    */
+    match /challenges/{challengeId}/scores/{playerId} {
+      function challenge() {
+        return get(/databases/$(database)/documents/challenges/$(challengeId)).data;
+      }
+
+      allow read: if isAuthenticated() && request.auth.uid in challenge().uids;
+
+      allow create: if isAuthenticated()
+                    && playerId == request.auth.uid
+                    && request.auth.uid in challenge().uids
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.keys().hasOnly(
+                         ['uid', 'score', 'accuracy', 'correct', 'answered', 'at'])
+                    && request.resource.data.score is int
+                    && request.resource.data.score >= 0
+                    && request.resource.data.accuracy is int
+                    && request.resource.data.accuracy >= 0
+                    && request.resource.data.accuracy <= 100;
+
+      allow update: if false;
+
+      // Only your own, and only so a deleted account can clean up after itself.
+      allow delete: if isAuthenticated() && playerId == request.auth.uid;
+    }
   }
 }

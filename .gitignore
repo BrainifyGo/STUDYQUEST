@@ -11,3 +11,10 @@ coverage/
 # different Firebase project. It is where the stray API key in the old history
 # came from, so it is not carried into StudyQuest.
 firebase-applet-config.json
+
+# Scratch files used to pass multi-line commit messages to `git commit -F`.
+# Twice now one has been picked up by `git add -A` because the file was still
+# there when the add ran. Ignored so the mistake cannot repeat.
+.msg.tmp
+commitmsg.txt
+*.local.cjs

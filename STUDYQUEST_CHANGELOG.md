@@ -1641,3 +1641,76 @@ All nine as intended, and everything created was deleted afterwards.
 **Challenging a friend** — the other half of what Ola said should be free. `GameMode` already accepts
 an injected deck (that is how the Arcade works inside a room), so the missing piece is a challenge
 document holding the questions and both scores. That is the next thing.
+
+---
+
+## [2026-08-17] — Challenge a friend
+
+**Editor:** Claude Code (Opus 5)
+
+The other half of what Ola said should be free: friends can now race each other through the same
+questions and see who won. Study rooms remain the paid feature.
+
+### Two decisions do all the work
+
+**The questions live on the challenge.** They are generated once, by the challenger, and stored.
+Regenerating them for the second player — even from the identical topic — would give the two people
+different questions, and two scores from different questions do not compare. A challenge whose
+scores cannot be compared is not a challenge.
+
+**Each score is its own document, written once.** `challenges/{id}/scores/{uid}`, where you may
+create yours and nobody may update any. That single `allow update: if false` is what stops someone
+replaying until they beat their friend — and because each score is separate, the rules never have to
+reason about which keys of a shared map changed, which is where this sort of thing usually goes
+wrong.
+
+Creating a challenge requires an **existing friendship**, checked with the same sorted-pair id
+`lib/friends.ts` builds. Without that, a challenge would be a way to push questions and a name into a
+stranger's app; the friends list is the consent step, and this is where that consent is checked.
+
+The round itself is `GameMode` with the challenge's questions injected — the same path the Arcade
+already uses inside a study room, so there is no second game engine to keep in step. Challenges pay
+no XP: they are for the scoreboard.
+
+### Small things that matter
+
+A challenge with one score has **no winner**, rather than showing the only player as having won —
+which would otherwise be true for every challenge until the second person finished. A tied score is
+broken on accuracy, and a genuine draw says so instead of picking someone. The winner is marked with
+a trophy as well as a coloured border, so it does not depend on seeing that purple.
+
+### Verified against the deployed rules
+
+Two throwaway accounts, through the Firestore REST API:
+
+| Attempt | Result |
+|---|---|
+| A challenges a **stranger** | **403** |
+| A challenges a friend | 200 |
+| A edits the questions afterwards | **403** |
+| A records a score | 200 |
+| A **replays to improve it** | **403** |
+| A writes B's score | **403** |
+| B records their own | 200 |
+
+All seven as intended; everything created was deleted afterwards.
+
+- **203 tests passing** (11 new); `tsc` clean; `npm run build` clean; rules deployed.
+- The new unit tests pin the winner logic specifically: higher score wins; a tie breaks on accuracy;
+  a real draw returns null rather than a name; and there is no winner until both have played.
+
+### Files
+
+`src/lib/challenges.ts` (new), `src/components/Challenges.tsx` (new),
+`tests/challenges.test.ts` (new), `firestore.rules`, `src/components/FriendsView.tsx`,
+`tests/rules-structure.test.ts`.
+
+### Where the free/paid line now sits
+
+| | |
+|---|---|
+| **Free** | Friends, direct messages, seeing a friend's level and streak, challenges, the Arcade |
+| **Pro** | Study rooms (creating *and* joining), the AI Tutor, detailed analytics, unlimited saved kits |
+
+That is Ola's stated policy, implemented and enforced — the paid gates on the server and the socket,
+the free features genuinely free.

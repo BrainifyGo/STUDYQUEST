@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import {
-  UserPlus, Users, Check, X, Search, Loader2, Sparkles, MessageSquare, AtSign, Clock,
+  UserPlus, Users, Check, X, Search, Loader2, Sparkles, MessageSquare, AtSign, Clock, Swords,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '../store/useUserStore';
@@ -13,6 +13,7 @@ import {
   type Friend, type FriendRequest, type Person, type FriendStats,
 } from '../lib/friends';
 import DirectMessages from './DirectMessages';
+import Challenges from './Challenges';
 import { cn } from '../lib/utils';
 
 /**
@@ -40,6 +41,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({ onStartRoom }) => {
   const [incoming, setIncoming] = useState<FriendRequest[]>([]);
   const [outgoing, setOutgoing] = useState<FriendRequest[]>([]);
   const [openChat, setOpenChat] = useState<Friend | null>(null);
+  const [showChallenges, setShowChallenges] = useState(false);
 
   const [term, setTerm] = useState('');
   const [results, setResults] = useState<Person[] | null>(null);
@@ -140,6 +142,10 @@ export const FriendsView: React.FC<FriendsViewProps> = ({ onStartRoom }) => {
     toast.success(`Room ${code} opened — the code is on your clipboard, send it to ${name}.`);
   };
 
+  if (showChallenges) {
+    return <Challenges friends={friends} onBack={() => setShowChallenges(false)} />;
+  }
+
   if (openChat) {
     return (
       <DirectMessages
@@ -164,8 +170,16 @@ export const FriendsView: React.FC<FriendsViewProps> = ({ onStartRoom }) => {
           Study with people you know
         </h1>
         <p className="text-text-dim text-sm">
-          Message them, or open a study room together with shared notes and a shared quiz.
+          Message them, challenge them, and see how they are getting on. All free — the study room is
+          the paid part.
         </p>
+        <button
+          onClick={() => setShowChallenges(true)}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-purple/15 border border-brand-purple/30 text-brand-purple text-sm font-bold hover:bg-brand-purple hover:text-white transition-all"
+        >
+          <Swords size={15} />
+          Challenges
+        </button>
       </div>
 
       {/* Your username */}
