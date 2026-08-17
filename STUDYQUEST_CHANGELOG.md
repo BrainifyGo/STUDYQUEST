@@ -1714,3 +1714,86 @@ All seven as intended; everything created was deleted afterwards.
 
 That is Ola's stated policy, implemented and enforced — the paid gates on the server and the socket,
 the free features genuinely free.
+
+---
+
+## [2026-08-17] — Mobile pass, part one: the defects findable without a device
+
+**Editor:** Claude Code (Opus 5)
+
+Daniel asked for the mobile pass once challenges were done. Challenges shipped in `c5f3727`, so this
+is the part of the pass that can be done properly from the code — specific, checkable failure modes
+rather than guesses about how a screen looks.
+
+### `100vh` is not the height of a phone screen
+
+`<main>` was `h-screen`. On iOS Safari `100vh` is the viewport height with the address bar
+**hidden**, which is taller than what you can actually see while it is showing — so the bottom of the
+app sat underneath the browser chrome, and it took the mobile bottom nav with it.
+
+Now `h-dvh`, the dynamic viewport height, which follows the chrome as it moves. Same fix in the
+direct-message view (whose composer sits at the bottom, so it was the worst affected) and the
+dashboard skeleton.
+
+### Four controls did not exist on a phone
+
+`opacity-0 group-hover:opacity-100` is a normal desktop pattern, and on a touch screen the second
+half never fires — there is no hover, so the element stays at `opacity: 0` permanently. Four real
+controls were invisible and unreachable on mobile:
+
+- deleting your own direct message
+- deleting a study-planner task
+- the Library's list-view actions
+- changing your profile photo
+
+All four now use a `.hover-reveal` class that only hides behind `@media (hover: hover) and (pointer:
+fine)`. On a phone they are simply visible. It also reveals on `:focus-visible`, so keyboard users
+can reach them, which the original could not do either.
+
+Two other matches were left alone deliberately: a decorative gradient and a `pointer-events-none`
+tooltip. Neither is a control.
+
+### The Pro column was clipped off the page that sells Pro
+
+The Free vs Pro comparison table sat in a wrapper with `overflow-hidden` and cells at `p-8`. Three
+cells of 32px padding is 192px before a single word of text, so on a 360px phone the table is wider
+than the screen — and `overflow-hidden` meant the excess was **clipped rather than scrollable**. The
+column that fell off the right edge was Pro.
+
+Wrapper is `overflow-x-auto` now, padding is `p-4 sm:p-8`, and the table has a sensible `min-w` so it
+scrolls as one piece instead of squashing.
+
+Also removed `min-w-fit` from the header's right-hand group, which combined with `flex-shrink-0` meant
+that group could never shrink and would push the header wider than a narrow screen.
+
+### Ten orphaned files deleted
+
+The whole of `src/views/` — nine components — plus `src/components/Sidebar.tsx`. Nothing imports any
+of them; `SettingsView` and the rest are aliases defined in `App.tsx` pointing at `components/`, not
+these. Confirmed by deleting them and watching `tsc` and the production build stay clean.
+
+That is the third orphan pair found in this project (`MusicPage`/`MusicMiniPlayer` were the first two).
+Dead components matter more than usual here because they look like the real thing when you go
+searching for where a bug lives.
+
+### Verification
+
+- **203 tests passing**; `tsc` clean; `npm run build` clean after the deletions, which is what proves
+  they were unused.
+- No `h-screen` or `100vh` left in any rendered layout.
+- No `opacity-0 group-hover:` left on anything that is a control.
+
+### Files
+
+Deleted: `src/views/` (9 files), `src/components/Sidebar.tsx`.
+Changed: `src/index.css`, `src/App.tsx`, `src/components/UpgradePage.tsx`,
+`src/components/DirectMessages.tsx`, `src/components/StudyPlanner.tsx`,
+`src/components/Library.tsx`, `src/components/Settings.tsx`,
+`src/components/skeletons/DashboardSkeleton.tsx`.
+
+### What part two needs
+
+The rest is not findable from the code. Keyboards covering inputs, real tap-target sizes, and how
+text actually wraps only show up on a device — and DevTools' device mode does not reproduce either of
+the first two. Screenshots of the Dashboard, Arcade, Analytics and Settings from a real phone would
+make short work of it; the last one Ola sent found three bugs faster than reasoning did.

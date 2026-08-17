@@ -225,13 +225,22 @@ const ComparisonTable = () => (
       <p className="text-text-dim font-medium">See why Pro is the essential choice for serious students.</p>
     </div>
 
-    <div className="glass rounded-[2.5rem] border border-border-main overflow-hidden">
-      <table className="w-full text-left border-collapse">
+    {/*
+      overflow-x-AUTO, not overflow-hidden.
+
+      Three cells at p-8 is 192px of padding before a single word of text, so on
+      a 360px phone this table is wider than the screen — and with
+      `overflow-hidden` the excess was CLIPPED rather than scrollable. The column
+      that fell off the right edge was Pro: the one this page exists to sell.
+      Padding is responsive now, and whatever still overflows can be scrolled to.
+    */}
+    <div className="glass rounded-[2.5rem] border border-border-main overflow-x-auto">
+      <table className="w-full text-left border-collapse min-w-[34rem]">
         <thead>
           <tr className="border-b border-border-main">
-            <th className="p-8 text-xs font-black text-text-main/20 uppercase tracking-widest">Feature</th>
-            <th className="p-8 text-xs font-black text-text-main/20 uppercase tracking-widest text-center">Free</th>
-            <th className="p-8 text-xs font-black text-brand-purple uppercase tracking-widest text-center bg-brand-purple/5">Pro</th>
+            <th className="p-4 sm:p-8 text-xs font-black text-text-main/20 uppercase tracking-widest">Feature</th>
+            <th className="p-4 sm:p-8 text-xs font-black text-text-main/20 uppercase tracking-widest text-center">Free</th>
+            <th className="p-4 sm:p-8 text-xs font-black text-brand-purple uppercase tracking-widest text-center bg-brand-purple/5">Pro</th>
           </tr>
         </thead>
         <tbody className="text-sm">
@@ -248,9 +257,9 @@ const ComparisonTable = () => (
             { label: "Device sync", free: "None", pro: "Coming soon" }
           ].map((row, i) => (
             <tr key={i} className="border-b border-border-main last:border-0 hover:bg-glass-bg transition-colors">
-              <td className="p-8 text-text-main/80 font-bold">{row.label}</td>
-              <td className="p-8 text-text-dim text-center font-medium">{row.free}</td>
-              <td className="p-8 text-text-main font-black text-center bg-brand-purple/5">{row.pro}</td>
+              <td className="p-4 sm:p-8 text-text-main/80 font-bold">{row.label}</td>
+              <td className="p-4 sm:p-8 text-text-dim text-center font-medium">{row.free}</td>
+              <td className="p-4 sm:p-8 text-text-main font-black text-center bg-brand-purple/5">{row.pro}</td>
             </tr>
           ))}
         </tbody>

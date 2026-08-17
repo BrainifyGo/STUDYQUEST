@@ -359,7 +359,7 @@ export default function StudyPlanner() {
                     </div>
                     <button 
                       onClick={() => deleteExam(exam.id)}
-                      className="p-2 rounded-lg text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
+                      className="p-2 rounded-lg text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-all hover-reveal"
                     >
                       <Trash2 size={14} />
                     </button>

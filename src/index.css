@@ -109,6 +109,28 @@ html {
   .bg-brand-purple-dark { background-color: var(--brand-purple-dark); }
   .border-brand-purple { border-color: var(--brand-purple); }
 
+
+  /*
+    A CONTROL THAT ONLY APPEARS ON HOVER DOES NOT EXIST ON A PHONE.
+
+    `opacity-0 group-hover:opacity-100` is a common desktop pattern, and on a
+    touch screen the second half never fires — so the element stays at opacity 0
+    permanently. Four real controls were unreachable on mobile because of it:
+    deleting your own message, deleting a planner task, the Library list-view
+    actions, and changing your profile photo.
+
+    This keeps the reveal on devices that actually have a pointer, and leaves the
+    control plainly visible everywhere else.
+  */
+  .hover-reveal {
+    transition: opacity 0.2s ease;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .hover-reveal { opacity: 0; }
+    .group:hover .hover-reveal,
+    .hover-reveal:focus-visible { opacity: 1; }
+  }
+
   .glass {
     background-color: var(--glass-bg);
     backdrop-filter: blur(20px);

@@ -196,7 +196,7 @@ export const Settings: React.FC = () => {
                 <User size={32} className="text-brand-purple" />
               )}
             </div>
-            <button className="absolute bottom-0 right-0 p-1.5 bg-brand-purple text-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity">
+            <button className="absolute bottom-0 right-0 p-2 bg-brand-purple text-white rounded-full shadow-lg hover-reveal transition-opacity">
               <Camera size={14} />
             </button>
           </div>

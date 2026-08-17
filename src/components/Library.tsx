@@ -266,7 +266,7 @@ export default function Library({ onOpenItem }: LibraryProps) {
 
                 <div className={cn(
                   "flex items-center gap-2 transition-opacity",
-                  viewMode === 'grid' ? "pt-4 border-t border-border-main" : "opacity-0 group-hover:opacity-100"
+                  viewMode === 'grid' ? "pt-4 border-t border-border-main" : "hover-reveal"
                 )}>
                   <button 
                     onClick={(e) => handleEditClick(e, item)}

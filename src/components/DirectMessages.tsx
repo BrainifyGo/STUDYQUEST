@@ -84,7 +84,7 @@ export const DirectMessages: React.FC<DirectMessagesProps> = ({ friend, onBack, 
   let lastDay = '';
 
   return (
-    <div className="max-w-3xl mx-auto flex flex-col h-[calc(100vh-8rem)] py-4">
+    <div className="max-w-3xl mx-auto flex flex-col h-[calc(100dvh-8rem)] py-4">
       {/* Header */}
       <div className="flex items-center gap-3 pb-4 border-b border-border-main">
         <button
@@ -143,7 +143,7 @@ export const DirectMessages: React.FC<DirectMessagesProps> = ({ friend, onBack, 
                     <button
                       onClick={() => deleteMessage(friend.uid, m.id).catch(() => toast.error('Could not delete that.'))}
                       aria-label="Delete message"
-                      className="self-center mr-2 p-1.5 rounded-lg text-text-dim opacity-0 group-hover:opacity-100 hover:text-red-400 transition-all"
+                      className="self-center mr-2 p-2 rounded-lg text-text-dim hover-reveal hover:text-red-400 transition-all"
                     >
                       <Trash2 size={13} />
                     </button>

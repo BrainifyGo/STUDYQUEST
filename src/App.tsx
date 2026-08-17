@@ -1748,7 +1748,7 @@ export default function App() {
     return null;
   };
 
-  if (authLoading) return <div className="h-screen w-screen flex items-center justify-center bg-bg-main"><Zap className="animate-pulse text-brand-purple" size={48} /></div>;
+  if (authLoading) return <div className="h-dvh w-screen flex items-center justify-center bg-bg-main"><Zap className="animate-pulse text-brand-purple" size={48} /></div>;
 
   if (!user && !isGuest) {
     return (
@@ -1982,7 +1982,7 @@ export default function App() {
         }}
         onUpdate={performUpdate}
       />
-      <div className="min-h-screen bg-bg-main flex text-text-main overflow-hidden max-w-screen">
+      <div className="min-h-dvh bg-bg-main flex text-text-main overflow-hidden max-w-screen">
       {/* --- Sidebar --- */}
       <AnimatePresence>
         {/* Backdrop — mobile only, tap anywhere outside to close sidebar */}
@@ -2274,7 +2274,16 @@ export default function App() {
       */}
       <main
         className={cn(
-          "flex-1 flex flex-col h-screen overflow-hidden relative transition-all duration-300 scrollbar-hide max-w-full",
+          /*
+            h-dvh, NOT h-screen.
+
+            `100vh` on iOS Safari is the height of the viewport with the address
+            bar HIDDEN — which is taller than what you can actually see while it
+            is showing. So the bottom of the app sat underneath the browser
+            chrome, taking the mobile bottom nav with it. `dvh` is the dynamic
+            viewport height and follows the chrome as it moves.
+          */
+          "flex-1 flex flex-col h-dvh overflow-hidden relative transition-all duration-300 scrollbar-hide max-w-full",
           sidebarOpen && !inRoom ? (railCollapsed ? "md:pl-20" : "md:pl-64") : "pl-0"
         )}
       >
@@ -2338,7 +2347,7 @@ export default function App() {
           </div>
 
           {/* RIGHT: icon buttons + upgrade — compact on mobile */}
-          <div className="flex items-center gap-1 md:gap-2 flex-shrink-0 min-w-fit">
+          <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
             {/* Everything hidden above, on one button. */}
             <button
               onClick={() => setShowTools(true)}

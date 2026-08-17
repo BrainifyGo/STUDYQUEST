@@ -2,7 +2,7 @@ import React from 'react';
 
 const DashboardSkeleton: React.FC = () => {
   return (
-    <div className="flex flex-col h-screen bg-background overflow-hidden">
+    <div className="flex flex-col h-dvh bg-background overflow-hidden">
       {/* Header Skeleton */}
       <header className="h-16 border-b border-border flex items-center justify-between px-6 bg-card/50">
         <div className="flex items-center gap-4">
