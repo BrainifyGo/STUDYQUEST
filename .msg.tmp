@@ -1,0 +1,38 @@
+Make key-granted Pro permanent, and let friends see each other's progress
+
+The Lemon Squeezy webhook wrote isPro unconditionally on every subscription
+event. An account that redeemed a key and later took out -- then cancelled --
+a subscription would be set back to free by an unrelated billing event, and
+because a key can only be spent once and redeemedKey is pinned, that account
+could never get its Pro back. Founder and comp accounts would have quietly
+lost access with no way to restore it.
+
+Redemption now stamps proSource: 'key' and the webhook refuses to revoke Pro
+that came from a key. proSource is pinned as hard as redeemedKey -- if it
+could be cleared, the protection it grants could be cleared with it, which is
+the same shape of bug closed this morning.
+
+On Daniel's question: creating and joining a room go through the SAME socket
+event, which has verified the plan server-side since this morning, so joining
+was already Pro. But he was right that something is broken -- the FREE friends
+feature had nothing free to do. A friend row offered Message (free) and Study
+together (a Pro room), and neither of the two things named as free -- challenge
+each other, see each other's progress -- existed at all.
+
+Friends can now see each other's level, XP and streak. A separate collection
+rather than more fields on /users: that document holds email, plan, token spend
+and redeemed keys, and loosening its rule to expose a level would have exposed
+everything beside it. user_stats holds four numbers, enforced with hasOnly.
+Read access goes through the friendship document itself using the same
+sorted-pair id, so unfriending closes the window on the next read.
+
+Proved against the DEPLOYED rules with throwaway accounts: key grant survives,
+proSource cannot be cleared (403), a stranger cannot read stats (403), a friend
+can (200), nobody can write someone else's (403), and after unfriending the
+friend is refused (403). All nine checks passed; test data deleted.
+
+Also removes commitmsg.txt, which the previous commit picked up by accident.
+
+192 tests passing (8 new), tsc clean, build clean, rules deployed.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

@@ -9,8 +9,8 @@ import {
   findPeople, sendRequest, acceptRequest, declineRequest, removeFriend,
   watchFriends, watchIncoming, watchOutgoing, cancelRequest,
   claimUsername, usernameProblem, isUsernameFree,
-  myProfile, normaliseUsername,
-  type Friend, type FriendRequest, type Person,
+  myProfile, normaliseUsername, statsFor,
+  type Friend, type FriendRequest, type Person, type FriendStats,
 } from '../lib/friends';
 import DirectMessages from './DirectMessages';
 import { cn } from '../lib/utils';
@@ -45,6 +45,15 @@ export const FriendsView: React.FC<FriendsViewProps> = ({ onStartRoom }) => {
   const [results, setResults] = useState<Person[] | null>(null);
   const [searching, setSearching] = useState(false);
 
+  /*
+    Friends' progress — free, and the reason the friends feature is free.
+
+    Loaded once per friend when the list arrives rather than watched live: a
+    level does not change second to second, and a listener per friend would be
+    a listener per friend forever.
+  */
+  const [stats, setStats] = useState<Record<string, FriendStats | null>>({});
+
   const [username, setUsername] = useState('');
   const [claimed, setClaimed] = useState<string | undefined>();
   const [claiming, setClaiming] = useState(false);
@@ -56,6 +65,19 @@ export const FriendsView: React.FC<FriendsViewProps> = ({ onStartRoom }) => {
     myProfile().then((p) => { setClaimed(p?.username); setUsername(p?.username || ''); });
     return () => { offF(); offR(); offO(); };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        friends.map(async (f) => [f.uid, await statsFor(f.uid)] as const)
+      );
+      // The list can change while these are in flight; a late reply must not
+      // repopulate stats for someone who has just been removed.
+      if (!cancelled) setStats(Object.fromEntries(entries));
+    })();
+    return () => { cancelled = true; };
+  }, [friends.map((f) => f.uid).join(',')]);
 
   const saveUsername = async () => {
     const problem = usernameProblem(username);
@@ -347,7 +369,23 @@ export const FriendsView: React.FC<FriendsViewProps> = ({ onStartRoom }) => {
               </span>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-text-main truncate">{f.name}</p>
-                {f.username && <p className="text-[11px] text-text-dim truncate">@{f.username}</p>}
+                {stats[f.uid] ? (
+                  <p className="text-[11px] text-text-dim truncate">
+                    Level {stats[f.uid]!.level}
+                    <span className="mx-1.5 opacity-40">·</span>
+                    {stats[f.uid]!.xp.toLocaleString()} XP
+                    {stats[f.uid]!.streak > 0 && (
+                      <>
+                        <span className="mx-1.5 opacity-40">·</span>
+                        {stats[f.uid]!.streak} day streak
+                      </>
+                    )}
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-text-dim truncate">
+                    {f.username ? `@${f.username}` : 'No progress yet'}
+                  </p>
+                )}
               </div>
 
               <div className="flex items-center gap-2">

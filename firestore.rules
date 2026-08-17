@@ -98,7 +98,8 @@ service cloud.firestore {
              (!('xp' in data) || data.xp is int) &&
              (!('level' in data) || data.level is int) &&
              (!('badges' in data) || data.badges is list && data.badges.size() < 50) &&
-             (!('redeemedKey' in data) || data.redeemedKey is string && data.redeemedKey.size() < 128);
+             (!('redeemedKey' in data) || data.redeemedKey is string && data.redeemedKey.size() < 128) &&
+             (!('proSource' in data) || data.proSource in ['key', 'subscription']);
     }
 
     function isValidExam(data) {
@@ -215,7 +216,10 @@ service cloud.firestore {
       isUsed false -> true and can never be reset by a client.
     */
     function redeemedKeyUnchanged() {
-      return request.resource.data.get('redeemedKey', '') == resource.data.get('redeemedKey', '');
+      return request.resource.data.get('redeemedKey', '') == resource.data.get('redeemedKey', '')
+          // `proSource` gets the same treatment for the same reason: if it could
+          // be cleared, the protection it grants could be cleared with it.
+          && request.resource.data.get('proSource', '') == resource.data.get('proSource', '');
     }
 
     function redeemedWithMyKey() {
@@ -227,7 +231,10 @@ service cloud.firestore {
           && get(path).data.isUsed == true
           && get(path).data.usedBy == request.auth.uid
           && request.resource.data.get('isPro', false) == true
-          && request.resource.data.get('subscriptionType', 'none') == get(path).data.type;
+          && request.resource.data.get('subscriptionType', 'none') == get(path).data.type
+          // Stamped as key-granted so the payment webhook knows never to revoke
+          // it. A key is a permanent grant; a subscription is not.
+          && request.resource.data.get('proSource', '') == 'key';
     }
 
     match /users/{userId} {
@@ -498,6 +505,53 @@ service cloud.firestore {
 
       // You may delete your own message. You may not delete theirs.
       allow delete: if inThisPair() && resource.data.senderUid == request.auth.uid;
+    }
+
+    /* =====================================================================
+       FRIEND STATS
+
+       Your level, XP and streak, readable by you and by your friends — and by
+       nobody else.
+
+       This is FREE, deliberately, and it is the whole point of the friends
+       feature being free: seeing where your friends are is the reason to add
+       one. The paid feature is the study room.
+
+       Why a separate collection rather than a few more fields on the user doc:
+       /users holds email, plan, token spend and redeemed keys, and the rule
+       there correctly refuses to show any of it to anyone else. Loosening that
+       to expose a level would expose everything beside it.
+
+       The friendship id is the two uids sorted and joined, exactly as
+       lib/friends.ts builds it, so the check is one exists() with no query.
+       ===================================================================== */
+    match /user_stats/{userId} {
+      function friendshipWith(other) {
+        return request.auth.uid < other
+          ? request.auth.uid + '__' + other
+          : other + '__' + request.auth.uid;
+      }
+
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId
+        || exists(/databases/$(database)/documents/friendships/$(friendshipWith(userId)))
+      );
+
+      // Only you write your own, and only these fields — a stats document that
+      // could hold anything would become a second, unguarded profile.
+      allow create, update: if isAuthenticated()
+                            && request.auth.uid == userId
+                            && request.resource.data.keys().hasOnly(
+                                 ['uid', 'displayName', 'level', 'xp', 'streak', 'sessions', 'updatedAt'])
+                            && request.resource.data.uid == userId
+                            && request.resource.data.displayName is string
+                            && request.resource.data.displayName.size() <= 60
+                            && request.resource.data.level is int
+                            && request.resource.data.xp is int
+                            && request.resource.data.get('streak', 0) is int
+                            && request.resource.data.get('sessions', 0) is int;
+
+      allow delete: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
     }
   }
 }

@@ -134,7 +134,7 @@ import {
 import { getMonthlyLimit, getDailyLimit } from './lib/tokenService';
 import { limitAdvice } from './lib/tokenService';
 import { levelFromXP, levelProgress } from './lib/progress';
-import { publishProfile } from './lib/friends';
+import { publishProfile, publishStats } from './lib/friends';
 import { describeAuthError } from './lib/authErrors';
 import { recordMistake, retireMistake, listMistakes, asQuiz, type Mistake } from './lib/mistakes';
 
@@ -371,6 +371,15 @@ export default function App() {
     try {
       await updateDoc(doc(db, 'users', user.uid), { xp: newXp, level: newLevel });
       setUserData({ ...userData, xp: newXp, level: newLevel });
+
+      // Mirror it where friends can see it. Free feature, on purpose: seeing
+      // where your friends are is the reason to add one.
+      publishStats({
+        displayName: userData.displayName || user.email?.split('@')[0] || 'Student',
+        level: newLevel, xp: newXp,
+        streak: userData.streak || 0,
+        sessions: (userData.studyDays || []).length,
+      });
       if (levelledUp) {
         setShowLevelUp(true);
         toast.success(`Level up — you're now level ${newLevel}`);

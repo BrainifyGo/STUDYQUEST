@@ -234,6 +234,62 @@ export async function findPeople(term: string): Promise<Person[]> {
   return Array.from(found.values()).slice(0, MAX_RESULTS);
 }
 
+/* ----------------------------------------------------------------- stats */
+
+export interface FriendStats {
+  level: number;
+  xp: number;
+  streak: number;
+  sessions: number;
+}
+
+/**
+ * Publish your level and streak for friends to see.
+ *
+ * Kept out of the user document on purpose. That one holds your email, your
+ * plan, your token spend and your redeemed key, and its rule correctly refuses
+ * to show any of it to anyone else — loosening that to expose a level number
+ * would expose everything sitting beside it.
+ */
+export async function publishStats(stats: Partial<FriendStats> & { displayName?: string }): Promise<void> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+  try {
+    await setDoc(doc(db, 'user_stats', uid), {
+      uid,
+      displayName: (stats.displayName || 'Student').slice(0, 60),
+      level: Math.max(1, Math.floor(stats.level ?? 1)),
+      xp: Math.max(0, Math.floor(stats.xp ?? 0)),
+      streak: Math.max(0, Math.floor(stats.streak ?? 0)),
+      sessions: Math.max(0, Math.floor(stats.sessions ?? 0)),
+      updatedAt: Timestamp.now().toDate().toISOString(),
+    });
+  } catch (err) {
+    // Not being visible to friends is a smaller problem than blocking the app.
+    console.warn('[friends] could not publish stats:', err);
+  }
+}
+
+/**
+ * Read a friend's stats. Returns null when they have none yet, or when the
+ * rules refuse — which is what happens the moment you stop being friends.
+ */
+export async function statsFor(uid: string): Promise<FriendStats | null> {
+  try {
+    const snap = await getDoc(doc(db, 'user_stats', uid));
+    if (!snap.exists()) return null;
+    const d = snap.data() as any;
+    return {
+      level: Number(d.level) || 1,
+      xp: Number(d.xp) || 0,
+      streak: Number(d.streak) || 0,
+      sessions: Number(d.sessions) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /* --------------------------------------------------------------- friends */
 
 export async function areFriends(otherUid: string): Promise<boolean> {

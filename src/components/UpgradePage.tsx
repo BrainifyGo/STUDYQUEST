@@ -360,6 +360,16 @@ export default function UpgradePage({ onBack, isSubscribed = false, onUpgradeSuc
         isPro: true,
         subscriptionType: type,
         redeemedKey: key,
+        /*
+          A KEY IS A PERMANENT GRANT.
+
+          Marking where the Pro came from is what lets the Lemon Squeezy webhook
+          tell the two apart. Without it, one `subscription_updated` event with a
+          non-active status would set isPro false on a key-redeemed account —
+          and since a key can only be spent once, that account could never get
+          its Pro back.
+        */
+        proSource: 'key',
       });
 
       setSuccess(true);

@@ -1553,3 +1553,91 @@ priced per *million* tokens and a study kit is a couple of thousand, so Pro at �
 enormous number of generations. The free tiers exist to serve **free users** — that is a
 customer-acquisition cost, not a problem to engineer around. If free usage ever gets expensive enough
 to matter, that means the app is working.
+
+---
+
+## [2026-08-17] — Keys are permanent, and friends can see each other
+
+**Editor:** Claude Code (Opus 5)
+
+### A redeemed key now survives everything
+
+Ola asked for founder keys to stay with the account permanently. They would not have.
+
+The Lemon Squeezy webhook wrote `isPro` **unconditionally** on every
+`subscription_created` / `subscription_updated` event. So an account that redeemed a key and later
+took out — then cancelled — a subscription would be set back to free by an unrelated billing event.
+And because a key can only be spent once, and `redeemedKey` is now pinned, **that account could
+never get its Pro back**. Founder and comp accounts would have quietly lost access with no way to
+restore it.
+
+Redemption now stamps `proSource: 'key'`, and the webhook refuses to revoke Pro that came from a
+key. A key is a permanent grant; a subscription is a rental, and only the rental is revocable.
+
+`proSource` is pinned exactly as hard as `redeemedKey` — if it could be cleared, the protection it
+grants could be cleared with it, which is the same shape of bug as the one closed this morning.
+
+Note the webhook still stamps `proSource: 'subscription'` when *granting*, and deliberately does not
+clear it when downgrading: clearing it would throw away the fact the check depends on.
+
+### Joining a room was never free — but Daniel was right that something is broken
+
+Daniel asked whether joining someone's room should be Pro, and Ola's answer was that the whole study
+room is Pro, with friends free so people can challenge each other and compare progress.
+
+Creating and joining go through the **same** socket event, `join-room`, which has verified the
+account's plan server-side since this morning. So joining was already Pro and that part is not a bug.
+
+The real one: **the free friends feature had nothing free to do.** A friend row offered "Message"
+(free) and "Study together" (a Pro-gated room). Neither of the two things Ola named as free —
+challenging each other, and seeing each other's progress — existed at all. A free user could add a
+friend and then hit a paywall.
+
+### Friends can see each other's progress
+
+Level, XP and streak, visible to friends and nobody else.
+
+**A separate collection, not more fields on `/users`.** The user document holds email, plan, token
+spend and redeemed keys, and its rule correctly refuses to show any of that to anyone else.
+Loosening that rule to expose a level number would have exposed everything sitting beside it. So
+`user_stats` holds those four numbers and nothing else, enforced with `hasOnly` — without that it
+becomes a second, unguarded profile that every friend can read.
+
+Read access is granted through the **friendship document itself**, using the same sorted-pair id
+`lib/friends.ts` builds. That means one `exists()` with no query, no second copy of who is allowed,
+and — because the check runs on every read — **unfriending closes the window immediately**.
+
+Stats load once per friend when the list arrives rather than being watched live; a level does not
+change second to second, and a listener per friend is a listener per friend forever. A late reply is
+discarded if the list changed underneath it, so removing someone cannot repopulate their row.
+
+### Verification
+
+Proved against the **deployed** rules, not the rules file — two throwaway accounts, a third as a
+stranger, and a throwaway key, all through the Firestore REST API:
+
+| Attempt | Result |
+|---|---|
+| A redeems the key, stamped `proSource: key` | 200 |
+| A clears `proSource` to escape the protection | **403** |
+| Webhook sees the key grant and leaves Pro alone | left alone, still Pro |
+| A stranger reads B's stats | **403** |
+| A **friend** reads B's stats | 200 |
+| B reads their own | 200 |
+| A stranger writes B's stats | **403** |
+| A reads B's stats **after unfriending** | **403** |
+
+All nine as intended, and everything created was deleted afterwards.
+
+- **192 tests passing** (8 new); `tsc` clean; `npm run build` clean; rules deployed.
+
+### Files
+
+`firestore.rules`, `server.ts`, `src/components/UpgradePage.tsx`, `src/components/FriendsView.tsx`,
+`src/lib/friends.ts`, `src/App.tsx`, `tests/rules-structure.test.ts`.
+
+### Still to build
+
+**Challenging a friend** — the other half of what Ola said should be free. `GameMode` already accepts
+an injected deck (that is how the Arcade works inside a room), so the missing piece is a challenge
+document holding the questions and both scores. That is the next thing.

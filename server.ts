@@ -201,11 +201,33 @@ async function startServer() {
         const status = req.body.data.attributes.status;
         const isPro = status === 'active';
 
-        await db.collection('users').doc(userId).update({
-          isPro
-        });
+        /*
+          NEVER REVOKE PRO THAT CAME FROM A KEY.
 
-        console.log(`Updated user ${userId} isPro to ${isPro}`);
+          This used to write `isPro` unconditionally. An account that redeemed a
+          key and later took out (then cancelled) a subscription would be set
+          back to free by this line — and because a key can only be spent once,
+          it could never recover. Founder and comp accounts would silently lose
+          their access to an unrelated billing event.
+
+          A key is a permanent grant. A subscription is a rental. Only the
+          rental is revocable here.
+        */
+        const userRef = db.collection('users').doc(userId);
+        const snap = await userRef.get();
+        const fromKey = snap.data()?.proSource === 'key';
+
+        if (!isPro && fromKey) {
+          console.log(`Subscription lapsed for ${userId}, but Pro came from a key — leaving it alone.`);
+        } else {
+          await userRef.update({
+            isPro,
+            // Only stamp the source when granting; clearing it on a downgrade
+            // would throw away the very fact this check depends on.
+            ...(isPro ? { proSource: 'subscription' } : {}),
+          });
+          console.log(`Updated user ${userId} isPro to ${isPro}`);
+        }
       }
 
       res.status(200).json({ success: true });

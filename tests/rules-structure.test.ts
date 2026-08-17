@@ -257,3 +257,59 @@ describe('an upgrade key can only be spent once', () => {
     expect(keys).toMatch(/allow list: if isAdmin\(\)/);
   });
 });
+
+describe('a key is a permanent grant', () => {
+  const users = block('users');
+  const stats = block('user_stats');
+
+  it('records that the Pro came from a key', () => {
+    // The payment webhook reads this to know what it may and may not revoke.
+    expect(rules).toMatch(/request\.resource\.data\.get\('proSource', ''\) == 'key'/);
+  });
+
+  it('pins proSource as hard as redeemedKey', () => {
+    // If proSource could be cleared, the protection it grants could be cleared
+    // with it, and the webhook would be free to revoke a key grant again.
+    expect(rules).toMatch(
+      /redeemedKeyUnchanged\(\)[\s\S]{0,400}proSource[\s\S]{0,80}resource\.data\.get\('proSource', ''\)/
+    );
+  });
+
+  it('only allows the two sources it knows about', () => {
+    expect(rules).toMatch(/proSource in \['key', 'subscription'\]/);
+  });
+});
+
+describe('friend stats are friends-only and free', () => {
+  const stats = block('user_stats');
+
+  it('lets you read your own', () => {
+    expect(stats).toMatch(/request\.auth\.uid == userId/);
+  });
+
+  it('lets a FRIEND read them, via the friendship document', () => {
+    // The same sorted-pair id lib/friends.ts builds, so this is one exists()
+    // with no query and no second copy of who is allowed.
+    expect(stats).toMatch(/exists\(\/databases\/\$\(database\)\/documents\/friendships\//);
+  });
+
+  it('will not let a stats document hold anything else', () => {
+    // Without hasOnly this becomes a second, unguarded profile that every
+    // friend can read.
+    expect(stats).toMatch(
+      /hasOnly\(\s*\['uid', 'displayName', 'level', 'xp', 'streak', 'sessions', 'updatedAt'\]\)/
+    );
+  });
+
+  it('only lets you write your own', () => {
+    expect(stats).toMatch(/allow create, update: if isAuthenticated\(\)\s*&& request\.auth\.uid == userId/);
+  });
+
+  it('keeps the sensitive fields on /users, not here', () => {
+    // The reason this collection exists at all: /users holds email, plan, token
+    // spend and redeemed keys, and none of that may be visible to a friend.
+    for (const field of ['email', 'isPro', 'tokensUsedToday', 'redeemedKey']) {
+      expect(stats, `user_stats must not carry ${field}`).not.toMatch(new RegExp(`'${field}'`));
+    }
+  });
+});
