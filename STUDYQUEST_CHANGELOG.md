@@ -1479,3 +1479,77 @@ every fallback was dead.
 
 Run **`npm run check:ai`** the moment generation misbehaves. It tests the exact models the app uses
 and, when everything is dead, prints the two commands that list what each provider currently offers.
+
+---
+
+## [2026-08-17] — A provider registry, so free capacity is a config line
+
+**Editor:** Claude Code (Opus 5)
+
+Ola asked whether we could hold several Google accounts and pool their free Gemini quotas.
+
+**No — and the alternative is better.** Google, Groq, Mistral and the rest all prohibit extra
+accounts created to get around rate limits, and they link accounts by phone number, payment method
+and device, so it is not difficult for them to spot. The realistic outcome of being caught is *every
+linked account closed*, including the one the live site runs on. It frequently does not even work,
+because limits are often per payment identity rather than per account.
+
+Six companies' free tiers, each under its own terms, is more capacity than six accounts at one
+company would have given — and none of it can be withdrawn for cheating.
+
+### The registry
+
+Nearly every inference company speaks the OpenAI chat-completions shape, so there is now **one**
+function that talks to all of them and a provider is a row in a list:
+
+```ts
+{ id, name, baseUrl, keyEnv, large, small, reasoning?, signup }
+```
+
+Six are pre-configured: Groq, Cerebras, Mistral, GitHub Models, Together and OpenRouter, alongside
+Gemini, which keeps its own path because it is not OpenAI-shaped through its SDK and because image
+analysis goes through it.
+
+**A provider with no key set is skipped silently**, deliberately: the app has to run for anyone who
+has cloned it with a single key, and a missing optional key is not an error. So adding capacity is
+sign up → key into Render → redeploy. No code change, and the chain rebuilds itself.
+
+The dedicated `callGroq` is gone, replaced by the generic caller. Its hard-won comment about
+reasoning budgets moved onto the `reasoning` flag rather than being deleted with it.
+
+### `npm run check:ai` now reports what is missing
+
+It tests every configured model and then lists the providers with no key, each with its sign-up URL —
+because each of those is a separate company's free tier going unused.
+
+Run right now, it makes the case on its own:
+
+```
+  DEAD  Gemini gemini-flash-latest      503 currently experiencing high demand
+  OK    Groq openai/gpt-oss-20b         OK
+  DEAD  OpenRouter llama-3.3-70b:free   unavailable for free
+  1 alive, 2 dead, 4 not set up.
+```
+
+Gemini is rate-limited at this moment and **Groq is the only thing keeping the app up**. One provider
+away from the outage we had this morning. That is the argument for the other four.
+
+### Verified
+
+End to end through `generateWithAI` and the real parsers, not just that the models answer: a free
+quiz generated and **5 questions parsed** — Gemini 503, Groq picked it up, exactly as designed.
+
+- **184 tests passing**; `tsc` clean; `npm run build` clean.
+
+### Files
+
+`AI_PROVIDERS.md` (new), `src/lib/aiProviders.server.ts`, `scripts/checkProviders.cjs`,
+`.env.example`.
+
+### On paying, honestly
+
+Worth saying plainly in the docs, so it is not discovered the expensive way: flash-class inference is
+priced per *million* tokens and a study kit is a couple of thousand, so Pro at £5/month covers an
+enormous number of generations. The free tiers exist to serve **free users** — that is a
+customer-acquisition cost, not a problem to engineer around. If free usage ever gets expensive enough
+to matter, that means the app is working.

@@ -1,0 +1,41 @@
+Add a provider registry so free capacity is a config line
+
+Ola asked about holding several Google accounts to pool their free Gemini
+quotas. That breaks the terms of every provider here, they link accounts by
+phone, payment method and device, and the realistic outcome of being caught is
+every linked account closed -- including the one the live site runs on. It also
+often does not work, since limits are frequently per payment identity rather
+than per account. Six companies' free tiers is more capacity than six accounts
+at one company, and none of it can be withdrawn for cheating.
+
+Nearly every inference company speaks the OpenAI chat-completions shape, so
+there is now one generic caller and a provider is a row in a list. Six are
+pre-configured -- Groq, Cerebras, Mistral, GitHub Models, Together, OpenRouter
+-- alongside Gemini, which keeps its own path because it is not OpenAI-shaped
+through its SDK and because image analysis goes through it.
+
+A provider with no key is skipped silently, deliberately: the app must run for
+anyone who cloned it with one key. So adding capacity is sign up -> key into
+Render -> redeploy, with no code change.
+
+check:ai now tests every configured model and then lists the providers with no
+key, each with its signup URL. Run right now it makes the case by itself:
+Gemini is 503 and Groq is the ONLY thing keeping the app up -- one provider
+away from this morning's outage.
+
+The dedicated callGroq is gone, replaced by the generic caller; its comment
+about reasoning budgets moved onto the `reasoning` flag rather than being
+deleted with it.
+
+Verified end to end, not just that models answer: a free quiz generated and 5
+questions parsed, with Gemini 503 and Groq picking it up as designed.
+
+AI_PROVIDERS.md also records the thing worth knowing before chasing free
+capacity -- flash-class inference is priced per million tokens and a study kit
+is a couple of thousand, so Pro at £5/month covers an enormous number of
+generations. The free tiers serve free users; that is customer acquisition
+cost, not a problem to engineer around.
+
+184 tests passing, tsc clean, build clean.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

@@ -72,84 +72,195 @@ const callGemini = async (prompt: string, model: string): Promise<string> => {
   return response.text ?? '';
 };
 
-const callGroq = async (prompt: string, model: string, maxTokens: number): Promise<string> => {
-  const Groq = (await import('groq-sdk')).default;
-  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-  const response = await groq.chat.completions.create({
+/*
+  THE PROVIDER REGISTRY.
+
+  Nearly every inference company speaks the OpenAI chat-completions shape, so
+  one function talks to all of them and a provider is a row in a list rather
+  than a new code path. Adding one is: sign up, put the key in the environment,
+  add four lines here. Nothing else changes, and `npm run check:ai` tests it.
+
+  EACH PROVIDER IS ITS OWN FREE TIER. That is the legitimate way to get more
+  free capacity, and it is strictly better than the alternative of holding
+  several accounts with one company:
+
+    - Terms. Google, Groq and the rest all prohibit extra accounts created to
+      get around rate limits. They link accounts by phone number, payment
+      method and device fingerprint, so it is also not difficult for them to
+      spot.
+    - Risk. The realistic outcome of being caught is every linked account
+      closed — including the one the live app runs on. That is the whole app
+      down, for a bit more free quota.
+    - It does not even work well. One company's limits are usually per project
+      OR per payment identity, so a second account often shares the first's
+      ceiling anyway.
+
+  Six companies' free tiers, each under its own terms, is more capacity than
+  six accounts at one company would have given, and none of it can be taken
+  away for cheating.
+
+  A provider with no key set is skipped silently. That is deliberate: the app
+  has to run for anyone who has cloned it with one key, and a missing optional
+  key is not an error.
+*/
+export interface Provider {
+  id: string;
+  name: string;
+  /** OpenAI-compatible base, without a trailing slash. */
+  baseUrl: string;
+  /** Environment variable holding the key. Absent = provider skipped. */
+  keyEnv: string;
+  /** Bigger model for Pro, smaller for Free. Same string is fine. */
+  large: string;
+  small: string;
+  /** Some hosts want extra headers (OpenRouter attributes traffic this way). */
+  headers?: Record<string, string>;
+  /**
+   * True for models that think before answering (Groq's gpt-oss, for example).
+   *
+   * REASONING SHARES THE TOKEN BUDGET, and that is a trap. Those thoughts are
+   * charged against `max_tokens` before a single character of answer appears.
+   * Measured on gpt-oss-120b with a trivial prompt: at max_tokens 30 the model
+   * spent all thirty thinking and returned EMPTY content with finish_reason
+   * "length" — no error, no warning, just nothing.
+   *
+   * Setting this sends `reasoning_effort: 'low'`, which is right for this app
+   * rather than a compromise: the prompts in studyPrompts.ts state the format
+   * precisely, so there is nothing to deliberate about. Measured on a real quiz
+   * prompt it cut reasoning from 296 characters to 26 and produced MORE usable
+   * output. It is only sent to providers marked here, because an unrecognised
+   * field is a 400 on some hosts.
+   */
+  reasoning?: boolean;
+  /** Where to sign up, so this file answers "how do I add capacity". */
+  signup: string;
+}
+
+export const PROVIDERS: Provider[] = [
+  {
+    id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1',
+    keyEnv: 'GROQ_API_KEY',
+    large: 'openai/gpt-oss-120b', small: 'openai/gpt-oss-20b',
+    reasoning: true,
+    signup: 'https://console.groq.com/keys',
+  },
+  {
+    id: 'cerebras', name: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1',
+    keyEnv: 'CEREBRAS_API_KEY',
+    large: 'llama-3.3-70b', small: 'llama3.1-8b',
+    signup: 'https://cloud.cerebras.ai/',
+  },
+  {
+    id: 'mistral', name: 'Mistral', baseUrl: 'https://api.mistral.ai/v1',
+    keyEnv: 'MISTRAL_API_KEY',
+    large: 'mistral-large-latest', small: 'mistral-small-latest',
+    signup: 'https://console.mistral.ai/api-keys/',
+  },
+  {
+    id: 'github', name: 'GitHub Models', baseUrl: 'https://models.github.ai/inference',
+    keyEnv: 'GITHUB_MODELS_TOKEN',
+    large: 'openai/gpt-4o', small: 'openai/gpt-4o-mini',
+    signup: 'https://github.com/settings/tokens (fine-grained, Models: read)',
+  },
+  {
+    id: 'together', name: 'Together', baseUrl: 'https://api.together.xyz/v1',
+    keyEnv: 'TOGETHER_API_KEY',
+    large: 'meta-llama/Llama-3.3-70B-Instruct-Turbo-Free',
+    small: 'meta-llama/Llama-3.3-70B-Instruct-Turbo-Free',
+    signup: 'https://api.together.ai/settings/api-keys',
+  },
+  {
+    id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1',
+    keyEnv: 'OPENROUTER_API_KEY',
+    // Free ids here come and go constantly — this one is last in the chain and
+    // its failures are expected rather than alarming.
+    large: 'meta-llama/llama-3.3-70b-instruct:free',
+    small: 'meta-llama/llama-3.3-70b-instruct:free',
+    headers: { 'HTTP-Referer': 'https://studyquest-ruuq.onrender.com', 'X-Title': 'StudyQuest' },
+    signup: 'https://openrouter.ai/keys',
+  },
+];
+
+/** The providers that actually have a key set right now. */
+export const activeProviders = (): Provider[] =>
+  PROVIDERS.filter((p) => !!process.env[p.keyEnv]?.trim());
+
+/** One call, any OpenAI-compatible host. */
+export const callOpenAICompatible = async (
+  provider: Provider,
+  prompt: string,
+  model: string,
+  maxTokens: number
+): Promise<string> => {
+  const key = process.env[provider.keyEnv];
+  if (!key) throw new Error(`${provider.keyEnv} is not set`);
+
+  const body: Record<string, unknown> = {
     model,
     messages: [{ role: 'user', content: prompt }],
     max_tokens: maxTokens,
-    /*
-      REASONING SHARES THE TOKEN BUDGET, and that is a trap.
+  };
+  // Only sent where it is understood; an unknown field is a 400 on some hosts.
+  if (provider.reasoning) body.reasoning_effort = 'low';
 
-      These are reasoning models: they think first, and those thoughts are
-      charged against `max_tokens` before a single character of answer is
-      produced. Measured on gpt-oss-120b with a trivial prompt: at max_tokens 30
-      the model spent all thirty thinking and returned **empty content** with
-      finish_reason "length". No error, no warning — just nothing.
-
-      A study kit is a long reply (twenty flashcards, or ten questions with
-      explanations), so the old 2048 was close enough to the edge to truncate
-      the JSON mid-object and fail the parse.
-
-      "low" is right for this app rather than a compromise: the prompts in
-      studyPrompts.ts already state the format precisely, so there is nothing to
-      deliberate about. Measured on a real quiz prompt, it cut reasoning from
-      296 characters to 26 and produced MORE usable output as a result.
-    */
-    reasoning_effort: 'low',
-  } as any);
-  return response.choices[0].message.content ?? '';
-};
-
-const callOpenRouter = async (prompt: string, model: string): Promise<string> => {
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+  const res = await fetch(`${provider.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      Authorization: `Bearer ${key}`,
       'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://brainifyai.app',
-      'X-Title': 'StudyQuest',
+      ...(provider.headers ?? {}),
     },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }] }),
+    body: JSON.stringify(body),
   });
-  const data = await response.json();
-  if (data.error) throw new Error(data.error.message);
-  return data.choices[0].message.content ?? '';
+
+  const data = await res.json().catch(() => ({}));
+  if (data?.error) throw new Error(typeof data.error === 'string' ? data.error : data.error.message);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return data?.choices?.[0]?.message?.content ?? '';
 };
 
 /**
- * The models, in one place so `npm run check:ai` can test exactly what runs.
+ * The models Gemini uses, kept separate because Gemini is not OpenAI-shaped
+ * through its own SDK and because vision goes through it.
  *
- * Every one of these was verified against the live API before being written
- * here. `gemini-flash-latest` is an alias and is first in both chains for that
- * reason — see the note above.
- *
- * OpenRouter is no longer in either chain. Its free tier now refuses the model
- * we used ("unavailable for free — the paid version is available now"), and
- * every model still marked free returned a provider error when tested. A
- * fallback that is always dead is worse than none: it adds a slow failure to
- * every request before the real error surfaces.
+ * `gemini-flash-latest` is an alias: it tracks whatever the current flash model
+ * is, so it cannot retire out from under us the way `gemini-2.0-flash` did.
  */
 export const MODELS = {
   geminiFlash: 'gemini-flash-latest',
-  groqLarge: 'openai/gpt-oss-120b',
-  groqSmall: 'openai/gpt-oss-20b',
 } as const;
 
-export const generateFree = (prompt: string): Promise<ProviderResult> =>
-  runFallbackChain([
+/**
+ * Build the chain: Gemini first, then every provider that has a key.
+ *
+ * Order is deliberate. Gemini leads because it is the highest quality of the
+ * free tiers for this job; the rest follow in registry order so the fastest and
+ * most generous come next. Every one of them is a separate company's free
+ * allowance, so a chain of six is six independent daily quotas.
+ */
+const buildChain = (prompt: string, plan: 'free' | 'pro') => {
+  const maxTokens = plan === 'pro' ? 8192 : 4096;
+
+  const chain: Array<{ name: string; fn: () => Promise<string> }> = [
     { name: 'Gemini Flash', fn: () => callGemini(prompt, MODELS.geminiFlash) },
-    { name: 'Groq GPT-OSS 120B', fn: () => callGroq(prompt, MODELS.groqLarge, 4096) },
-    { name: 'Groq GPT-OSS 20B', fn: () => callGroq(prompt, MODELS.groqSmall, 4096) },
-  ]);
+  ];
+
+  for (const provider of activeProviders()) {
+    const model = plan === 'pro' ? provider.large : provider.small;
+    chain.push({
+      name: `${provider.name} ${model}`,
+      fn: () => callOpenAICompatible(provider, prompt, model, maxTokens),
+    });
+  }
+
+  return chain;
+};
+
+export const generateFree = (prompt: string): Promise<ProviderResult> =>
+  runFallbackChain(buildChain(prompt, 'free'));
 
 export const generatePro = (prompt: string): Promise<ProviderResult> =>
-  runFallbackChain([
-    { name: 'Gemini Flash', fn: () => callGemini(prompt, MODELS.geminiFlash) },
-    { name: 'Groq GPT-OSS 120B', fn: () => callGroq(prompt, MODELS.groqLarge, 8192) },
-    { name: 'Groq GPT-OSS 20B', fn: () => callGroq(prompt, MODELS.groqSmall, 8192) },
-  ]);
+  runFallbackChain(buildChain(prompt, 'pro'));
 
 export const generateWithAI = (prompt: string, plan: 'free' | 'pro'): Promise<ProviderResult> =>
   plan === 'pro' ? generatePro(prompt) : generateFree(prompt);
