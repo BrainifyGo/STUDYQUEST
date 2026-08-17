@@ -1382,3 +1382,100 @@ deletion was verified rather than assumed.
 Production now holds **six accounts**, up from four — two people signed up on the 16th and 17th
 without being asked to. That makes the Pro gating from the previous entry live for real users, so the
 two keys should be redeemed before anyone demonstrates the app.
+
+---
+
+## [2026-08-17] — Generation was down because every model id had been retired
+
+**Editor:** Claude Code (Opus 5)
+
+Study kit generation stopped working entirely. The only symptom was
+`All AI services are currently busy. Please try again.`
+
+Nothing in the app had changed. **Every model in both fallback chains had been retired by its
+provider**, and image input had been dead for exactly as long, from the same cause.
+
+### What was actually wrong
+
+Each one tested against the live API rather than inferred:
+
+| Model | Where | Result |
+|---|---|---|
+| `gemini-2.0-flash` | free chain, first | **404** — "no longer available" |
+| `gemini-1.5-flash` | pro chain + **all image analysis** | **404** — "not found for API version v1beta" |
+| `llama-3.3-70b-versatile` | both chains | gone from Groq's model list |
+| `mixtral-8x7b-32768` | pro chain | gone |
+| `llama3-8b-8192` | pro chain | gone |
+| `llama-3.1-8b-instruct:free` | both chains, last | "unavailable for free — the paid version is available now" |
+
+Six models, three providers, nothing left standing. A fallback chain is only insurance if the
+fallbacks are alive, and every link had rotted independently while the code sat still.
+
+### The message was the reason it took so long
+
+"All AI services are currently busy" is what you say when everything is **rate limited**. It is not
+what you say when every model id you hold has been deleted. The one sentence the app could produce
+pointed firmly at the wrong cause.
+
+The chain now records each provider's actual error and logs all of them together, so a dead model id
+reads as a dead model id. It also treats a **200 with an empty body as a failure** — a provider that
+returns nothing has not succeeded, and taking it would hand the student a blank study kit and call it
+done.
+
+### Rolling aliases where they exist
+
+`gemini-flash-latest` replaces the pinned versions and is first in both chains. It tracks whatever
+the current flash model is, so it cannot retire out from under us the way `gemini-2.0-flash` did.
+
+This is the third time this project has been broken by a pinned external id — dead YouTube video ids
+twice, dead model ids now. Where a provider offers an alias, use it. Where it does not, the id is
+pinned and `npm run check:ai` exists so the next retirement is something we check for rather than
+something a user reports.
+
+OpenRouter is **out of both chains**. Its free tier refuses the model we used, and every model still
+listed as free returned a provider error when tested. A fallback that is always dead is worse than no
+fallback: it adds a slow failure to every request before the real error surfaces.
+
+### The trap inside the replacement
+
+The new Groq models are **reasoning models**, and their reasoning is charged against `max_tokens`
+before a single character of answer appears.
+
+`npm run check:ai` found this out about its own first version: it asked for 30 tokens, the model
+spent all thirty thinking, and it returned **empty content with `finish_reason: "length"`**. No error.
+The script duly reported a perfectly healthy model as dead.
+
+That is not a curiosity — a study kit is a long reply, and the old 2048-token budget was close enough
+to the edge to truncate JSON mid-object and fail the parse. So:
+
+- `reasoning_effort: 'low'`, which is right here rather than a compromise: the prompts in
+  `studyPrompts.ts` state the format precisely, so there is nothing to deliberate about. Measured on
+  a real quiz prompt it cut reasoning from 296 characters to 26 **and produced more usable output**.
+- Budgets raised to 4096 (free) and 8192 (pro), because reasoning shares them.
+
+### Verification
+
+Not "the models respond" — the actual pipeline, end to end, through `generateWithAI` and the real
+parsers:
+
+| Mode | Plan | Result |
+|---|---|---|
+| summary | free | 1,671 characters |
+| quiz | free | **5 questions parsed** — the free allowance exactly |
+| flashcards | pro | **20 cards parsed** — the Pro allowance exactly |
+
+Gemini happened to be returning 503 during that run, so all three were served by Groq — which is the
+fallback chain doing precisely its job, and something it could not have done an hour earlier because
+every fallback was dead.
+
+- **184 tests passing**; `tsc` clean; `npm run build` clean.
+- `npm run check:ai` reports 3/3 alive.
+
+### Files
+
+`scripts/checkProviders.cjs` (new), `src/lib/aiProviders.server.ts`, `package.json`.
+
+### For next time
+
+Run **`npm run check:ai`** the moment generation misbehaves. It tests the exact models the app uses
+and, when everything is dead, prints the two commands that list what each provider currently offers.

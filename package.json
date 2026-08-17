@@ -12,7 +12,8 @@
     "start": "cross-env NODE_ENV=production tsx server.ts",
     "test": "vitest run --exclude tests/rules.test.ts --exclude \"**/node_modules/**\" --exclude \"**/dist/**\"",
     "test:rules": "firebase emulators:exec --only firestore \"vitest run tests/rules.test.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:ai": "node scripts/checkProviders.cjs"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
