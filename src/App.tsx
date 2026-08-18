@@ -263,6 +263,22 @@ export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [showLimitAlert, setShowLimitAlert] = useState(false);
   const [showLevelUp, setShowLevelUp] = useState(false);
+
+  /*
+    THE LEVEL-UP POPUP HAD NO WAY OUT.
+
+    It was dismissed by a setTimeout that lived inside the XP-on-generate blocks
+    — and those blocks were removed when XP became Arcade-only, which took the
+    only `setShowLevelUp(false)` in the file with them. The remaining caller
+    turned it on and nothing ever turned it off, so it sat there for the rest of
+    the session. My regression, and this is the fix: the timer belongs with the
+    popup, not with whatever happened to raise it.
+  */
+  useEffect(() => {
+    if (!showLevelUp) return;
+    const t = setTimeout(() => setShowLevelUp(false), 4000);
+    return () => clearTimeout(t);
+  }, [showLevelUp]);
   const [musicDropdownOpen, setMusicDropdownOpen] = useState(false);
   const [ambientSounds, setAmbientSounds] = useState<Record<string, { active: boolean, volume: number, howl: Howl | null }>>({
     rain: { active: false, volume: 0.5, howl: null },
@@ -286,8 +302,6 @@ export default function App() {
   // (wrong) sums. See src/lib/progress.ts.
   const sidebarProgress = levelProgress(userData?.xp || 0);
 
-  /** A study room is a screen of its own — see the note on the header. */
-  const inRoom = activeView === 'collab';
 
   /*
     COLLAPSING IS A DESKTOP IDEA.
@@ -309,6 +323,19 @@ export default function App() {
     return () => mq.removeEventListener('change', onChange);
   }, []);
   const railCollapsed = isDesktop && sidebarCollapsed;
+
+  /*
+    A STUDY ROOM TAKES THE SCREEN ON A PHONE, NOT ON A DESKTOP.
+
+    Hiding the app chrome was the right call for mobile — the room draws its own
+    header and there is no width to share. On a desktop it went too far: you lost
+    the sidebar and the header, so leaving a room meant hunting for the room's own
+    close button rather than just clicking Dashboard. There is plenty of room for
+    both on a laptop.
+  */
+  const inRoom = activeView === 'collab';
+  const roomTakesScreen = inRoom && !isDesktop;
+
 
   /** The mobile tools sheet. Header-local, so it stays out of the store. */
   const [showTools, setShowTools] = useState(false);
@@ -332,6 +359,21 @@ export default function App() {
     setHeaderHidden(y > 80 && delta > 0);
     lastScrollY.current = y;
   }, []);
+
+  /*
+    ON A MOUSE, THE HEADER COMES BACK ON HOVER.
+
+    Scrolling up to retrieve it is fine on a phone, where scrolling is how you
+    move anyway. On a desktop it means scrolling the page just to reach the
+    Upgrade button, which is the wrong trade. A thin strip along the top of the
+    window brings it back, so it is out of the way while you read and one
+    movement away when you want it.
+
+    Pointer-based rather than a breakpoint: a touch device that happens to be
+    wide should keep the scroll behaviour, because it has no hover to offer.
+  */
+  const [headerHovered, setHeaderHovered] = useState(false);
+  const headerVisible = !headerHidden || headerHovered;
 
   /*
     Get out of the way in a study room.
@@ -1986,7 +2028,7 @@ export default function App() {
       {/* --- Sidebar --- */}
       <AnimatePresence>
         {/* Backdrop — mobile only, tap anywhere outside to close sidebar */}
-        {sidebarOpen && !inRoom && (
+        {sidebarOpen && !roomTakesScreen && (
           <motion.div
             key="backdrop"
             initial={{ opacity: 0 }}
@@ -1996,7 +2038,7 @@ export default function App() {
             onClick={() => setSidebarOpen(false)}
           />
         )}
-        {sidebarOpen && !inRoom && (
+        {sidebarOpen && !roomTakesScreen && (
           <div>
             <motion.aside 
               key="sidebar"
@@ -2211,7 +2253,9 @@ export default function App() {
               initial={{ opacity: 0, y: 50, scale: 0.8 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, scale: 0.8 }}
-              className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-4 bg-brand-purple p-6 rounded-3xl shadow-2xl shadow-brand-purple/40 border border-white/20"
+              onClick={() => setShowLevelUp(false)}
+              role="status"
+              className="fixed bottom-24 lg:bottom-10 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-4 bg-brand-purple p-5 sm:p-6 rounded-3xl shadow-2xl shadow-brand-purple/40 border border-white/20 cursor-pointer"
             >
               <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center">
                 <Star className="text-white" size={24} fill="currentColor" />
@@ -2287,7 +2331,7 @@ export default function App() {
             viewport height and follows the chrome as it moves.
           */
           "flex-1 flex flex-col h-dvh overflow-hidden relative transition-all duration-300 scrollbar-hide max-w-full",
-          sidebarOpen && !inRoom ? (railCollapsed ? "md:pl-20" : "md:pl-64") : "pl-0"
+          sidebarOpen && !roomTakesScreen ? (railCollapsed ? "md:pl-20" : "md:pl-64") : "pl-0"
         )}
       >
         {/* Sticky Header */}
@@ -2301,7 +2345,15 @@ export default function App() {
           z-index sorts it out is what produced that; a room is a screen, so it
           gets the screen.
         */}
-        {!inRoom && (
+        {!roomTakesScreen && (
+        <>
+        {/* The strip that catches the pointer while the header is hidden. It has
+            no pointer events on touch, where there is nothing to hover. */}
+        <div
+          onMouseEnter={() => setHeaderHovered(true)}
+          className="hidden md:block fixed top-0 left-0 right-0 h-4 z-30 pointer-events-auto"
+          aria-hidden="true"
+        />
         <header
           className={cn(
             "sticky top-0 z-40 glass-panel border-b border-border-main px-3 md:px-6 py-2",
@@ -2310,8 +2362,10 @@ export default function App() {
             // scroll up. It used to sit there permanently, eating the top of every
             // screen — worst on a phone, where it cost a fifth of the page.
             "transition-transform duration-300 will-change-transform",
-            headerHidden ? "-translate-y-full" : "translate-y-0"
+            headerVisible ? "translate-y-0" : "-translate-y-full"
           )}
+          onMouseEnter={() => setHeaderHovered(true)}
+          onMouseLeave={() => setHeaderHovered(false)}
         >
           {/* LEFT: hamburger + streak (streak hidden on mobile) */}
           <div className="flex items-center gap-2 min-w-0">
@@ -2492,6 +2546,7 @@ export default function App() {
             </button>
           </div>
         </header>
+        </>
         )}
 
         <div
@@ -3398,16 +3453,16 @@ export default function App() {
         React. The bar below is the control that goes with it.
       */}
       <AnimatePresence>
-        {showMusic && !inRoom && (
+        {showMusic && !roomTakesScreen && (
           <StudyMusic onClose={() => setShowMusic(false)} />
         )}
       </AnimatePresence>
 
       {/* Whatever is playing, whenever the full player is not on screen. */}
-      {(!showMusic || inRoom) && (
+      {(!showMusic || roomTakesScreen) && (
         <MusicBar
           onExpand={() => { setActiveView('dashboard'); setShowMusic(true); }}
-          raised={!inRoom}
+          raised={!roomTakesScreen}
         />
       )}
 

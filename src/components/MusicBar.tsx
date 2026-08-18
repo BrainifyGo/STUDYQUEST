@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Music, X, ChevronUp } from 'lucide-react';
+import { Music, X, ChevronUp, Minus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   activeAmbience, onAmbienceChange, stopAmbience, stopAllAmbience,
@@ -41,6 +41,15 @@ interface MusicBarProps {
 
 export const MusicBar: React.FC<MusicBarProps> = ({ onExpand, raised }) => {
   const [, bump] = useState(0);
+  /*
+    THE BAR CAN BE PUT AWAY WITHOUT STOPPING THE MUSIC.
+
+    It sits across the bottom of every screen for as long as anything is
+    playing, which is the whole point — but "I want my screen back" and "I want
+    silence" are different wishes, and the only control was the one that stopped
+    the sound. Minimised it is a single round button in the corner.
+  */
+  const [minimised, setMinimised] = useState(false);
 
   // One subscription per engine. Neither owns the other, and either can change
   // without the other doing anything.
@@ -72,6 +81,22 @@ export const MusicBar: React.FC<MusicBarProps> = ({ onExpand, raised }) => {
     for (const id of activeAmbience()) stopAmbience(id);
   };
 
+  if (playing && minimised) {
+    return (
+      <motion.button
+        initial={{ scale: 0.6, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        onClick={() => setMinimised(false)}
+        aria-label={`Music playing: ${label}. Show the player.`}
+        title={label}
+        className={`fixed right-3 z-[70] w-12 h-12 rounded-full glass-panel border border-border-main shadow-2xl flex items-center justify-center text-brand-purple ${raised ? 'bottom-24' : 'bottom-4'}`}
+        style={{ marginBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        <Music size={18} className="animate-pulse" />
+      </motion.button>
+    );
+  }
+
   return (
     <AnimatePresence>
       {playing && (
@@ -92,6 +117,13 @@ export const MusicBar: React.FC<MusicBarProps> = ({ onExpand, raised }) => {
               <p className="text-xs font-bold text-text-main truncate">{label}</p>
             </div>
 
+            <button
+              onClick={() => setMinimised(true)}
+              aria-label="Minimise the music bar"
+              className="p-2 rounded-lg text-text-dim hover:text-text-main hover:bg-glass-bg transition-all"
+            >
+              <Minus size={16} />
+            </button>
             <button
               onClick={onExpand}
               aria-label="Open the music player"

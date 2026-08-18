@@ -1895,3 +1895,76 @@ The AI providers were checked while writing this: Gemini and Groq both answering
 model still refusing. The "Could not build that" in the planner screenshot was taken during
 yesterday's outage, before the retired model ids were replaced — it should not recur, and
 `npm run check:ai` is how to confirm.
+
+---
+
+## [2026-08-18] — Desktop pass, from a ten-minute screen recording
+
+**Editor:** Claude Code (Opus 5)
+
+Ola recorded himself testing on a laptop and typed notes into Notepad as he went, which the recording
+captured. Six things, and one of them was mine.
+
+### The level-up popup never went away — my regression
+
+`setShowLevelUp(true)` was called and **nothing in the file ever set it back to false**. It sat on
+screen for the rest of the session.
+
+That was not always true. The dismissal was a `setTimeout` living inside the XP-on-generate blocks,
+and those blocks were deleted when XP became Arcade-only — which took the only `setShowLevelUp(false)`
+with them. Removing the caller removed the cleanup, and nothing failed loudly enough to notice.
+
+The timer now lives with the popup rather than with whatever raised it, which is where it should
+always have been. Tapping it dismisses it too, since four seconds is a while to stare at something
+you have already read. It also sits above the mobile bottom nav instead of behind it.
+
+### "Study" was invisible in light mode
+
+The wordmark is `Study` in a plain span plus `Quest` in a gradient one — and the plain span was
+`text-white`. In light mode that is white on near-white, so the logo read as just **"Quest"**, which
+is exactly how it appears in the recording. It uses the theme token now.
+
+### The header comes back on hover
+
+Scrolling up to retrieve the header is reasonable on a phone, where scrolling is how you move around
+anyway. On a desktop it means scrolling the page just to reach the Upgrade button.
+
+A four-pixel strip along the top of the window now brings it back on hover. That strip is
+`hidden md:block`, and the reveal is pointer-driven rather than breakpoint-driven, so a wide *touch*
+device keeps the scroll behaviour — it has no hover to offer.
+
+### A study room no longer takes the whole desktop
+
+Hiding the app chrome inside a room was right for mobile: the room draws its own header and there is
+no width to share. On a laptop it went too far — you lost the sidebar and the header, so leaving a
+room meant hunting for the room's own close button instead of just clicking Dashboard.
+
+`roomTakesScreen` is now `inRoom && !isDesktop`. The phone behaves as before; the desktop keeps its
+navigation and can leave the way it arrived.
+
+### The music bar can be put away
+
+It sits across the bottom for as long as anything is playing, which is the point — but *"I want my
+screen back"* and *"I want silence"* are different wishes, and the only control offered was the one
+that stopped the sound. Minimised, it is a single round button in the corner with the track name as
+its tooltip; the music carries on.
+
+### Also seen in the recording
+
+- The Pro gate on Study Rooms reads correctly, and the generated music tabs (Still, Drift, Dusk,
+  Glass) all render and play.
+- **A Boss Battle question was "Calculate 45 + 55."** That is not a GCSE question, and it is the same
+  complaint Daniel opened with. The prompt does say GCSE; the model ignored it for an easy topic.
+  Worth a proper look — noted rather than guessed at here.
+- The search overlay returns an empty panel with no "no results" message.
+
+Neither of those last two is fixed in this entry, because neither is a one-line change and both
+deserve to be understood before being touched.
+
+### Verification
+
+- **204 tests passing**; `tsc` clean; `npm run build` clean.
+
+### Files
+
+`src/App.tsx`, `src/components/Logo.tsx`, `src/components/MusicBar.tsx`.
