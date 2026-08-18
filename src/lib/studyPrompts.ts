@@ -46,6 +46,51 @@ export function itemCount(mode: StudyMode, isPro: boolean): number {
 }
 
 /**
+ * WHAT "GCSE LEVEL" ACTUALLY MEANS, spelled out.
+ *
+ * The word "GCSE" alone does not calibrate anything — measured, the same prompt
+ * produced "Calculate 45 + 55" for one topic and "what is the primary source of
+ * electrons that reduce NADP+" for another. One is primary school, the other is
+ * A-level. Neither is the exam these students are sitting.
+ *
+ * A floor and a ceiling with concrete examples fixes far more than an adjective
+ * does, so both are stated, and both name the failure they are there to prevent.
+ */
+const GCSE_LEVEL = `
+  - The FLOOR: never ask something answerable by arithmetic alone or by reading
+    the question back. "Calculate 45 + 55" and "What does H2O stand for?" are
+    not GCSE questions and must not appear.
+  - The CEILING: nothing beyond the GCSE specification. No A-level content — no
+    calculus, no NADP+ or the Calvin cycle by name, no university terminology.
+    If a topic has an A-level treatment, ask the GCSE version of it.
+  - The TARGET: what a grade 4-7 student meets in a real paper. Applying a method
+    rather than reciting it, one or two steps of reasoning, the distinctions
+    examiners actually test.
+  - If the topic given is a whole SUBJECT rather than a topic ("maths",
+    "biology"), choose specific GCSE topics within it and vary them across the
+    questions. Do not retreat to the easiest thing in the subject.`;
+
+/**
+ * Plain notation, because LaTeX breaks the parse.
+ *
+ * A backslash is not a valid JSON escape unless what follows it happens to be
+ * one, so a model that answers with \frac{1}{2} or \(x^2\) produces JSON that
+ * `JSON.parse` rejects outright — and the student gets "could not build that"
+ * with no idea why. Measured: this is exactly how a maths generation failed.
+ *
+ * `parseJsonReply` repairs stray escapes as well, because a model will do this
+ * whatever it is told. Belt and braces, and the braces are cheap.
+ */
+const PLAIN_NOTATION = `
+  - NOTATION: plain text only. Write x^2 for x squared, (a+b)/c for a fraction,
+    sqrt(x) for a square root, and pi for pi. NEVER use LaTeX, and never use a
+    backslash anywhere in your reply — a backslash is not valid JSON and it will
+    make the whole answer unreadable.
+  - QUOTES: straight quotes only ("), never curly ones. Curly quotes are not
+    valid JSON and the whole reply is rejected because of them.
+  - Use a plain hyphen for a minus sign, not a dash.`;
+
+/**
  * The per-mode contract. This is the part that was missing.
  *
  * The JSON modes say "ONLY the array" in as many ways as it takes, because a
@@ -66,6 +111,10 @@ TASK: Produce EXACTLY ${n} revision flashcards.
 - The answer side is one or two sentences. No lists, no markdown, no headings.
 - Cover the whole of the content, not just the opening paragraphs.
 
+DIFFICULTY — this is a GCSE app, for 14 to 16 year olds sitting UK exams.
+${GCSE_LEVEL}
+${PLAIN_NOTATION}
+
 OUTPUT: a JSON array and NOTHING else. No prose before it, no explanation after
 it, no \`\`\`json fence around it. The very first character you output must be [
 and the very last must be ].
@@ -78,12 +127,17 @@ and the very last must be ].
       return `
 TASK: Produce EXACTLY ${n} multiple-choice questions.
 
+DIFFICULTY — this is a GCSE app, for 14 to 16 year olds sitting UK exams.
+${GCSE_LEVEL}
+
 - Four options each. The three wrong ones must be plausible — an obviously silly
-  option makes the question free.
+  option makes the question free. The best wrong answers are the mistakes a
+  student actually makes: a sign error, the reciprocal, the confused definition.
 - "correctAnswer" must be the full text of the right option, copied exactly as it
   appears in "options", not a letter.
 - The explanation says WHY, in one or two sentences. It is what the student reads
   after getting it wrong, so it has to teach something.
+${PLAIN_NOTATION}
 
 OUTPUT: a JSON array and NOTHING else. No prose before it, no explanation after
 it, no \`\`\`json fence around it. The very first character you output must be [
@@ -223,6 +277,15 @@ export function parseJsonReply(raw: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
+    // A stray backslash is the commonest reason a maths reply will not parse:
+    // \frac, \( and \text are all invalid JSON escapes. Repair and retry
+    // before falling back to the bracket scan below.
+    try {
+      return JSON.parse(repair(text));
+    } catch { /* fall through */ }
+  }
+
+  {
     // Fall back to the outermost bracketed span, which survives a stray
     // "Here are your flashcards:" that the model added anyway.
     const start = text.search(/[[{]/);
@@ -231,8 +294,55 @@ export function parseJsonReply(raw: string): unknown {
     const closer = opener === '[' ? ']' : '}';
     const end = text.lastIndexOf(closer);
     if (end <= start) throw new Error('Model reply contained no JSON');
-    return JSON.parse(text.slice(start, end + 1));
+    return JSON.parse(repair(text.slice(start, end + 1)));
   }
+}
+
+/**
+ * Strip backslash escapes that JSON does not recognise.
+ *
+ * `JSON.parse` rejects the WHOLE document for one bad escape, so a single
+ * \\frac in one question throws away the other nine. The model is told to use
+ * plain notation (see PLAIN_NOTATION) but will reach for LaTeX occasionally
+ * anyway, and losing an entire generation to that is not a reasonable outcome
+ * for the student.
+ *
+ * Only the escapes JSON actually defines are kept. Everything else loses its
+ * backslash and keeps its text, so \\frac becomes frac — readable rather than
+ * fatal.
+ */
+/** Both known model-side JSON faults, applied together. */
+function repair(text: string): string {
+  return straightenQuotes(repairEscapes(text));
+}
+
+export function repairEscapes(text: string): string {
+  // Either a valid escape — \uXXXX, or \ followed by one of " \ / b f n r t —
+  // which is kept as it is; or a backslash before anything else, which is
+  // dropped while its text is kept.
+  return text.replace(
+    /\\(u[0-9a-fA-F]{4}|["\\/bfnrt])|\\(.)/g,
+    (_m, valid, invalid) => (valid ? '\\' + valid : invalid)
+  );
+}
+
+/**
+ * Replace typographic double quotes with straight ones.
+ *
+ * Measured on a real maths generation:
+ *
+ *     "options": ["-9", “-1”, “7”, ...
+ *
+ * The model started the array with straight quotes and then drifted into curly
+ * ones, which are not JSON string delimiters — so the whole reply was rejected
+ * and the student got "could not build that".
+ *
+ * Only DOUBLE quotes are touched. A curly apostrophe inside a sentence
+ * ("Newton's") is perfectly valid JSON and rewriting it would change what the
+ * question says for no reason.
+ */
+export function straightenQuotes(text: string): string {
+  return text.replace(/[“”„‟]/g, '"');
 }
 
 /**

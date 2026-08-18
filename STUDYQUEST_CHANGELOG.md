@@ -2026,3 +2026,90 @@ never appears in a title.
 ### Files
 
 `src/lib/librarySearch.ts` (new), `tests/librarySearch.test.ts` (new), `src/components/Library.tsx`.
+
+---
+
+## [2026-08-18] — "Calculate 45 + 55" — question quality
+
+**Editor:** Claude Code (Opus 5)
+
+The Boss Battle question in the screen recording was `Calculate 45 + 55`. That is Daniel's original
+complaint, and it turned out to be three separate faults rather than one.
+
+Everything below was **measured** — the same prompts run against the live models before and after.
+
+### 1. "GCSE" is not a difficulty
+
+The word appeared once, buried in the content line, and calibrated nothing. Running the old prompt
+across four topics produced, from the *same instructions*:
+
+- **"Calculate 45 + 55"** — primary school
+- **"What is the primary source of electrons that reduce NADP+?"** and the Calvin cycle by name —
+  A-level
+
+Neither is the exam these students sit. So the prompt now states a floor, a ceiling and a target,
+each naming the failure it exists to prevent — including the two real questions above, quoted. It
+also says what to do when the "topic" is a whole subject like `maths`: pick specific GCSE topics
+and vary them, rather than retreating to the easiest thing in the subject.
+
+Measured after, on the same vague topics:
+
+| before | after |
+|---|---|
+| Calculate 45 + 55 | Value of 3(2x - 4) + 5x when x = 2 |
+| | Solve for n: 2n - 5 = 3n + 7 |
+| | A circle has diameter 14 cm — area to the nearest cm² |
+| | 25% discount on an £80 jacket |
+| NADP+, Calvin cycle | Function of the chloroplast; which phase of mitosis; prokaryote vs eukaryote |
+
+### 2. Maths could not be generated at all
+
+Two different JSON failures, both found by running it rather than by reading the code.
+
+**LaTeX.** A backslash is only a valid JSON escape if what follows it happens to be one, so
+`\(x^2\)` makes `JSON.parse` reject the **whole reply** — one bad question throws away the other
+nine, and the student sees "could not build that".
+
+There is a quieter version of the same fault that is worth knowing about: `\frac` begins with `\f`,
+which *is* valid, so it parses silently into a formfeed followed by `rac`. No error, just corrupted
+text. Nothing can distinguish that from an intended formfeed after the event, which is why the
+prompt now bans backslashes at source rather than relying only on repair.
+
+**Curly quotes.** A real maths generation came back as:
+
+    "options": ["-9", “-1”, “7”, ...
+
+The model opened the array with straight quotes and drifted into typographic ones, which are not JSON
+delimiters. Whole reply rejected.
+
+`parseJsonReply` now repairs both before giving up — invalid escapes lose their backslash and keep
+their text (`\frac` → `frac`, readable rather than fatal), and curly **double** quotes are
+straightened. Curly *apostrophes* are left alone: "Newton's" is valid JSON and rewriting it would
+change what the question says.
+
+Both topics that previously failed now parse and return ten questions each.
+
+### 3. Groq's free tier is 8,000 tokens per minute
+
+Not a bug, but it explains the "Could not build that" Daniel hit: one generation is about 4,400
+tokens, so **two in a minute exhausts the limit**. The fallback chain handles it by moving to the next
+provider — which is only useful if there is a next provider, and today there are two, one of which
+(Gemini) returned 503 repeatedly during this session.
+
+This is the concrete argument for the unused free tiers in `AI_PROVIDERS.md`: Cerebras and GitHub
+Models are two keys and no code, and would take this from "one bad minute breaks generation" to
+"barely noticeable".
+
+### Verification
+
+- **225 tests passing** (14 new); `tsc` clean; `npm run build` clean.
+- The new tests pin: a LaTeX reply that `JSON.parse` genuinely rejects is recovered with its maths
+  still readable and its answer still markable; valid escapes and unicode escapes are untouched; a
+  reply that drifts into curly quotes is recovered with all four options intact; a curly apostrophe
+  survives; the prompt names both a floor and a ceiling and quotes the actual bad question; and the
+  notation rules are sent to the JSON modes but **not** to the prose ones, which have no parse to
+  break.
+
+### Files
+
+`src/lib/studyPrompts.ts`, `tests/studyPrompts.test.ts`.

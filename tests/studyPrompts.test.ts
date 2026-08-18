@@ -154,3 +154,96 @@ describe('normalising quiz questions', () => {
     expect(() => normaliseQuiz([{ question: 'Q', options: ['only one'], correctAnswer: 'only one' }])).toThrow();
   });
 });
+
+describe('repairing broken escapes', () => {
+
+  it('rescues a reply containing LaTeX', () => {
+    /*
+      LaTeX in a JSON string fails in TWO ways, and the loud one is the lucky one.
+
+      `\(x^2\)` is not a valid escape, so JSON.parse rejects the WHOLE document —
+      one bad question throws away the other nine. That is the failure a real
+      maths generation hit.
+
+      (The quiet one: `\frac` begins with `\f`, which IS a valid escape, so it
+      parses happily into a formfeed followed by "rac". No error, just corrupted
+      text on screen. Nothing can reliably tell that from an intended formfeed
+      after the fact, which is why the prompt bans backslashes at source.)
+    */
+    const raw = String.raw`[{"question":"Solve \(x^2 - 4 = 0\)","options":["2 and -2","4","0","1"],"correctAnswer":"2 and -2","explanation":"Factorise as (x-2)(x+2)."}]`;
+    expect(() => JSON.parse(raw)).toThrow();           // the bug
+    const parsed = parseJsonReply(raw) as any[];        // the fix
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].question).toContain('x^2');        // readable, not fatal
+    expect(parsed[0].correctAnswer).toBe('2 and -2');   // and still markable
+  });
+
+  it('leaves valid escapes alone', () => {
+    const raw = String.raw`[{"question":"He said \"hello\"","answer":"a\b","note":"line\nbreak"}]`;
+    const parsed = parseJsonReply(raw) as any[];
+    expect(parsed[0].question).toBe('He said "hello"');
+    expect(parsed[0].answer).toBe('a\b');
+    expect(parsed[0].note).toBe('line\nbreak');
+  });
+
+  it('keeps unicode escapes working', () => {
+    const parsed = parseJsonReply(String.raw`[{"question":"café"}]`) as any[];
+    expect(parsed[0].question).toBe('café');
+  });
+});
+
+describe('difficulty is actually specified', () => {
+
+  it('names both a floor and a ceiling', () => {
+    // "GCSE" on its own calibrates nothing — measured, the same prompt produced
+    // "Calculate 45 + 55" for one topic and NADP+ for another.
+    const p = build('quiz');
+    expect(p).toMatch(/FLOOR/);
+    expect(p).toMatch(/CEILING/);
+    expect(p).toMatch(/Calculate 45 \+ 55/);   // the actual bad question, named
+    expect(p).toMatch(/A-level/);
+  });
+
+  it('tells the model what to do with a whole subject rather than a topic', () => {
+    expect(build('quiz')).toMatch(/whole SUBJECT/);
+  });
+
+  it('bans LaTeX in every JSON mode', () => {
+    // A backslash is not valid JSON, so LaTeX costs the entire generation.
+    for (const mode of ['quiz', 'flashcards'] as const) {
+      expect(build(mode), mode).toMatch(/NEVER use LaTeX/);
+    }
+  });
+
+  it('does not lecture the prose modes about JSON notation', () => {
+    expect(build('summary')).not.toMatch(/NEVER use LaTeX/);
+  });
+});
+
+describe('curly quotes', () => {
+
+  it('rescues a reply that drifted into typographic quotes', () => {
+    // Measured on a real maths generation: the model opened the array with
+    // straight quotes and then drifted into curly ones, which are not JSON
+    // delimiters, so the entire reply was rejected.
+    const raw = '[{"question":"Solve x^2 = 81","options":["9 and -9", “-1”, “7”, "3"],"correctAnswer":"9 and -9","explanation":"Both roots."}]';
+    expect(() => JSON.parse(raw)).toThrow();
+    const parsed = parseJsonReply(raw) as any[];
+    expect(parsed[0].options).toHaveLength(4);
+    expect(parsed[0].options).toContain('-1');
+  });
+
+  it('leaves a curly APOSTROPHE alone', () => {
+    // "Newton’s" is valid JSON and means something; rewriting it would change
+    // what the question says for no reason.
+    const raw = '[{"question":"State Newton’s third law","answer":"Equal and opposite."}]';
+    const parsed = parseJsonReply(raw) as any[];
+    expect(parsed[0].question).toContain('’');
+  });
+
+  it('warns the model about both faults up front', () => {
+    const p = build('quiz');
+    expect(p).toMatch(/straight quotes only/);
+    expect(p).toMatch(/never use a\s+backslash/);
+  });
+});
