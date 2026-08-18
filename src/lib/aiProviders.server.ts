@@ -136,6 +136,22 @@ export interface Provider {
   signup: string;
 }
 
+/**
+ * The providers, IN CHAIN ORDER.
+ *
+ * The order is the fallback order, and it is chosen from measured allowances
+ * rather than from which company is best known:
+ *
+ *   1. Groq       — generous free tier, fast. 8,000 tokens/minute.
+ *   2. Mistral    — free tier, verified working 2026-08-18.
+ *   3. Cerebras   — free tier, very fast (add a key and it joins here).
+ *   4. Together   — key present but the account has no credit; fails fast.
+ *   5. OpenRouter — PREPAID CREDIT, so it costs real money. Last on purpose:
+ *                   it should only ever answer when every free tier has failed.
+ *
+ * Gemini is appended after all of these in buildChain — see the note there. Its
+ * free tier is twenty requests a DAY, which cannot lead a chain.
+ */
 export const PROVIDERS: Provider[] = [
   {
     id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1',
@@ -145,26 +161,23 @@ export const PROVIDERS: Provider[] = [
     signup: 'https://console.groq.com/keys',
   },
   {
-    id: 'cerebras', name: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1',
-    keyEnv: 'CEREBRAS_API_KEY',
-    large: 'llama-3.3-70b', small: 'llama3.1-8b',
-    signup: 'https://cloud.cerebras.ai/',
-  },
-  {
     id: 'mistral', name: 'Mistral', baseUrl: 'https://api.mistral.ai/v1',
     keyEnv: 'MISTRAL_API_KEY',
     large: 'mistral-large-latest', small: 'mistral-small-latest',
     signup: 'https://console.mistral.ai/api-keys/',
   },
   {
-    id: 'github', name: 'GitHub Models', baseUrl: 'https://models.github.ai/inference',
-    keyEnv: 'GITHUB_MODELS_TOKEN',
-    large: 'openai/gpt-4o', small: 'openai/gpt-4o-mini',
-    signup: 'https://github.com/settings/tokens (fine-grained, Models: read)',
+    id: 'cerebras', name: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1',
+    keyEnv: 'CEREBRAS_API_KEY',
+    large: 'llama-3.3-70b', small: 'llama3.1-8b',
+    signup: 'https://cloud.cerebras.ai/',
   },
   {
     id: 'together', name: 'Together', baseUrl: 'https://api.together.xyz/v1',
     keyEnv: 'TOGETHER_API_KEY',
+    // Tested 2026-08-18: "Credit limit exceeded". The key is valid, the account
+    // simply has no credit — it will start working the moment any is added, and
+    // it fails fast until then, which is why it sits last.
     large: 'meta-llama/Llama-3.3-70B-Instruct-Turbo-Free',
     small: 'meta-llama/Llama-3.3-70B-Instruct-Turbo-Free',
     signup: 'https://api.together.ai/settings/api-keys',
@@ -172,10 +185,19 @@ export const PROVIDERS: Provider[] = [
   {
     id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1',
     keyEnv: 'OPENROUTER_API_KEY',
-    // Free ids here come and go constantly — this one is last in the chain and
-    // its failures are expected rather than alarming.
-    large: 'meta-llama/llama-3.3-70b-instruct:free',
-    small: 'meta-llama/llama-3.3-70b-instruct:free',
+    /*
+      PAID MODELS, NOT THE FREE ONES.
+
+      Every `:free` id tested has refused — OpenRouter has been steadily moving
+      them behind payment. But an OpenRouter key carries prepaid credit, and at
+      roughly $0.0005 a study kit even $5 is several thousand of them, which is
+      far more useful than a free tier that will not serve a request.
+
+      Verified working on 2026-08-18. If this ever starts failing with a billing
+      error, the credit has run out — that is a top-up, not a bug.
+    */
+    large: 'meta-llama/llama-3.3-70b-instruct',
+    small: 'mistralai/mistral-small-24b-instruct-2501',
     headers: { 'HTTP-Referer': 'https://studyquest-ruuq.onrender.com', 'X-Title': 'StudyQuest' },
     signup: 'https://openrouter.ai/keys',
   },
@@ -241,10 +263,10 @@ export const MODELS = {
 const buildChain = (prompt: string, plan: 'free' | 'pro') => {
   const maxTokens = plan === 'pro' ? 8192 : 4096;
 
-  const chain: Array<{ name: string; fn: () => Promise<string> }> = [
-    { name: 'Gemini Flash', fn: () => callGemini(prompt, MODELS.geminiFlash) },
-  ];
+  const chain: Array<{ name: string; fn: () => Promise<string> }> = [];
 
+  // The registry order IS the chain order — see the note on PROVIDERS. Free and
+  // generous first, paid last.
   for (const provider of activeProviders()) {
     const model = plan === 'pro' ? provider.large : provider.small;
     chain.push({
@@ -252,6 +274,22 @@ const buildChain = (prompt: string, plan: 'free' | 'pro') => {
       fn: () => callOpenAICompatible(provider, prompt, model, maxTokens),
     });
   }
+
+  /*
+    GEMINI IS NOT FIRST ANY MORE, and the reason is a measured number.
+
+    Its free tier is **20 requests per day, per model** — the whole allowance,
+    not per user. Measured on 2026-08-18, when a morning of testing exhausted it
+    and the API said so in as many words:
+
+      "Quota exceeded ... limit: 20, model: gemini-3.7-flash"
+
+    Twenty requests does not survive a single classroom. Leading with it meant
+    almost every real request paid for a failed call before reaching a provider
+    that could actually answer. It sits near the end now — still useful, because
+    twenty free requests is twenty more than none, just not as the front door.
+  */
+  chain.push({ name: 'Gemini Flash', fn: () => callGemini(prompt, MODELS.geminiFlash) });
 
   return chain;
 };

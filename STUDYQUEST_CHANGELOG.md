@@ -2325,3 +2325,68 @@ on the upgrade page, which is one tap away.
 `src/lib/accountData.server.ts` (new), `server.ts`, `src/lib/firebase.ts`, `src/lib/friends.ts`,
 `src/lib/tokenService.ts`, `src/components/Settings.tsx`, `src/components/ProGate.tsx`,
 `src/components/Analytics.tsx`, `src/App.tsx`, `tests/progress.test.ts`.
+
+---
+
+## [2026-08-18] — Five provider keys added, and the chain reordered by what they actually give
+
+**Editor:** Claude Code (Opus 5)
+
+Ola supplied keys for Gemini, Groq, Mistral, GitHub Models, Together and OpenRouter. Each was tested
+against its live API rather than assumed, and the results changed the design.
+
+| Provider | Result |
+|---|---|
+| **Groq** | Works |
+| **Mistral** | Works — a new third provider |
+| **OpenRouter** | Works on **paid** models; every `:free` id still refuses |
+| **Gemini** | Key valid, but see below |
+| **Together** | Key valid, account has **no credit** |
+| **GitHub Models** | *"scheduled retirement brownout"* — GitHub is retiring the service |
+
+### Gemini cannot lead the chain — 20 requests a day
+
+The number that changed the design. Gemini's free tier is **twenty requests per day, per model** —
+for the whole project, not per user. The API said so directly once a morning's testing exhausted it:
+
+    Quota exceeded ... limit: 20, model: gemini-3.7-flash
+
+Twenty requests does not survive a single classroom. Leading with Gemini meant nearly every real
+request paid for a failed call before reaching a provider that could answer. It now sits at the end
+of the chain — still worth having, because twenty free requests is twenty more than none, just not as
+the front door.
+
+### The chain, ordered by measured allowance
+
+    Groq -> Mistral -> Cerebras -> Together -> OpenRouter -> Gemini
+
+Generous free tiers first; **OpenRouter last because it spends real money**. It holds prepaid credit
+rather than a free tier, so it should only ever answer when everything free has failed. At roughly
+$0.0005 a study kit, $5 is several thousand of them — far more useful than a free tier that will not
+serve a request, but not something to burn on the first call.
+
+Together sits just before it: the key is valid and the account simply has no credit, so it fails fast
+today and starts working the moment any is added.
+
+### GitHub Models removed
+
+Not a transient failure and not a key problem — GitHub is retiring the service. The entry is left in
+place as a comment so nobody spends an afternoon wondering why a valid token does not work.
+
+### Verified
+
+- Generation proved end to end through the new chain: 10 GCSE questions and 10 flashcards, served by
+  Groq, with the fallback visibly stepping past a rate-limited Gemini in the logs.
+- **240 tests passing**; `tsc` clean; `npm run build` clean.
+- The diff was scanned for key material before committing — `.env` is gitignored and no key appears in
+  any tracked file.
+
+### The keys themselves
+
+They were pasted into a chat, so **all six should be treated as compromised and rotated**. They also
+have to be added to Render's environment before any of this helps in production — the app reads them
+at runtime on the server, and a provider with no key is skipped silently.
+
+### Files
+
+`src/lib/aiProviders.server.ts`, `scripts/checkProviders.cjs`.

@@ -35,14 +35,12 @@ const PROVIDERS = [
   { name: 'Mistral', baseUrl: 'https://api.mistral.ai/v1',
     keyEnv: 'MISTRAL_API_KEY', model: 'mistral-small-latest',
     signup: 'https://console.mistral.ai/api-keys/' },
-  { name: 'GitHub Models', baseUrl: 'https://models.github.ai/inference',
-    keyEnv: 'GITHUB_MODELS_TOKEN', model: 'openai/gpt-4o-mini',
-    signup: 'https://github.com/settings/tokens  (fine-grained, Models: read)' },
+  // GitHub Models is being retired by GitHub — see aiProviders.server.ts.
   { name: 'Together', baseUrl: 'https://api.together.xyz/v1',
     keyEnv: 'TOGETHER_API_KEY', model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo-Free',
     signup: 'https://api.together.ai/settings/api-keys' },
   { name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1',
-    keyEnv: 'OPENROUTER_API_KEY', model: 'meta-llama/llama-3.3-70b-instruct:free',
+    keyEnv: 'OPENROUTER_API_KEY', model: 'mistralai/mistral-small-24b-instruct-2501',
     signup: 'https://openrouter.ai/keys' },
 ];
 
