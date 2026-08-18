@@ -7,6 +7,7 @@ import {
   Loader2, Save, X, FolderOpen, Sparkles
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { searchLibrary, libraryState } from '../lib/librarySearch';
 import { db, auth, collection, query, where, onSnapshot, updateDoc, doc, deleteDoc, addDoc, handleFirestoreError, OperationType } from '../lib/firebase';
 
 interface HistoryItem {
@@ -72,10 +73,13 @@ export default function Library({ onOpenItem }: LibraryProps) {
     return () => unsubscribe();
   }, []);
 
-  const filteredItems = items.filter(item => 
-    item.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.content.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  /*
+    The matching lives in lib/librarySearch.ts so it can be tested, and because
+    `item.content` is not always present on kits saved by older versions —
+    `undefined.toLowerCase()` would have taken the page down mid-keystroke.
+  */
+  const filteredItems = searchLibrary(items, searchQuery);
+  const state = libraryState(items.length, filteredItems.length, searchQuery);
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
@@ -297,14 +301,39 @@ export default function Library({ onOpenItem }: LibraryProps) {
           className="flex flex-col items-center justify-center py-24 text-center space-y-6"
         >
           <div className="w-24 h-24 rounded-[2rem] bg-brand-purple/10 border border-brand-purple/20 flex items-center justify-center">
-            <FolderOpen size={40} className="text-brand-purple/60" />
+            {state === 'no-matches'
+              ? <Search size={40} className="text-brand-purple/60" />
+              : <FolderOpen size={40} className="text-brand-purple/60" />}
           </div>
           <div className="space-y-2">
-            <h3 className="text-2xl font-black text-text-main">No study kits yet — generate your first one</h3>
+            {/*
+              TWO DIFFERENT EMPTY STATES, not one.
+
+              This used to say "No study kits yet" whenever the grid was empty —
+              including to somebody with thirty kits whose search simply matched
+              none of them. It also offered the wrong way out: what you want
+              there is to clear the search, not to generate another kit.
+            */}
+            <h3 className="text-2xl font-black text-text-main">
+              {state === 'no-matches'
+                ? `Nothing matches "${searchQuery.trim()}"`
+                : 'No study kits yet — generate your first one'}
+            </h3>
             <p className="text-text-dim text-sm max-w-xs mx-auto leading-relaxed">
-              It'll be saved here automatically so you can come back to it anytime.
+              {state === 'no-matches'
+                ? `You have ${items.length} study kit${items.length === 1 ? '' : 's'}. Try a different word, or search the notes inside them.`
+                : "It'll be saved here automatically so you can come back to it anytime."}
             </p>
           </div>
+          {state === 'no-matches' ? (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="px-6 py-3 bg-brand-purple text-white font-bold rounded-xl hover:bg-brand-purple/90 transition-all flex items-center gap-2"
+            >
+              <X size={16} />
+              Clear the search
+            </button>
+          ) : (
           <div className="flex flex-col sm:flex-row gap-3">
             <button
               onClick={() => window.dispatchEvent(new CustomEvent('brainify:navigate', { detail: 'dashboard' }))}
@@ -321,6 +350,7 @@ export default function Library({ onOpenItem }: LibraryProps) {
               Create manually
             </button>
           </div>
+          )}
           {/* Example of what a saved kit looks like */}
           <div className="mt-4 p-4 rounded-xl bg-glass-bg border border-border-main border-dashed max-w-sm w-full opacity-50">
             <div className="flex items-center gap-3 mb-2">

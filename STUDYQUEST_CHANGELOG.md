@@ -1968,3 +1968,61 @@ deserve to be understood before being touched.
 ### Files
 
 `src/App.tsx`, `src/components/Logo.tsx`, `src/components/MusicBar.tsx`.
+
+---
+
+## [2026-08-18] — Library search
+
+**Editor:** Claude Code (Opus 5)
+
+### First, a correction
+
+I reported a broken "search overlay" from the screen recording. **There is no such thing in
+StudyQuest.** Zooming into the frame shows the Windows 11 search flyout — its multicoloured magnifier
+glyph, and a panel sitting *above the browser's address bar*, outside the page entirely. Ola was
+typing "note" to launch Notepad, which he then used for the very notes that recording captured.
+
+I should have checked before listing it as a defect. Looking properly at the search the app *does*
+have turned up a real bug, so the trip was not wasted.
+
+### A search that found nothing claimed you had nothing
+
+The Library rendered one empty state for two completely different situations. With thirty study kits
+and a search matching none of them, it said:
+
+> **No study kits yet — generate your first one**
+
+and offered "Generate my first kit" and "Create manually". Both the diagnosis and the suggested
+action were wrong: what you want there is to clear the search.
+
+The two states are now distinguished — different heading, different explanation, a different icon,
+and a single **Clear the search** button. The heading names what you searched for and the body says
+how many kits you actually have, so the number contradicts the old message rather than repeating it.
+
+### And a crash waiting to happen
+
+The filter was:
+
+```ts
+item.subject.toLowerCase().includes(...) || item.content.toLowerCase().includes(...)
+```
+
+`content` is not present on every kit — items saved by older versions do not all carry it — and
+`undefined.toLowerCase()` throws. That would have taken the whole Library down **mid-keystroke**, on
+a page whose entire job is to be the place your work is safe.
+
+Matching moved to `src/lib/librarySearch.ts` where it can be tested, every field is coalesced, the
+query is trimmed, and the **mode** is now searchable too — "quiz" is a thing people look for and it
+never appears in a title.
+
+### Verification
+
+- **215 tests passing** (11 new); `tsc` clean; `npm run build` clean.
+- The tests pin: matching on title, on content, and on mode; case and surrounding spaces ignored; an
+  empty query returns everything; **ragged items with missing fields do not throw**; and the three
+  library states are told apart — including that a search with no results over an *empty* library
+  still says "no kits" rather than blaming the search.
+
+### Files
+
+`src/lib/librarySearch.ts` (new), `tests/librarySearch.test.ts` (new), `src/components/Library.tsx`.
