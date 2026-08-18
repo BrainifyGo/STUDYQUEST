@@ -21,6 +21,8 @@ import { auth, db, doc, updateDoc, deleteDoc, resetPassword, deleteMyAccount } f
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { TokenUsageBar } from './TokenUsageBar';
+import { checkDisplayNameSafety, safetyMessage } from '../lib/usernameSafety';
+import { toast } from 'sonner';
 
 type SettingsTab = 'notifications' | 'privacy' | 'subscription';
 
@@ -42,6 +44,17 @@ export const Settings: React.FC = () => {
 
   const handleSaveProfile = async () => {
     if (!user || isGuest) return;
+
+    // Checked here as well as in publishProfile: this is where someone types it,
+    // so this is where they should be told, rather than having it silently
+    // replaced with "Student" later.
+    const verdict = checkDisplayNameSafety(displayName);
+    if (!verdict.ok) {
+      setSuccessMessage(null);
+      toast.error(safetyMessage(verdict.reason || 'offensive'));
+      return;
+    }
+
     setIsSaving(true);
     try {
       const userRef = doc(db, 'users', user.uid);

@@ -11,6 +11,7 @@ import admin from "firebase-admin";
 import { generateWithAI, analyzeImage } from "./src/lib/aiProviders.server";
 import { getMonthlyLimit, getDailyLimit, estimateTokens, getExpandMessageCost, TOKEN_LIMIT_EXCEEDED, TOKEN_MONTHLY_LIMIT_EXCEEDED, currentMonthKey, currentDayKey } from "./src/lib/tokenService";
 import { can, planOf, type Feature } from "./src/lib/entitlements";
+import { eraseAccount } from "./src/lib/accountData.server";
 
 dotenv.config();
 
@@ -450,6 +451,58 @@ async function startServer() {
       console.warn('Failed to record token usage:', err);
     }
   }
+
+  /*
+    DELETE MY ACCOUNT — completely, and on the server.
+
+    The browser version could never finish: it has to delete the Firestore data
+    while still signed in and the Auth user last, so any failure in between
+    strands a half-erased account; it can only remove what the rules let it see;
+    and an account deleted from the Firebase console leaves its Firestore
+    documents behind entirely. That last one is not hypothetical — it left an
+    email address and two display names in the database.
+
+    The Admin SDK has none of those limits. Authorisation is the ID token: you
+    may only erase yourself.
+  */
+  app.post('/api/delete-account', async (req, res) => {
+    const header = req.headers.authorization;
+    if (!header?.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Sign in first.' });
+    }
+
+    let uid: string;
+    try {
+      const decoded = await admin.auth().verifyIdToken(header.slice(7));
+      uid = decoded.uid;
+      /*
+        Deleting an account is irreversible, so it needs a RECENT sign-in — the
+        same rule Firebase applies to deleting a login. A stolen token that has
+        been sitting in someone's pocket for a day must not be able to erase
+        somebody's revision.
+      */
+      const age = Date.now() / 1000 - (decoded.auth_time ?? 0);
+      if (age > 10 * 60) {
+        return res.status(401).json({ error: 'REAUTH_REQUIRED' });
+      }
+    } catch {
+      return res.status(401).json({ error: 'Your session is not valid. Sign in again.' });
+    }
+
+    try {
+      const report = await eraseAccount(admin, uid);
+      if (report.failures.length) {
+        console.error('Account erasure had failures:', report.failures);
+        // Some of it went. Say so rather than reporting a clean success.
+        return res.status(207).json({ ok: false, ...report });
+      }
+      console.log(`Erased account ${uid}:`, report.deleted);
+      res.json({ ok: true, ...report });
+    } catch (error: any) {
+      console.error('Account erasure failed:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   app.post('/api/generate', async (req, res) => {
     const { prompt, systemPrompt, feature } = req.body;

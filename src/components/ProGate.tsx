@@ -32,9 +32,18 @@ interface ProGateProps {
    * is the argument for paying. Wrong for anything holding real data.
    */
   preview?: boolean;
+  /**
+   * A single inline chip instead of a card.
+   *
+   * For small controls that sit inside someone's own content — a period
+   * switcher, a toggle. A full upsell card there reads as an advert dropped into
+   * the middle of their progress page, and on a phone it is taller than the
+   * thing it is gating. The pitch belongs on the upgrade page.
+   */
+  compact?: boolean;
 }
 
-export const ProGate: React.FC<ProGateProps> = ({ feature, children, preview }) => {
+export const ProGate: React.FC<ProGateProps> = ({ feature, children, preview, compact }) => {
   const { userData, setActiveView, authLoading } = useUserStore();
 
   // Nothing flashes while we do not yet know the plan. Rendering the locked
@@ -62,6 +71,21 @@ export const ProGate: React.FC<ProGateProps> = ({ feature, children, preview }) 
       </button>
     </div>
   );
+
+  if (compact) {
+    // Matches the height and shape of the controls beside it, so it sits in the
+    // row rather than on top of it.
+    return (
+      <button
+        onClick={() => setActiveView('upgrade')}
+        title={`${title} — see Pro`}
+        className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-glass-bg border border-border-main text-text-dim hover:text-text-main hover:border-brand-purple/40 transition-all text-xs font-bold"
+      >
+        <Lock size={13} className="text-brand-purple" />
+        Pro
+      </button>
+    );
+  }
 
   if (preview) {
     /*

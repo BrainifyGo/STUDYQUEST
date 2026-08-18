@@ -25,6 +25,7 @@ import {
   db, auth, doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs,
   onSnapshot, Timestamp, orderBy, limit,
 } from './firebase';
+import { checkUsernameSafety, checkDisplayNameSafety, safetyMessage } from './usernameSafety';
 
 export interface FriendRequest {
   id: string;
@@ -89,6 +90,18 @@ export function usernameProblem(name: string): string | null {
   if (!/^[a-z0-9._]+$/.test(u)) return 'Use letters, numbers, dots and underscores only.';
   if (/^[._]|[._]$/.test(u)) return 'It cannot start or end with a dot or underscore.';
   if (/[._]{2,}/.test(u)) return 'No two dots or underscores in a row.';
+
+  /*
+    SHAPE FIRST, THEN MEANING.
+
+    Ola and Daniel found the n-word could be registered. The check lives in
+    lib/usernameSafety.ts because it is a different question from length and
+    punctuation, and because it needs its own tests — a word list without tests
+    for the evasions (n1gger, n.i.g.g.e.r, niiigger) catches almost nothing.
+  */
+  const verdict = checkUsernameSafety(u);
+  if (!verdict.ok) return safetyMessage(verdict.reason || 'offensive');
+
   return null;
 }
 
@@ -161,7 +174,10 @@ export async function publishProfile(
 ): Promise<void> {
   const uid = auth.currentUser?.uid;
   if (!uid) return;
-  const name = (displayName || email?.split('@')[0] || 'Student').slice(0, 60);
+  let name = (displayName || email?.split('@')[0] || 'Student').slice(0, 60);
+  // A filtered username beside an unfiltered display name is not a filter — the
+  // display name is what people actually read in a friends list.
+  if (!checkDisplayNameSafety(name).ok) name = 'Student';
 
   const payload: Record<string, unknown> = {
     uid,

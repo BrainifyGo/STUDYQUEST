@@ -11,6 +11,10 @@ import {
   xpForCorrectAnswer, endOfQuizBonus, nextStreak, localDayKey,
   BASE_LEVEL_XP, XP_COMBO_CAP, MAX_LEVEL, LEVEL_COST_CAP,
 } from '../src/lib/progress';
+import {
+  kitsPerDay, kitsLeftToday, TOKENS_PER_KIT,
+  FREE_DAILY_LIMIT, getDailyLimit, getMonthlyLimit,
+} from '../src/lib/tokenService';
 
 describe('the level curve', () => {
 
@@ -167,5 +171,40 @@ describe('streaks', () => {
     // Late-evening study in the UK must not count as the next day.
     const lateEvening = new Date('2026-08-15T23:30:00');
     expect(localDayKey(lateEvening)).toBe('2026-08-15');
+  });
+});
+
+describe('the token allowance, in study kits', () => {
+
+  it('gives round numbers of kits', () => {
+    // "10,968 tokens left today" is a number from our billing arithmetic.
+    // "8 study kits" is something a student can plan around.
+    expect(kitsPerDay(false)).toBe(8);
+    expect(kitsPerDay(true)).toBe(40);
+  });
+
+  it('counts down as the allowance is used', () => {
+    expect(kitsLeftToday(0, false)).toBe(8);
+    expect(kitsLeftToday(TOKENS_PER_KIT * 3, false)).toBe(5);
+    expect(kitsLeftToday(FREE_DAILY_LIMIT, false)).toBe(0);
+  });
+
+  it('never goes negative when the allowance is overspent', () => {
+    // A single generation can overshoot the cap, so `used` can exceed the limit.
+    // "-1 study kits left" would be a nonsense on screen.
+    expect(kitsLeftToday(FREE_DAILY_LIMIT + 5000, false)).toBe(0);
+  });
+
+  it('leaves the monthly cap well clear of the daily one', () => {
+    /*
+      THE BUG THIS EXISTS FOR. Free was 12,000/day and 120,000/month — exactly
+      ten full days — so a student revising properly hit an invisible monthly
+      wall on the 10th, having been told all along about a daily limit that
+      reset tomorrow. It did reset. It just did not help.
+    */
+    for (const isPro of [false, true]) {
+      const days = getMonthlyLimit(isPro) / getDailyLimit(isPro);
+      expect(days, isPro ? 'pro' : 'free').toBeGreaterThanOrEqual(20);
+    }
   });
 });

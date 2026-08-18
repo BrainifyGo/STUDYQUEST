@@ -2212,3 +2212,116 @@ is deliberately no feature flag that could express the latter — there is a tes
 `src/lib/arcadeSound.ts` (new), `src/components/BossArena2D.tsx` (new),
 `src/components/BossArena3D.tsx` (new), `src/components/GameMode.tsx`, `src/lib/entitlements.ts`,
 `tests/entitlements.test.ts`.
+
+---
+
+## [2026-08-18] — Slur filter, complete account erasure, rounder limits
+
+**Editor:** Claude Code (Opus 5)
+
+### First: nothing was broken by the Firestore clear-out
+
+Ola and Daniel emptied several collections while resetting to clean data, and worried they had broken
+something. They had not, and it is worth writing down why: **Firestore has no such thing as an empty
+collection.** A collection exists only while it holds a document, so the "missing" ones will reappear
+the moment anything writes to them. Rules and indexes live in this repository and were already
+deployed.
+
+What the clear-out *did* leave was the opposite problem — **three documents belonging to accounts that
+no longer existed**, one of them holding an email address. That is the account-deletion bug below,
+demonstrated on live data.
+
+### Usernames could contain slurs
+
+Ola and Daniel found the n-word could be registered. On an app where a username appears in a friends
+list, a study room and a challenge scoreboard, in front of other children, that is the worst thing
+this codebase was carrying.
+
+**The hard part is not the word list — it is that people evade one.** `n1gger`, `n!gger`,
+`n.i.g.g.e.r`, `nigg3r`, `niiigger` and `ñïgger` are one word to a reader and six different strings
+to `includes()`. So a name is normalised before it is checked: accents stripped, confusable digits
+and symbols folded back to letters, separators removed, repeated letters collapsed. All six examples
+arrive at the same string.
+
+**My first version had a bug the tests caught immediately, and it is instructive.** I wrote the word
+lists by hand in post-collapse form — and got it wrong three times over, because `support` collapses
+to `suport` and `ass` collapses to `as`, so entries written in ordinary spelling matched nothing. The
+lists are now run through the same normaliser at load. That removes a whole class of failure which is
+otherwise invisible until somebody gets a slur past the filter.
+
+**It also blocked Scunthorpe**, in a file whose own comments named the Scunthorpe problem. Knowing
+about a trap is not the same as avoiding it. There is an allowlist now, checked first, with UK place
+names in it — this is an app for British schoolchildren and some of them live in those places.
+
+Display names get the same treatment, because a filtered username beside an unfiltered display name
+is not a filter.
+
+The rejection message deliberately does not repeat the word, name the matched term, or explain the
+rule. Anything more detailed is a hint sheet.
+
+### Account deletion is now actually complete
+
+The client version could never finish, for three reasons no amount of client code can fix: it can
+only delete what the security rules let it query; it must delete the Auth user **last**, since it
+needs to be signed in for everything before that, so any failure in between strands a half-erased
+account; and it does not run at all when an account is removed from the Firebase console — which is
+exactly how those three orphans appeared.
+
+Erasure now runs on the server with the Admin SDK, across **13 collections**: sessions, tasks, exams,
+history, mistakes, the username claim, friendships, friend requests, DM threads, challenges and their
+scores, the profile, the public profile, the stats — and then the login, last, so a failure leaves a
+working account to retry rather than a stranded one.
+
+Two details worth keeping:
+
+- **The username claim is released only if it is still yours.** After a rename someone else may hold
+  that name, and deleting an account must not free a stranger's username.
+- **It requires a sign-in from the last ten minutes.** Erasure is irreversible, so a token that has
+  been sitting in someone's pocket since yesterday must not be able to destroy a term's revision.
+
+Proved on production: an account seeded with a document in every collection, erased, then every
+collection re-checked. Fourteen deletions, no failures, **nothing left behind**.
+
+### Token limits: round, and with the hidden wall removed
+
+Two problems, and the second was the real one.
+
+**The monthly cap was the actual limit and nobody could see it.** Free was 12,000 a day against
+120,000 a month — *exactly ten full days*. Somebody revising properly hit an invisible monthly wall on
+the 10th, having been told all along about a daily limit that reset tomorrow. It did reset. It just
+did not help. Both plans now have twenty full days of monthly headroom, so the daily limit is the one
+people actually meet — which is the one the interface talks about.
+
+**And the numbers are round**: free 10,000 a day (8 study kits), Pro 50,000 (40).
+
+The header said **"10,968 tokens left today"**. A token is a unit from our billing arithmetic; nobody
+revising for a GCSE can plan around one. It says **"8 study kits left today"** now, and the
+limit-reached messages count in kits too.
+
+### The Pro advert in Your Progress
+
+It was `preview` mode — blur the control, float a full upsell card over it. That card is an icon, a
+heading, a sentence and a button, over a switcher about 50px tall, so on a phone it spilled over the
+page title and even on a desktop it read as an advert dropped into the middle of somebody's own
+progress page.
+
+There is a `compact` mode now: a single lock chip sized like the controls beside it. The pitch belongs
+on the upgrade page, which is one tap away.
+
+### Verification
+
+- **240 tests passing** (16 new); `tsc` clean; `npm run build` clean.
+- The username tests pin every evasion listed above, the Scunthorpe cases (`cassandra`, `analysis`,
+  `sussex`, `scunthorpe` itself), reserved names, and that the rejection message never repeats the
+  word.
+- The token tests pin 8 and 40 kits, the countdown, that it never goes negative when a generation
+  overshoots the cap, and that the monthly allowance is at least twenty days of the daily one — the
+  test that would have caught the original design.
+- Erasure was proved against production, not reasoned about.
+
+### Files
+
+`src/lib/usernameSafety.ts` (new), `tests/usernameSafety.test.ts` (new),
+`src/lib/accountData.server.ts` (new), `server.ts`, `src/lib/firebase.ts`, `src/lib/friends.ts`,
+`src/lib/tokenService.ts`, `src/components/Settings.tsx`, `src/components/ProGate.tsx`,
+`src/components/Analytics.tsx`, `src/App.tsx`, `tests/progress.test.ts`.

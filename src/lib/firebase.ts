@@ -152,21 +152,45 @@ export const deleteMyAccount = async (password?: string): Promise<void> => {
   // A phone-only account cannot be re-authenticated without another SMS round
   // trip; deleteUser below will report requires-recent-login if it needs to.
 
-  // 2. The data. Done while still signed in, because the rules check the uid.
-  for (const name of USER_OWNED_COLLECTIONS) {
-    try {
-      const snap = await getDocs(query(collection(db, name), where('userId', '==', user.uid)));
-      await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
-    } catch (err) {
-      // One collection refusing must not strand the account half-deleted, and
-      // the profile and login below matter more than a leftover session row.
-      console.warn(`[delete] could not clear ${name}:`, err);
+  /*
+    2. THE ERASURE ITSELF RUNS ON THE SERVER.
+
+    The client used to do this, and could never finish it:
+      - it can only delete what the rules let it query;
+      - it must delete the Auth user LAST (it needs to be signed in for the
+        rest), so any failure in between strands a half-erased account; and
+      - none of it runs at all if the account is removed from the Firebase
+        console, which is how three documents holding an email address and two
+        display names were left behind by accounts that no longer existed.
+
+    The server uses the Admin SDK, which has none of those limits. The
+    re-authentication above still happens here, because proving it is really you
+    has to happen where the password is typed.
+  */
+  const idToken = await user.getIdToken(true);
+  const res = await fetch('/api/delete-account', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    if (body?.error === 'REAUTH_REQUIRED') {
+      const err: any = new Error('For security, sign in again and retry.');
+      err.code = 'auth/requires-recent-login';
+      throw err;
     }
+    // 207 means some of it went. Saying "deleted" would be a lie, and saying
+    // "failed" would send them back to try again on a half-erased account.
+    if (res.status === 207) {
+      throw new Error('Most of your data was deleted, but some of it could not be. Tell us and we will finish it.');
+    }
+    throw new Error(body?.error || 'Could not delete your account. Please try again.');
   }
 
-  // 3. The profile, then the login itself.
-  await deleteDoc(doc(db, 'users', user.uid));
-  await deleteUser(user);
+  // The Auth user is gone, so this session is already invalid — signing out
+  // locally just clears what the browser is holding.
+  await auth.signOut().catch(() => { /* already gone */ });
 };
 
 export const resetPassword = async (email: string) => {

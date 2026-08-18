@@ -174,10 +174,20 @@ export default function Analytics() {
           <p className="text-text-dim text-sm">Track your study habits and mastery across all subjects.</p>
         </div>
         
-        {/* Costs nothing to serve, so the gate is client-side only and says so
-            in entitlements.ts. Preview mode: seeing the control you are missing
-            is the argument for paying for it. */}
-        <ProGate feature="advanced-analytics" preview>
+        {/*
+          A QUIET LOCK, NOT A BILLBOARD.
+
+          This was `preview`, which blurs the control and floats a full upsell
+          card — an icon, a heading, a sentence and a button — over the top. On a
+          phone that card was taller than the row it covered and spilled up over
+          the page title, and even on a desktop it read as an advert dropped into
+          the middle of somebody's own progress page.
+
+          The period switcher is small and self-explanatory, so it gets a small
+          lock that matches the surrounding controls. The full pitch belongs on
+          the upgrade page, which is one tap away.
+        */}
+        <ProGate feature="advanced-analytics" compact>
         <div className="flex items-center gap-3 p-1.5 bg-glass-bg rounded-2xl border border-border-main">
           {/* These three had no onClick and no state behind them. */}
           {PERIODS.map((p) => (

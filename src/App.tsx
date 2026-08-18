@@ -131,7 +131,7 @@ import { callAI } from './lib/aiService';
 import {
   buildStudyPrompt, isJsonMode, parseJsonReply, normaliseFlashcards, normaliseQuiz,
 } from './lib/studyPrompts';
-import { getMonthlyLimit, getDailyLimit } from './lib/tokenService';
+import { getMonthlyLimit, getDailyLimit, kitsLeftToday, kitsPerDay } from './lib/tokenService';
 import { limitAdvice } from './lib/tokenService';
 import { levelFromXP, levelProgress } from './lib/progress';
 import { publishProfile, publishStats } from './lib/friends';
@@ -2503,11 +2503,21 @@ export default function App() {
                       ? 'bg-red-500/10 border-red-500/20 text-red-400'
                       : 'bg-brand-purple/10 border-brand-purple/20 text-brand-purple'
                   }`}
-                  title={`${usedToday.toLocaleString()} / ${dailyLimit.toLocaleString()} tokens used today`}
+                  title={`${kitsLeftToday(usedToday, isProUser)} of ${kitsPerDay(isProUser)} study kits left today`}
                 >
                   <div className={`w-1.5 h-1.5 rounded-full ${isNearLimit ? 'bg-red-500 animate-pulse' : 'bg-brand-purple'}`} />
-                  <span className="hidden md:inline">{dailyLimit - usedToday > 0 ? (dailyLimit - usedToday).toLocaleString() : 0} tokens left today</span>
-                  <span className="md:hidden">{pctUsed}%</span>
+                  {/*
+                    KITS, NOT TOKENS.
+
+                    This said "10,968 tokens left today". A token is a unit from
+                    our billing arithmetic; nobody revising for a GCSE can plan
+                    around one. How many study kits they can still make is the
+                    same fact in a form they can act on.
+                  */}
+                  <span className="hidden md:inline">
+                    {kitsLeftToday(usedToday, isProUser)} study kit{kitsLeftToday(usedToday, isProUser) === 1 ? '' : 's'} left today
+                  </span>
+                  <span className="md:hidden">{kitsLeftToday(usedToday, isProUser)}</span>
                 </motion.div>
               );
             })()}
