@@ -1797,3 +1797,101 @@ The rest is not findable from the code. Keyboards covering inputs, real tap-targ
 text actually wraps only show up on a device — and DevTools' device mode does not reproduce either of
 the first two. Screenshots of the Dashboard, Arcade, Analytics and Settings from a real phone would
 make short work of it; the last one Ola sent found three bugs faster than reasoning did.
+
+---
+
+## [2026-08-18] — Mobile pass, part two: from real device screenshots
+
+**Editor:** Claude Code (Opus 5)
+
+Nine screenshots from an actual phone. They found more in ten minutes than the code audit did, and
+one of them was a broken feature rather than a layout problem.
+
+### Adding a friend was impossible for everybody
+
+The Friends screen showed **"Missing or insufficient permissions"** on every attempt.
+
+Firestore evaluates a `get` on a document that **does not exist** with `resource` set to `null`. The
+rule said `request.auth.uid in resource.data.uids`, which throws on null — so the read was **denied**
+rather than returning "not found".
+
+That is exactly the path `sendRequest()` takes. It calls `areFriends()` first, which reads the
+friendship document *before a friendship exists*, and then checks whether the other person has
+already asked you — another document that normally does not exist. Both reads were denied, so adding
+a friend failed for everyone who was not already a friend. Which is everyone.
+
+Both rules now check `resource == null` first. That leaks nothing: a missing document has no data.
+
+Proved against the deployed rules — reading a missing friendship returns **404** rather than 403, the
+friend request goes through with **200**, and a stranger still gets **403** reading it.
+
+### Light mode was never checked
+
+The bottom navigation used a hardcoded `text-white/40`. Measured against `--bg-main` (`#f8f7ff`) that
+is **1.03:1** — white on near-white, which is why LIBRARY, STATS, FOCUS and SETTINGS were invisible in
+two of the screenshots.
+
+The theme tokens were no better, and they were measured rather than eyeballed:
+
+| | contrast on `#f8f7ff` | |
+|---|---|---|
+| `--text-dim` was `0.4` | **2.47:1** | fails (4.5:1 required) |
+| `--text-muted` was `0.6` | **4.41:1** | fails |
+| `--text-dim` now `0.68` | **5.73:1** | passes |
+| `--text-muted` now `0.8` | **8.64:1** | passes |
+
+They had been copied from the dark theme, where pale ink on a dark ground behaves completely
+differently, and never re-checked. Half the secondary text on the site was unreadable in daylight.
+
+### Modals put dark text on a black backdrop
+
+"Add New Exam" and "Ready to Focus?" were both barely legible. The panels use `glass`, which is
+`rgba(0,0,0,0.03)` in light mode — effectively transparent — sitting on a `bg-black/80` backdrop. So
+light mode's dark navy text was rendered onto near-black.
+
+Every modal panel now uses `glass-panel`, which is opaque by design. Padding is responsive too, since
+`p-8` on a 360px screen leaves very little room for the form.
+
+### The bottom nav sat on top of things
+
+It is `fixed` at `z-50`, and three places did not reserve room for it: the Focus Timer's play, reset
+and settings buttons; the sidebar's level bar and account row; and the foot of every scrolling view.
+All three now clear it on mobile and leave it alone on desktop, where the nav does not exist.
+
+### The Pro gate covered the page title
+
+`ProGate` in preview mode wrapped the weekly/monthly/all-time switcher — a row about 50px tall —
+while the message it shows is an icon, a heading, a sentence and a button. Absolutely positioned
+inside a 50px box, it spilled upwards over the page heading, printing "Detailed progress is part of
+Pro" across "Your Progress". It now has a minimum height, so the gate stays inside the thing it gates.
+
+### Emoji
+
+Fourteen removed from user-facing text — toasts, headings, the onboarding steps, the sidebar timer,
+the leaderboard, the browser tab title. The ones left behind are load-bearing: they match emoji in
+*AI output* so the summary renderer can pick the right icon, and removing those would break the
+parsing.
+
+### Verification
+
+- **204 tests passing** (1 new); `tsc` clean; `npm run build` clean; rules deployed.
+- The friends rule was proved end to end against production, and the contrast numbers above were
+  computed from the sRGB relative-luminance formula rather than judged by eye.
+- The rules test for friendship reads was rewritten to check the *property* rather than the exact
+  wording — it asserted a string that the fix legitimately changed, which is a test that would block
+  a correct fix.
+
+### Files
+
+`firestore.rules`, `src/index.css`, `src/components/Navigation.tsx`, `src/components/ProGate.tsx`,
+`src/components/FocusTimer.tsx`, `src/components/StudyPlanner.tsx`, `src/components/Settings.tsx`,
+`src/components/CollaborativeRoom.tsx`, `src/components/ErrorBoundary.tsx`,
+`src/components/Leaderboard.tsx`, `src/components/TimerEngine.tsx`, `src/App.tsx`,
+`tests/rules-structure.test.ts`.
+
+### Still open
+
+The AI providers were checked while writing this: Gemini and Groq both answering, OpenRouter's free
+model still refusing. The "Could not build that" in the planner screenshot was taken during
+yesterday's outage, before the retired model ids were replaced — it should not recur, and
+`npm run check:ai` is how to confirm.

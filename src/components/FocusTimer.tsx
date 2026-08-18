@@ -51,8 +51,10 @@ export default function FocusTimer() {
   const progress = (timeLeft / MODES[mode].time) * 100;
   const ModeIcon = MODES[mode].icon;
 
+  // py-12 alone left the play / reset / settings row sitting under the fixed
+  // mobile bottom nav — the controls were there, just half covered.
   return (
-    <div className="flex flex-col items-center justify-center space-y-12 py-12 relative">
+    <div className="flex flex-col items-center justify-center space-y-8 sm:space-y-12 py-8 sm:py-12 pb-28 lg:pb-12 relative">
       <AnimatePresence>
         {showFocusAgreement && mode === 'work' && !isActive && (
           <motion.div
@@ -64,7 +66,7 @@ export default function FocusTimer() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-md glass rounded-[2.5rem] border border-border-main p-8 shadow-2xl relative overflow-hidden"
+              className="w-full max-w-md glass-panel rounded-[2rem] sm:rounded-[2.5rem] border border-border-main p-6 sm:p-8 shadow-2xl relative overflow-hidden"
             >
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-brand-purple to-transparent opacity-50" />
               
@@ -74,7 +76,7 @@ export default function FocusTimer() {
                 </div>
 
                 <div className="space-y-2">
-                  <h2 className="text-2xl font-black text-text-main">🧠 Ready to Focus?</h2>
+                  <h2 className="text-2xl font-black text-text-main">Ready to Focus?</h2>
                   <p className="text-text-dim text-sm">
                     Commit to this session for maximum productivity.
                   </p>

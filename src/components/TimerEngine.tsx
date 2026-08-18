@@ -51,7 +51,7 @@ export default function TimerEngine() {
     }
 
     if (!onFocusView) {
-      toast('Focus session complete! Time for a break 🎉', {
+      toast('Focus session complete. Time for a break.', {
         action: {
           label: 'View Timer',
           onClick: () => setActiveView('focus'),
@@ -65,7 +65,7 @@ export default function TimerEngine() {
     if (timerIsRunning) {
       const m = Math.floor(timerTimeLeft / 60).toString().padStart(2, '0');
       const s = (timerTimeLeft % 60).toString().padStart(2, '0');
-      document.title = `🔴 Focusing... (${m}:${s}) — StudyQuest`;
+      document.title = `Focusing ${m}:${s} — StudyQuest`;
     } else {
       document.title = 'StudyQuest — Study Smarter';
     }

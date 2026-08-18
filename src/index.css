@@ -53,8 +53,18 @@ html {
   --panel-bg: rgba(255, 255, 255, 0.96);
   --border-main: rgba(0, 0, 0, 0.08);
   --text-main: #1a1a2e;
-  --text-dim: rgba(26, 26, 46, 0.4);
-  --text-muted: rgba(26, 26, 46, 0.6);
+  /*
+    MEASURED, not eyeballed. Against --bg-main (#f8f7ff):
+      0.4  -> 2.47:1   the old value, well under the 4.5:1 WCAG asks for
+      0.6  -> 4.41:1   still under
+      0.68 -> 5.73:1   what --text-dim uses now
+      0.8  -> 8.64:1   what --text-muted uses now
+    These were copied from the dark theme, where pale ink on a dark ground
+    behaves completely differently, and never re-checked. Half the secondary
+    text on the site was effectively unreadable in light mode.
+  */
+  --text-dim: rgba(26, 26, 46, 0.68);
+  --text-muted: rgba(26, 26, 46, 0.8);
   --brand-purple: #7c3aed;
   --brand-purple-dark: #6d28d9;
 }

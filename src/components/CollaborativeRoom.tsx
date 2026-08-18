@@ -264,7 +264,7 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
   if (!activeRoomId) {
     return (
       <div className="fixed inset-0 z-[100] flex items-center justify-center bg-bg-dark p-6">
-        <div className="w-full max-w-md glass rounded-[2.5rem] border border-white/10 p-8 space-y-8 relative">
+        <div className="w-full max-w-md glass-panel rounded-[2rem] sm:rounded-[2.5rem] border border-white/10 p-6 sm:p-8 space-y-8 relative">
           <button
             onClick={onClose}
             aria-label="Close"

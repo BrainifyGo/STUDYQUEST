@@ -822,10 +822,10 @@ export default function App() {
           return;
         }
         await signUpWithEmail(email, password);
-        toast.success('Account created! Welcome to StudyQuest 🎉');
+        toast.success('Account created. Welcome to StudyQuest.');
       } else {
         await signInWithEmail(email, password);
-        toast.success('Welcome back to StudyQuest! 🎉');
+        toast.success('Welcome back to StudyQuest.');
       }
       
       // Create user document if first time
@@ -908,7 +908,7 @@ export default function App() {
   const handleGitHubLogin = async () => {
     try {
       await signInWithGitHub();
-      toast.success('Welcome back to StudyQuest! 🎉');
+      toast.success('Welcome back to StudyQuest.');
       
       // Create user document if first time
       if (auth.currentUser) {
@@ -971,7 +971,7 @@ export default function App() {
 
     try {
       await confirmationResult.confirm(phoneCode);
-      toast.success('Phone number verified! Welcome to StudyQuest! 🎉');
+      toast.success('Phone verified. Welcome to StudyQuest.');
       
       // Create user document if first time
       if (auth.currentUser) {
@@ -2108,7 +2108,7 @@ export default function App() {
                   title="Focus session in progress — click to return"
                 >
                   <span className="flex items-center gap-1.5">
-                    🍅 {!railCollapsed && `${Math.floor(timerTimeLeft / 60).toString().padStart(2, '0')}:${(timerTimeLeft % 60).toString().padStart(2, '0')} remaining`}
+                    {!railCollapsed && `${Math.floor(timerTimeLeft / 60).toString().padStart(2, '0')}:${(timerTimeLeft % 60).toString().padStart(2, '0')} remaining`}
                   </span>
                   {railCollapsed && (
                     <span className="sr-only">
@@ -2133,7 +2133,10 @@ export default function App() {
                   sidebar needed its own scrollbar. */}
             </nav>
 
-            <div className="p-4 border-t border-border-main space-y-4">
+            {/* The mobile bottom nav is fixed at z-50 and 64px tall, so this block sat
+                underneath it — the level bar and the account row were both half
+                covered. Reserved on mobile only; the nav is lg:hidden. */}
+            <div className="p-4 pb-24 lg:pb-4 border-t border-border-main space-y-4">
               {/* Gamification Stats */}
               {!railCollapsed && (
                 <div className="px-2 space-y-2">
@@ -2494,7 +2497,7 @@ export default function App() {
         <div
           ref={scrollAreaRef}
           onScroll={handleContentScroll}
-          className="w-full max-w-7xl mx-auto p-3 sm:p-4 md:p-6 lg:p-8 space-y-6 lg:space-y-12 pb-28 lg:pb-12 overflow-x-hidden overflow-y-auto scrollbar-hide">
+          className="w-full max-w-7xl mx-auto p-3 sm:p-4 md:p-6 lg:p-8 space-y-6 lg:space-y-12 pb-32 lg:pb-12 overflow-x-hidden overflow-y-auto scrollbar-hide">
           {/* One boundary for every route-level view. They are code-split, so each one's
               JavaScript is fetched the first time you open it rather than up front — the whole
               app used to arrive in a single 2.7 MB file before the first flashcard appeared.
@@ -3445,16 +3448,16 @@ export default function App() {
                 <div className="w-16 h-16 bg-brand-purple/20 border border-brand-purple/30 rounded-2xl flex items-center justify-center mx-auto">
                   <Logo showText={false} size={62} />
                 </div>
-                <h2 className="text-2xl font-black text-text-main">Welcome to StudyQuest! 🧠</h2>
+                <h2 className="text-2xl font-black text-text-main">Welcome to StudyQuest</h2>
                 <p className="text-text-dim text-sm">Turn any study material into a complete study kit in seconds.</p>
               </div>
 
               {/* 3 steps */}
               <div className="space-y-3">
                 {[
-                  { step: '01', icon: '📄', title: 'Add your content', desc: 'Paste notes, upload a PDF, or add a YouTube transcript' },
+                  { step: '01', icon: '1', title: 'Add your content', desc: 'Paste notes, upload a PDF, or add a YouTube transcript' },
                   { step: '02', icon: '⚡', title: 'Pick a study mode', desc: 'Summary, Flashcards, Quiz, or Explain Simply' },
-                  { step: '03', icon: '🎓', title: 'Study smarter', desc: 'Save to your library, quiz yourself, ace your exams' },
+                  { step: '03', icon: '3', title: 'Study smarter', desc: 'Save to your library, quiz yourself, ace your exams' },
                 ].map(({ step, icon, title, desc }) => (
                   <div key={step} className="flex items-start gap-4 p-3 rounded-xl bg-glass-bg border border-border-main">
                     <div className="w-8 h-8 rounded-lg bg-brand-purple flex items-center justify-center text-white text-xs font-black shrink-0">
@@ -3605,7 +3608,7 @@ function FlashcardComponent({ card }: { card: Flashcard, key?: any }) {
     >
       {isDue && (
         <div className="absolute -top-2 -right-2 z-10 px-2 py-1 rounded-lg bg-emerald-500 text-white text-[8px] font-black uppercase tracking-widest shadow-lg animate-bounce">
-          📅 Due
+          Due
         </div>
       )}
       <motion.div 

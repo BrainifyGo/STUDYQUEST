@@ -64,12 +64,24 @@ export const ProGate: React.FC<ProGateProps> = ({ feature, children, preview }) 
   );
 
   if (preview) {
+    /*
+      THE CTA IS ABSOLUTE, SO IT MUST NOT BE TALLER THAN WHAT IT COVERS.
+
+      On the Analytics page this wrapped the weekly/monthly/all-time switcher —
+      a row about 50px tall — while the CTA is an icon, a heading, a sentence and
+      a button. Absolutely positioned inside a 50px box, it spilled straight up
+      over the page title, so "Detailed progress is part of Pro" was printed
+      across "Your Progress" on a phone.
+
+      A minimum height keeps the box at least as tall as its own contents, so the
+      blur and the message stay inside the thing being gated.
+    */
     return (
-      <div className="relative">
+      <div className="relative min-h-[13rem] rounded-2xl overflow-hidden">
         <div className="pointer-events-none select-none blur-sm opacity-40" aria-hidden="true">
           {children}
         </div>
-        <div className="absolute inset-0 flex items-center justify-center bg-bg-main/60 backdrop-blur-[2px] rounded-2xl">
+        <div className="absolute inset-0 flex items-center justify-center bg-bg-main/70 backdrop-blur-[2px] rounded-2xl">
           {cta}
         </div>
       </div>

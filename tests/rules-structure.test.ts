@@ -175,7 +175,22 @@ describe('the friends blocks', () => {
   });
 
   it('only exposes a friendship to the two people in it', () => {
-    expect(friendships).toMatch(/allow read: if isAuthenticated\(\) && request\.auth\.uid in resource\.data\.uids/);
+    expect(friendships).toMatch(/allow read:[\s\S]{0,200}request\.auth\.uid in resource\.data\.uids/);
+  });
+
+  it('does not turn a MISSING document into a permission error', () => {
+    /*
+      Firestore evaluates a get on a non-existent document with `resource` set to
+      null, so `resource.data.uids` throws and the read is DENIED rather than
+      returning "not found".
+
+      That is not theoretical. areFriends() reads exactly this document before a
+      friendship exists, and sendRequest() calls areFriends() first — so adding a
+      friend failed with "Missing or insufficient permissions" for everyone who
+      was not already a friend, which is everyone. Found on a real phone.
+    */
+    expect(friendships).toMatch(/resource == null/);
+    expect(requests).toMatch(/resource == null/);
   });
 
   it('keeps public profiles to the searchable fields only', () => {

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Trophy, Medal, Crown, Star, Loader2, TrendingUp } from 'lucide-react';
+import { Trophy, Medal, Crown, Star, Loader2, TrendingUp, Users } from 'lucide-react';
 import { db, collection, query, orderBy, limit, getDocs, handleFirestoreError, OperationType } from '../lib/firebase';
 import { cn } from '../lib/utils';
 import { useUserStore } from '../store/useUserStore';
@@ -81,7 +81,7 @@ export default function Leaderboard() {
             animate={{ opacity: 1, y: 0 }}
             className="glass p-6 rounded-2xl border border-brand-purple/20 text-center space-y-3 mb-6"
           >
-            <div className="text-2xl">👥</div>
+            <Users size={22} className="text-brand-purple" />
             <h3 className="font-bold text-text-main text-sm">Be the first to climb the ranks!</h3>
             <p className="text-text-dim text-xs leading-relaxed">
               Share StudyQuest with your classmates. As more students join, the leaderboard fills up — and you'll see exactly where you rank.
@@ -93,7 +93,7 @@ export default function Leaderboard() {
                 }}
                 className="px-4 py-2 bg-brand-purple/10 border border-brand-purple/30 text-brand-purple text-xs font-bold rounded-lg hover:bg-brand-purple/20 transition-all"
               >
-                📋 Copy invite link
+                Copy invite link
               </button>
             </div>
           </motion.div>

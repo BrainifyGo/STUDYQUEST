@@ -353,8 +353,23 @@ service cloud.firestore {
     match /friend_requests/{reqId} {
       // Visible to the two people involved and nobody else. A request is a small
       // fact about a child's social life; it is not public.
+      /*
+        `resource == null` FIRST, or a missing document is a permission error.
+
+        Firestore evaluates a `get` on a document that does not exist with
+        `resource` set to null, so `resource.data.fromUid` throws and the read is
+        DENIED rather than returning "not found". That is not a hypothetical:
+        sendRequest() checks "have they already asked me?" before writing, and
+        that document almost never exists — so adding a friend failed with
+        "Missing or insufficient permissions" for everybody who was not already
+        a friend, which is everybody.
+
+        Allowing the read when there is no document leaks nothing. There is no
+        data to leak.
+      */
       allow read: if isAuthenticated()
-                  && (resource.data.fromUid == request.auth.uid
+                  && (resource == null
+                      || resource.data.fromUid == request.auth.uid
                       || resource.data.toUid == request.auth.uid);
 
       // You may only send a request AS yourself. The document id is pinned to
@@ -378,7 +393,11 @@ service cloud.firestore {
     }
 
     match /friendships/{pairId} {
-      allow read: if isAuthenticated() && request.auth.uid in resource.data.uids;
+      // Same reason as friend_requests above: areFriends() reads this exact
+      // document before a friendship exists, and a null `resource` made that a
+      // permission error instead of a plain "no".
+      allow read: if isAuthenticated()
+                  && (resource == null || request.auth.uid in resource.data.uids);
 
       /*
         Creating a friendship requires a real request addressed to you.

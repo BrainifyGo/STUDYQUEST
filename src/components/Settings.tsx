@@ -459,7 +459,7 @@ export const Settings: React.FC = () => {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-md glass p-8 rounded-3xl border border-border-main shadow-2xl"
+              className="relative w-full max-w-md glass-panel p-6 sm:p-8 rounded-3xl border border-border-main shadow-2xl"
             >
               <div className="flex flex-col items-center text-center space-y-4">
                 <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center text-red-500">
@@ -528,7 +528,7 @@ export const Settings: React.FC = () => {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-md glass p-8 rounded-3xl border border-border-main shadow-2xl"
+              className="relative w-full max-w-md glass-panel p-6 sm:p-8 rounded-3xl border border-border-main shadow-2xl"
             >
               <div className="flex flex-col items-center text-center space-y-4">
                 <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center text-red-500">

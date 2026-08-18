@@ -572,7 +572,7 @@ export default function StudyPlanner() {
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="w-full max-w-md glass p-8 rounded-[2.5rem] border border-border-main space-y-6 shadow-2xl"
+              className="w-full max-w-md glass-panel p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border border-border-main space-y-6 shadow-2xl"
             >
               <div className="flex items-center justify-between">
                 <h3 className="text-2xl font-black text-text-main tracking-tight">Add New Exam</h3>
