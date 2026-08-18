@@ -30,11 +30,12 @@ export type Feature =
   | 'ai-tutor'          // deep explanations, follow-up questions
   | 'study-rooms'       // real-time collaboration, and the multiplayer quiz in it
   | 'advanced-analytics'// period switching, subject breakdown, badges
-  | 'unlimited-kits';   // saving more than the free allowance
+  | 'unlimited-kits'    // saving more than the free allowance
+  | '3d-arena';        // the boss fight rendered in 3D rather than 2D
 
 /** What Pro unlocks, in the order it is advertised. */
 export const PRO_FEATURES: Feature[] = [
-  'ai-tutor', 'study-rooms', 'advanced-analytics', 'unlimited-kits',
+  'ai-tutor', 'study-rooms', 'advanced-analytics', 'unlimited-kits', '3d-arena',
 ];
 
 /**
@@ -83,6 +84,11 @@ export function upsellFor(feature: Feature): { title: string; body: string } {
         title: 'Detailed progress is part of Pro',
         body: 'See your subject breakdown, switch between weekly, monthly and all-time, and collect badges.',
       };
+    case '3d-arena':
+      return {
+        title: 'The 3D arena is part of Pro',
+        body: 'Fight the boss in a real 3D arena. Free keeps the 2D fight, which plays exactly the same.',
+      };
     case 'unlimited-kits':
       return {
         title: `Free accounts keep ${FREE_SAVED_KITS} study kits`,
@@ -123,5 +129,9 @@ export const PRO_SELLING_POINTS: { headline: string; detail: string }[] = [
   {
     headline: 'Detailed progress tracking',
     detail: 'Subject breakdown, weekly / monthly / all-time views, and badges.',
+  },
+  {
+    headline: 'The boss fight in 3D',
+    detail: 'A real 3D arena instead of the 2D one. Same fight, considerably more of a spectacle.',
   },
 ];

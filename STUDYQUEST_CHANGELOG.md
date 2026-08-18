@@ -2113,3 +2113,102 @@ Models are two keys and no code, and would take this from "one bad minute breaks
 ### Files
 
 `src/lib/studyPrompts.ts`, `tests/studyPrompts.test.ts`.
+
+---
+
+## [2026-08-18] — The boss fight is a game now, and Pro gets it in 3D
+
+**Editor:** Claude Code (Opus 5)
+
+The fight worked mechanically and looked like a form: a name, a percentage and a bar. This is the same
+fight, drawn as a game.
+
+### Sound
+
+`src/lib/arcadeSound.ts` — generated, like the music and the ambience. Nothing to 404, nothing a
+school network can block, no download, no licence.
+
+Seven sounds: hit, miss, combo, enrage, victory, defeat, and a clock tick under ten seconds. Each is
+short, quiet and mixed well below the music — they play dozens of times a round, and anything with a
+tail becomes a drone.
+
+Two decisions worth recording:
+
+- **The sound fires on the tap, not on the state change.** There is a deliberate 650ms pause after
+  answering so you can see which option was right. Waiting for it would put the hit most of a second
+  after the tap, at which point it stops feeling like a consequence of the tap.
+- **The combo sound rises with the streak.** A major arpeggio that starts higher the longer the run,
+  so the sound itself tells you the streak is building — faster than reading a number.
+- **Wrong is a falling muffled tone, not a buzzer.** It plays right after a mistake, and a harsh sound
+  there is a reason to stop playing.
+
+Muting is one tap and is remembered, because someone revising in a library meant it.
+
+### The 2D arena
+
+`BossArena2D.tsx`. Everything drawn — SVG and CSS, no sprites — partly out of habit by now and partly
+because a boss that reacts has to be made of parts that move independently. **An image cannot flinch.**
+
+What actually makes it read as a game, in order of how much each contributes:
+
+1. **Reaction.** The boss flinches when hit, lunges when it hits you, and its face changes with the
+   phase — eyes angling down, mouth going from level to a grimace to bared teeth, horns appearing at
+   phase 3. The silhouette changes, which reads faster than a colour does. You can tell how the fight
+   is going without reading the percentage.
+2. **Impact.** Damage numbers fly off, twelve particles burst from the centre, the arena shakes. These
+   tell you the hit landed before you have read anything.
+3. **Anticipation.** An idle bob and a breathing floor glow, faster at phase 3, so the thing is alive
+   between questions rather than frozen while you think.
+
+Health is **segmented**: a smooth bar hides how much a hit was worth, and with notches you can see the
+chunk come off. Lives are hearts rather than a number.
+
+All of it respects `prefers-reduced-motion` — the shake and the float stop, the information does not.
+
+The arena animates from **one bumped event id** rather than from game state. Deriving animation from
+state means any re-render replays the hit; an explicit event fires exactly once, when something
+actually happened.
+
+### The 3D arena — Pro
+
+`BossArena3D.tsx`. **Raw WebGL, not three.js.**
+
+three.js is around 600 KB and the main bundle is already 2.2 MB. Even lazy-loaded that is a real
+download on a phone for one screen. This is **6.8 KB**, verified as its own chunk in the build — so a
+free player never downloads a byte of it — and it does everything the scene needs: a perspective
+camera, a lit subdivided icosahedron that rotates and pulses with the phase, and a grid floor
+receding to a horizon.
+
+The lighting has a rim term as well as a lambert one, which is what stops it reading as a flat
+silhouette against a dark background. The solid shrinks as its health drops, so the state of the
+fight is legible from the shape alone.
+
+Three things it does deliberately:
+
+- **Falls back to 2D if WebGL is unavailable.** A Pro user on an old phone gets the fight, not a black
+  rectangle.
+- **Keeps the numbers in HTML.** Text drawn into a canvas is invisible to a screen reader and blurry
+  when the browser zooms, so health, lives and the boss's line stay as DOM on top of the canvas.
+- **Releases the GL context on unmount.** Browsers cap how many exist; leaking one per round would
+  eventually refuse to make more.
+
+### Where the gate sits
+
+**On the spectacle, never on the mechanics.** A free player gets the same boss, the same phases, the
+same damage, the same questions — drawn in 2D. Pro gets it in a WebGL arena.
+
+Gating how a fight *looks* is a fair upsell. Gating whether you can *win* it would not be, and there
+is deliberately no feature flag that could express the latter — there is a test asserting that
+`PRO_FEATURES` contains no such thing.
+
+### Verification
+
+- **226 tests passing** (1 new); `tsc` clean; `npm run build` clean.
+- `BossArena3D` confirmed as a separate 6.8 KB chunk in `dist/assets`, which is the whole argument for
+  not using three.js.
+
+### Files
+
+`src/lib/arcadeSound.ts` (new), `src/components/BossArena2D.tsx` (new),
+`src/components/BossArena3D.tsx` (new), `src/components/GameMode.tsx`, `src/lib/entitlements.ts`,
+`tests/entitlements.test.ts`.

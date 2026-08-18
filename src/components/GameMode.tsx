@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, Check, X, Flame, Timer, Target, Heart, Trophy, Zap, Ghost, Loader2,
-  Skull, Mountain, Sparkles,
+  Skull, Mountain, Sparkles, Volume2, VolumeX,
 } from 'lucide-react';
 import {
   MODES, MODE_ORDER, startState, applyAnswer, tickClock, completionBonus, accuracy,
@@ -13,6 +13,18 @@ import type { QuizQuestion } from '../App';
 import { toast } from 'sonner';
 import { callAI } from '../lib/aiService';
 import { buildStudyPrompt, parseJsonReply, normaliseQuiz } from '../lib/studyPrompts';
+import { playSfx, loadSfxPreference, setSfxEnabled, sfxEnabled } from '../lib/arcadeSound';
+import BossArena2D, { type ArenaEvent } from './BossArena2D';
+import { can, planOf } from '../lib/entitlements';
+import { useUserStore } from '../store/useUserStore';
+
+/*
+  The 3D arena is Pro, and it is lazy so free players never download it.
+
+  It is raw WebGL rather than three.js — see the note in the file. A separate
+  chunk means the cost lands only on the accounts that get the feature.
+*/
+const BossArena3D = React.lazy(() => import('./BossArena3D'));
 
 /**
  * THE ARCADE — Speed Run and Boss Battle, ported from ReviseGo.
@@ -112,7 +124,14 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP, questions
   // counting in the background and fires after the player has left.
   useEffect(() => {
     if (!state || state.over || !state.mode.duration) return;
-    tickRef.current = setInterval(() => setState((s) => (s ? tickClock(s) : s)), 1000);
+    tickRef.current = setInterval(() => setState((s) => {
+      if (!s) return s;
+      const next = tickClock(s);
+      // The last ten seconds are audible. A clock you can hear running out is
+      // most of what makes a timed mode tense.
+      if (next.timeLeft > 0 && next.timeLeft <= 10) playSfx('tick');
+      return next;
+    }), 1000);
     return () => { if (tickRef.current) clearInterval(tickRef.current); };
   }, [state?.mode.id, state?.over]);
 
@@ -150,6 +169,25 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP, questions
     if (!pool?.length) return;
     startRound(id, pool, injected ? (subject || '') : dominantSubject);
   }, [pool, dominantSubject, startRound, injected, subject]);
+
+  /*
+    ONE EVENT DRIVES EVERY REACTION.
+
+    The arena animates from a single bumped id rather than from the game state
+    directly. Deriving animation from state means a re-render for any reason
+    replays the hit; an explicit event fires exactly once, when something
+    actually happened.
+  */
+  const [arenaEvent, setArenaEvent] = useState<ArenaEvent | null>(null);
+  const eventSeq = useRef(0);
+  const [sfxOn, setSfxOn] = useState(true);
+  useEffect(() => { setSfxOn(loadSfxPreference()); }, []);
+
+  const { userData } = useUserStore();
+  const isPro = !!userData?.isPro
+    || (typeof localStorage !== 'undefined' && localStorage.getItem('brainify_test_pro') === 'true');
+  const [use3D, setUse3D] = useState(true);
+  const canUse3D = can(planOf(isPro), '3d-arena') && use3D;
 
   /* ── Quick Play ───────────────────────────────────────
      Generated questions, for when there is nothing to drill yet. */
@@ -204,8 +242,41 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP, questions
     (right ? retireMistake(current) : recordMistake(current, option, 'Arcade'))
       .catch(() => { /* logged in mistakes.ts; never block the game */ });
 
+    /*
+      SOUND FIRES IMMEDIATELY, THE STATE CHANGES AFTER A BEAT.
+
+      The pause exists so the player can see which option was correct. The sound
+      must not wait for it: a hit that arrives 650ms after the tap does not feel
+      like a consequence of the tap.
+    */
+    playSfx(right ? 'hit' : 'miss', state.combo + 1);
+    if (right && state.combo + 1 >= 3) playSfx('combo', state.combo + 1);
+
     setTimeout(() => {
-      setState((s) => (s ? applyAnswer(s, right) : s));
+      setState((s) => {
+        if (!s) return s;
+        const next = applyAnswer(s, right);
+
+        // The arena reacts to what actually changed, which is only knowable by
+        // comparing the two states — "did the boss lose health" and "did I" are
+        // different animations and the component cannot work that out alone.
+        const dealt = s.bossHP - next.bossHP;
+        const taken = s.playerHP - next.playerHP;
+
+        if (next.enragedThisTurn) playSfx('enrage');
+        else if (next.over) playSfx(next.won ? 'victory' : 'defeat');
+
+        setArenaEvent({
+          id: ++eventSeq.current,
+          kind: next.enragedThisTurn ? 'enrage'
+              : next.over ? (next.won ? 'win' : 'lose')
+              : taken > 0 ? 'hurt'
+              : 'hit',
+          amount: dealt > 0 ? dealt : taken > 0 ? taken : undefined,
+        });
+
+        return next;
+      });
       setPicked(null);
     }, right ? 650 : 1500);
   };
@@ -243,6 +314,24 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP, questions
       </div>
     );
   }
+
+  /*
+    A MUTE BUTTON, and the choice is remembered.
+
+    Sound effects on by default is right — they are most of what makes this feel
+    like a game — but someone revising in a library needs one tap to stop it, and
+    needs it to stay stopped next time.
+  */
+  const soundToggle = (
+    <button
+      onClick={() => { const next = !sfxOn; setSfxEnabled(next); setSfxOn(next); if (next) playSfx('hit'); }}
+      aria-label={sfxOn ? 'Turn sound off' : 'Turn sound on'}
+      title={sfxOn ? 'Sound on' : 'Sound off'}
+      className="p-2 rounded-lg text-text-dim hover:text-text-main hover:bg-glass-bg transition-all"
+    >
+      {sfxOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+    </button>
+  );
 
   const back = (
     <button
@@ -402,7 +491,10 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP, questions
   /* ── playing ─────────────────────────────────────────── */
   return (
     <div className="w-full max-w-3xl mx-auto px-4 py-8">
-      {back}
+      <div className="flex items-center justify-between">
+        {back}
+        {soundToggle}
+      </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         {state.mode.duration > 0 && (
@@ -432,53 +524,47 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP, questions
       </div>
 
       {state.boss && (
-        <div className={`mb-6 rounded-2xl border p-4 transition-colors ${
-          state.phase === 3
-            ? 'border-red-500/60 bg-red-500/5'
-            : 'border-border-main bg-glass-bg'
-        }`}>
-          <div className="flex items-center gap-3 mb-3">
-            {/* The boss flinches when hit and lurches when it enrages, so the
-                fight has a physical reaction rather than only a number. */}
-            <div className={`shrink-0 ${
-              state.enragedThisTurn ? 'animate-bounce' : picked && picked === current?.correctAnswer ? 'animate-pulse' : ''
-            }`}>
-              <BossFace phase={state.phase} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="font-bold text-text-main leading-tight">{state.boss.name}</div>
-              <div className="text-[11px] uppercase tracking-wider text-text-dim">
-                {state.phase === 3 ? 'ENRAGED' : state.boss.title}
-              </div>
-            </div>
-            <div className="text-right shrink-0">
-              <div className="text-lg font-bold tabular-nums text-text-main">{bossPercent}%</div>
-              <div className="text-[10px] uppercase tracking-wider text-text-dim">health</div>
-            </div>
-          </div>
+        <div className="mb-6">
+          {/*
+            3D FOR PRO, 2D FOR EVERYONE ELSE — and the fight is identical.
 
-          <div className="h-3 rounded-full bg-black/40 overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-300 ${
-                state.phase === 3
-                  ? 'bg-gradient-to-r from-red-600 to-red-400'
-                  : 'bg-gradient-to-r from-orange-500 to-red-500'
-              }`}
-              style={{ width: `${bossPercent}%` }}
+            The gate is on the spectacle, never on the mechanics. A free player
+            gets the same boss, the same phases, the same damage and the same
+            questions; Pro gets it rendered in a WebGL arena. Gating how a fight
+            LOOKS is a fair upsell. Gating whether you can win it would not be.
+
+            The 3D arena falls back to the 2D one if WebGL is unavailable, so an
+            old phone shows the fight rather than a black rectangle.
+          */}
+          {canUse3D ? (
+            <React.Suspense fallback={
+              <BossArena2D
+                boss={state.boss} hp={state.bossHP} maxHp={state.boss.maxHP}
+                phase={state.phase} playerHp={state.playerHP}
+                maxPlayerHp={state.mode.playerHP} event={arenaEvent} line={bossLine}
+              />
+            }>
+              <BossArena3D
+                boss={state.boss}
+                hpPct={bossPercent}
+                phase={state.phase}
+                eventId={arenaEvent?.id ?? 0}
+                eventKind={arenaEvent?.kind ?? null}
+                onUnsupported={() => setUse3D(false)}
+              />
+              {/* The numbers stay in HTML even in 3D — a health bar drawn into a
+                  canvas is invisible to a screen reader. */}
+              <BossStats
+                hp={state.bossHP} maxHp={state.boss.maxHP} phase={state.phase}
+                playerHp={state.playerHP} maxPlayerHp={state.mode.playerHP} line={bossLine}
+              />
+            </React.Suspense>
+          ) : (
+            <BossArena2D
+              boss={state.boss} hp={state.bossHP} maxHp={state.boss.maxHP}
+              phase={state.phase} playerHp={state.playerHP}
+              maxPlayerHp={state.mode.playerHP} event={arenaEvent} line={bossLine}
             />
-          </div>
-
-          {/* What the boss has to say about your last answer. */}
-          <p className={`mt-3 text-sm italic ${
-            state.enragedThisTurn ? 'text-red-400 font-semibold not-italic' : 'text-text-dim'
-          }`} role="status" aria-live="polite">
-            &ldquo;{bossLine}&rdquo;
-          </p>
-
-          {state.phase === 3 && (
-            <p className="mt-2 text-[11px] uppercase tracking-wider text-red-400">
-              Mistakes now cost 2 health
-            </p>
           )}
         </div>
       )}
@@ -545,32 +631,6 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP, questions
  * ship and would not react. The eyes narrow and the colour deepens as it takes
  * damage, so the phase is readable without reading the percentage.
  */
-const BossFace: React.FC<{ phase: 1 | 2 | 3 }> = ({ phase }) => {
-  const tone = phase === 3 ? '#ef4444' : phase === 2 ? '#f97316' : '#a78bfa';
-  return (
-    <svg width="52" height="52" viewBox="0 0 52 52" aria-hidden="true">
-      <circle cx="26" cy="26" r="24" fill={tone} opacity={0.16} />
-      <circle cx="26" cy="26" r="24" fill="none" stroke={tone} strokeWidth="2" />
-      {/* Eyes: level at first, angled further down as it gets angrier. */}
-      <path
-        d={phase === 1 ? 'M15 21 L23 21' : phase === 2 ? 'M15 19 L23 22' : 'M15 18 L23 23'}
-        stroke={tone} strokeWidth="3" strokeLinecap="round"
-      />
-      <path
-        d={phase === 1 ? 'M29 21 L37 21' : phase === 2 ? 'M29 22 L37 19' : 'M29 23 L37 18'}
-        stroke={tone} strokeWidth="3" strokeLinecap="round"
-      />
-      {/* Mouth: flat, then a grimace, then bared teeth. */}
-      {phase < 3 ? (
-        <path d={phase === 1 ? 'M18 34 Q26 34 34 34' : 'M18 35 Q26 31 34 35'}
-              stroke={tone} strokeWidth="3" fill="none" strokeLinecap="round" />
-      ) : (
-        <path d="M17 32 L21 37 L25 32 L29 37 L33 32 L35 35"
-              stroke={tone} strokeWidth="2.5" fill="none" strokeLinejoin="round" />
-      )}
-    </svg>
-  );
-};
 
 const Cell: React.FC<{
   icon: React.ReactNode; value: React.ReactNode; label: string;
@@ -590,3 +650,53 @@ const Cell: React.FC<{
 );
 
 export default GameMode;
+
+/**
+ * The readable half of the 3D arena.
+ *
+ * WebGL draws pixels, not text — anything rendered into the canvas is invisible
+ * to a screen reader and blurry when the browser zooms. So the health, the
+ * lives and the boss's line stay as HTML on top of it. The 2D arena draws its
+ * own, which is why this is only used alongside the 3D one.
+ */
+const BossStats: React.FC<{
+  hp: number; maxHp: number; phase: 1 | 2 | 3;
+  playerHp: number; maxPlayerHp: number; line: string;
+}> = ({ hp, maxHp, phase, playerHp, maxPlayerHp, line }) => {
+  const pct = maxHp > 0 ? Math.max(0, Math.min(100, (hp / maxHp) * 100)) : 0;
+  const colour = phase === 3 ? '#ef4444' : phase === 2 ? '#f59e0b' : '#7c7cff';
+
+  return (
+    <div className="mt-3 space-y-3">
+      <div>
+        <div className="flex items-center justify-between mb-1.5 text-[10px] font-black uppercase tracking-widest">
+          <span className="text-text-dim">
+            {phase === 3 ? 'Enraged' : phase === 2 ? 'Rattled' : 'Composed'}
+          </span>
+          <span style={{ color: colour }}>{Math.ceil(pct)}%</span>
+        </div>
+        <div className="relative h-4 rounded-full bg-black/40 border border-border-main overflow-hidden">
+          <div className="h-full rounded-full transition-all duration-500"
+               style={{ width: `${pct}%`, background: colour }} />
+          <div className="absolute inset-0 flex pointer-events-none" aria-hidden="true">
+            {Array.from({ length: 10 }).map((_, i) => (
+              <div key={i} className="flex-1 border-r border-black/30 last:border-r-0" />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {maxPlayerHp > 0 && (
+        <div className="flex items-center justify-center gap-1.5"
+             aria-label={`${playerHp} of ${maxPlayerHp} lives left`}>
+          {Array.from({ length: maxPlayerHp }).map((_, i) => (
+            <Heart key={i} size={16} className={i < playerHp ? 'text-red-400' : 'text-text-dim/30'}
+                   fill={i < playerHp ? 'currentColor' : 'none'} />
+          ))}
+        </div>
+      )}
+
+      {line && <p className="text-sm italic text-text-dim text-center">"{line}"</p>}
+    </div>
+  );
+};

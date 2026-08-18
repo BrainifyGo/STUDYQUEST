@@ -36,6 +36,17 @@ describe('what free is refused', () => {
     }
   });
 
+  it('locks the 3D arena but never the fight itself', () => {
+    // The gate is on the SPECTACLE, not the mechanics. A free player gets the
+    // same boss, phases, damage and questions — just drawn in 2D. Gating how a
+    // fight looks is a fair upsell; gating whether you can win it is not, and
+    // there is deliberately no feature flag that could do the latter.
+    expect(can('free', '3d-arena')).toBe(false);
+    expect(can('pro', '3d-arena')).toBe(true);
+    expect(PRO_FEATURES).not.toContain('boss-battle' as any);
+    expect(PRO_FEATURES).not.toContain('arcade' as any);
+  });
+
   it('locks the four that were reported as unlocked', () => {
     // Named individually rather than only looped, so removing one from
     // PRO_FEATURES cannot quietly make this suite pass.
