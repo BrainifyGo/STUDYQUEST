@@ -66,6 +66,22 @@ export const MusicBar: React.FC<MusicBarProps> = ({ onExpand, raised }) => {
   const piece = playingPiece();
   const playing = layers.length > 0 || !!tone || !!piece;
 
+  /*
+    Tell the page how much of the bottom this bar is taking.
+
+    The bar is fixed, so it covers whatever is under it, and the scroll areas
+    cannot see it to leave room. They read `--app-music-h` off the body instead
+    (see index.css), and this is the only place that knows whether the bar is
+    actually on screen. Minimised it is a small round button in the corner that
+    covers nothing, so it reserves nothing.
+  */
+  useEffect(() => {
+    const shown = playing && !minimised;
+    if (shown) document.body.dataset.musicBar = raised ? 'raised' : 'flat';
+    else delete document.body.dataset.musicBar;
+    return () => { delete document.body.dataset.musicBar; };
+  }, [playing, minimised, raised]);
+
   const label = [
     piece ? pieceById(piece)?.title : null,
     tone ? toneById(tone)?.title : null,
@@ -89,7 +105,7 @@ export const MusicBar: React.FC<MusicBarProps> = ({ onExpand, raised }) => {
         onClick={() => setMinimised(false)}
         aria-label={`Music playing: ${label}. Show the player.`}
         title={label}
-        className={`fixed right-3 z-[70] w-12 h-12 rounded-full glass-panel border border-border-main shadow-2xl flex items-center justify-center text-brand-purple ${raised ? 'bottom-24' : 'bottom-4'}`}
+        className={`hide-when-typing fixed right-3 z-[70] w-12 h-12 rounded-full glass-panel border border-border-main shadow-2xl flex items-center justify-center text-brand-purple ${raised ? 'bottom-24' : 'bottom-4'}`}
         style={{ marginBottom: 'env(safe-area-inset-bottom)' }}
       >
         <Music size={18} className="animate-pulse" />
@@ -104,7 +120,7 @@ export const MusicBar: React.FC<MusicBarProps> = ({ onExpand, raised }) => {
           initial={{ y: 60, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: 60, opacity: 0 }}
-          className={`fixed left-0 right-0 z-[70] px-3 ${raised ? 'bottom-20' : 'bottom-0'}`}
+          className={`hide-when-typing fixed left-0 right-0 z-[70] px-3 ${raised ? 'bottom-20' : 'bottom-0'}`}
           style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
         >
           <div className="mx-auto max-w-2xl glass-panel border border-border-main rounded-2xl shadow-2xl flex items-center gap-3 px-4 py-2.5">

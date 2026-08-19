@@ -351,16 +351,33 @@ export default function Analytics() {
             </div>
           </div>
 
+          {/*
+            THE PLACEHOLDER SLICE IS FOR THE RING, NOT FOR THE LEGEND.
+
+            `displaySubjectData` carries a single grey 100% slice when there is
+            nothing to show, so the donut is a ring instead of an empty box. Feed
+            that same array to the legend and it prints "No Data ... 100%" as
+            though it were a subject someone had studied — which is the one
+            reading of an empty chart that is actively wrong. The ring keeps its
+            placeholder; the legend says what is actually true.
+          */}
           <div className="space-y-3">
-            {displaySubjectData.map((s, i) => (
-              <div key={i} className="flex items-center justify-between group cursor-default">
-                <div className="flex items-center gap-3">
-                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
-                  <span className="text-sm font-bold text-text-muted group-hover:text-text-main transition-colors">{s.name}</span>
+            {subjectData.length === 0 ? (
+              <p className="text-sm text-text-dim leading-relaxed">
+                No subjects yet. Generate a study kit and the breakdown of what
+                you have been working on appears here.
+              </p>
+            ) : (
+              subjectData.map((s, i) => (
+                <div key={i} className="flex items-center justify-between group cursor-default">
+                  <div className="flex items-center gap-3">
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+                    <span className="text-sm font-bold text-text-muted group-hover:text-text-main transition-colors">{s.name}</span>
+                  </div>
+                  <span className="text-sm font-black text-text-main">{s.value}%</span>
                 </div>
-                <span className="text-sm font-black text-text-main">{s.value}%</span>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </div>

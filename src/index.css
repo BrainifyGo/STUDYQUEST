@@ -271,3 +271,63 @@ html {
 .animate-pulse-ring {
   animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+/*
+  THE BOTTOM OF THE SCREEN HAS MORE THAN ONE OWNER.
+
+  On a phone the nav is fixed to the bottom, and the music bar sits above it
+  whenever something is playing. Every scroll area had its own hardcoded guess
+  at how much room to leave for that — pb-32 here, pb-28 there, pb-24 in the
+  sidebar — and each guess was made when only the nav existed. Once the music
+  bar arrived they were all short by exactly one music bar, so the last thing on
+  every page sat underneath it.
+
+  The heights live here instead, once. `.pb-chrome` reserves whatever is
+  actually down there. The music height is zero until MusicBar says otherwise,
+  so nothing reserves space for a bar that is not on screen.
+*/
+:root {
+  --app-nav-h: 0px;
+  --app-music-h: 0px;
+}
+
+/* How far a floating panel sits above whatever is below it. */
+:root { --app-panel-gap: 2rem; }
+
+@media (max-width: 1023px) {
+  :root {
+    /* py-2 + a 48px row + the home indicator, matching Navigation.tsx. */
+    --app-nav-h: calc(4rem + max(16px, env(safe-area-inset-bottom)));
+    --app-panel-gap: 0.75rem;
+  }
+}
+
+/* Set by MusicBar itself — it is the only thing that knows it is on screen. */
+body[data-music-bar='raised'],
+body[data-music-bar='flat'] {
+  --app-music-h: 3.75rem;
+}
+
+/* The flat bar sits at bottom-0, in the space the nav would otherwise take. */
+body[data-music-bar='flat'] {
+  --app-nav-h: 0px;
+}
+
+@layer utilities {
+  .pb-chrome {
+    padding-bottom: calc(var(--app-nav-h) + var(--app-music-h) + 1.5rem);
+  }
+}
+
+/*
+  While the on-screen keyboard is up, the fixed bottom chrome is pure obstruction
+  — see lib/keyboardInset.ts. It goes away, and gives its reserved space back.
+*/
+body[data-keyboard='open'] {
+  --app-nav-h: 0px;
+  --app-music-h: 0px;
+}
+
+body[data-keyboard='open'] .hide-when-typing {
+  display: none;
+}

@@ -140,8 +140,21 @@ export default function StudyMusic({ onClose }: StudyMusicProps) {
       exit={{ opacity: 0, y: 20, scale: 0.95 }}
       role="dialog"
       aria-label="Study music"
-      className="fixed bottom-24 right-3 left-3 md:left-auto md:bottom-8 md:right-8 md:w-[400px] glass-panel rounded-3xl border border-border-main shadow-2xl z-[60] overflow-hidden"
-      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      className="fixed right-3 left-3 md:left-auto md:right-8 md:w-[400px] glass-panel rounded-3xl border border-border-main shadow-2xl z-[60] overflow-hidden"
+      /*
+        Sits directly on top of the bottom nav, whatever height the nav is on
+        this device. It used to be a flat `bottom-24` with an `md:bottom-8`,
+        which cleared an iPhone by about six pixels — and on a tablet, where the
+        md: rules apply but the nav is still on screen (it is lg:hidden), the
+        panel sat behind the nav entirely. Both offsets are in the variables now,
+        so the desktop gap survives and the tablet case is covered. See
+        index.css. This is inline rather than a class because it has to beat the
+        md: variant it replaces.
+      */
+      style={{
+        bottom: 'calc(var(--app-nav-h) + var(--app-panel-gap))',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}
     >
       {/* Header */}
       <div className="p-5 border-b border-border-main flex items-center justify-between bg-glass-bg">

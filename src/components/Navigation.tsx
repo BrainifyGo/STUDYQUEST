@@ -15,7 +15,7 @@ export const Navigation: React.FC = () => {
   ];
 
   return (
-    <nav className="lg:hidden fixed bottom-0 left-0 right-0 glass-panel border-t border-border-main px-4 py-2 flex items-center justify-between z-50" style={{ paddingBottom: 'max(16px, env(safe-area-inset-bottom))' }}>
+    <nav className="hide-when-typing lg:hidden fixed bottom-0 left-0 right-0 glass-panel border-t border-border-main px-4 py-2 flex items-center justify-between z-50" style={{ paddingBottom: 'max(16px, env(safe-area-inset-bottom))' }}>
       {navItems.map((item) => {
         const Icon = item.icon;
         const isActive = activeView === item.id;

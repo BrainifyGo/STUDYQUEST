@@ -336,7 +336,16 @@ export default function UpgradePage({ onBack, isSubscribed = false, onUpgradeSuc
     setIsValidating(true);
     setError('');
     
-    const key = upgradeKey.trim();
+    /*
+      The key IS the document id, and every key we mint is uppercase out of a
+      32-character alphabet with no lowercase in it (scripts/makeKeys.cjs). So a
+      key typed in lowercase, or pasted with a stray space in the middle from a
+      chat message, is a lookup miss — and the honest "invalid or already used"
+      message then reads as a broken key rather than a typo. Normalising costs
+      nothing and cannot turn a wrong key into a right one, because no valid key
+      differs from another only by case or spacing.
+    */
+    const key = upgradeKey.replace(/\s+/g, '').toUpperCase();
     const uid = auth.currentUser.uid;
     let claimed = false;
 
@@ -470,12 +479,27 @@ export default function UpgradePage({ onBack, isSubscribed = false, onUpgradeSuc
                 <div className="space-y-3">
                   <label className="text-[10px] font-black text-text-dim uppercase tracking-[0.2em] ml-1">Enter Upgrade Key</label>
                   <div className="relative">
+                    {/*
+                      The placeholder is the only description of the format
+                      anyone gets, so it has to be the real one. It read
+                      PRO-XXXX-XXXX while every key we have ever issued looks
+                      like SQ-MOIT-QOIB-ROIF-KOIN — wrong prefix, and two groups
+                      short. Anyone typing to the shape shown would stop less
+                      than halfway and be told their key was invalid.
+
+                      23 characters at text-2xl with tracking-widest is wider
+                      than a phone, so the size steps up with the screen rather
+                      than starting there.
+                    */}
                     <input 
                       type="text" 
                       value={upgradeKey}
                       onChange={(e) => setUpgradeKey(e.target.value)}
-                      placeholder="PRO-XXXX-XXXX"
-                      className="w-full bg-glass-bg border border-border-main rounded-2xl px-8 py-6 text-2xl font-mono tracking-widest focus:outline-none focus:border-brand-purple/50 transition-all text-text-main placeholder:text-text-dim"
+                      placeholder="SQ-XXXX-XXXX-XXXX-XXXX"
+                      autoCapitalize="characters"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      className="w-full bg-glass-bg border border-border-main rounded-2xl px-4 sm:px-8 py-5 sm:py-6 text-base sm:text-xl md:text-2xl font-mono tracking-wider md:tracking-widest focus:outline-none focus:border-brand-purple/50 transition-all text-text-main placeholder:text-text-dim"
                     />
                     {success && <Check className="absolute right-6 top-1/2 -translate-y-1/2 text-green-400" size={32} />}
                   </div>

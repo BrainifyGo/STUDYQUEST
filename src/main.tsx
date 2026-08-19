@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import {initAnalytics} from './lib/analytics';
+import {watchKeyboard} from './lib/keyboardInset';
 
 /*
   A BLANK WHITE PAGE IS THE WORST WAY TO FAIL.
@@ -61,6 +62,11 @@ function ConfigError({ missing }: { missing: readonly string[] }) {
 
 // No-op unless VITE_GA_ID is set. See analytics.ts for why consent starts denied.
 initAnalytics();
+
+// Hides the fixed bottom chrome while the on-screen keyboard is up. Outside
+// React on purpose: it is a property of the window, not of any one screen, and
+// every screen with a text box needs it.
+watchKeyboard();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -54,7 +54,7 @@ export default function FocusTimer() {
   // py-12 alone left the play / reset / settings row sitting under the fixed
   // mobile bottom nav — the controls were there, just half covered.
   return (
-    <div className="flex flex-col items-center justify-center space-y-8 sm:space-y-12 py-8 sm:py-12 pb-28 lg:pb-12 relative">
+    <div className="flex flex-col items-center justify-center space-y-8 sm:space-y-12 py-8 sm:py-12 pb-chrome lg:pb-12 relative">
       <AnimatePresence>
         {showFocusAgreement && mode === 'work' && !isActive && (
           <motion.div

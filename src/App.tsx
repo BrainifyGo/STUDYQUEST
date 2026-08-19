@@ -2175,10 +2175,12 @@ export default function App() {
                   sidebar needed its own scrollbar. */}
             </nav>
 
-            {/* The mobile bottom nav is fixed at z-50 and 64px tall, so this block sat
-                underneath it — the level bar and the account row were both half
-                covered. Reserved on mobile only; the nav is lg:hidden. */}
-            <div className="p-4 pb-24 lg:pb-4 border-t border-border-main space-y-4">
+            {/* The mobile bottom nav is fixed at z-50, and the music bar stacks on
+                top of it, so this block sat underneath both — the level bar and
+                the account row were half covered even after the nav was
+                accounted for. `pb-chrome` reserves whatever is actually down
+                there; see index.css. */}
+            <div className="p-4 pb-chrome lg:pb-4 border-t border-border-main space-y-4">
               {/* Gamification Stats */}
               {!railCollapsed && (
                 <div className="px-2 space-y-2">
@@ -2562,7 +2564,7 @@ export default function App() {
         <div
           ref={scrollAreaRef}
           onScroll={handleContentScroll}
-          className="w-full max-w-7xl mx-auto p-3 sm:p-4 md:p-6 lg:p-8 space-y-6 lg:space-y-12 pb-32 lg:pb-12 overflow-x-hidden overflow-y-auto scrollbar-hide">
+          className="w-full max-w-7xl mx-auto p-3 sm:p-4 md:p-6 lg:p-8 space-y-6 lg:space-y-12 pb-chrome lg:pb-12 overflow-x-hidden overflow-y-auto scrollbar-hide">
           {/* One boundary for every route-level view. They are code-split, so each one's
               JavaScript is fetched the first time you open it rather than up front — the whole
               app used to arrive in a single 2.7 MB file before the first flashcard appeared.

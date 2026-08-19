@@ -2390,3 +2390,103 @@ at runtime on the server, and a provider with no key is skipped silently.
 ### Files
 
 `src/lib/aiProviders.server.ts`, `scripts/checkProviders.cjs`.
+
+---
+
+## [2026-08-19] — Mobile test: the bottom of the screen has more than one owner
+
+**Editor:** Claude Code (Opus 5)
+
+From RED's `mobile test.mov` — the latest mobile pass, recorded on an iPhone in Safari
+against the live Render deploy. Everything below is something the video shows happening,
+not something inferred from reading the code.
+
+### The upgrade key was fighting the person typing it
+
+One frame is RED entering a real key, and three separate things are wrong in it at once:
+
+- The field reads `-MOIT-QOIB-ROIF` (masked). The `SQ` prefix and the final group have scrolled out
+  of view, because 23 characters at `text-2xl` with `tracking-widest` is wider than a phone.
+- iOS is offering to autocorrect it to **BEDTIME**, with a lowercase keyboard.
+- The placeholder said `PRO-XXXX-XXXX`. Every key ever issued looks like
+  `SQ-MOIT-QOIB-ROIF-KOIN` — wrong prefix, and two groups short. Anyone typing to the shape
+  shown would stop less than halfway and be told their key was invalid.
+
+Fixed all three. The placeholder is now the real format; the type size steps up with the
+screen instead of starting at `text-2xl`; and the field is `autoCapitalize="characters"`,
+`autoCorrect="off"`, `spellCheck={false}`.
+
+The submit handler now also normalises what it gets:
+
+```ts
+const key = upgradeKey.replace(/\s+/g, '').toUpperCase();
+```
+
+The key **is** the Firestore document id, and every key is minted uppercase from a
+32-character alphabet with no lowercase in it. So a key typed in lowercase, or pasted with a
+stray space out of a chat message, was a lookup miss — and the deliberately vague "invalid or
+already used" message then read as a broken key rather than a typo. This cannot turn a wrong
+key into a right one, because no two valid keys differ only by case or spacing.
+
+### Five scroll areas, five different guesses at the same number
+
+The music bar covers the bottom of the screen whenever something is playing, sitting above
+the nav. Every scroll area had its own hardcoded reservation for that space — `pb-32` on the
+dashboard, `pb-28` in rooms and the focus timer, `pb-24` in the sidebar — and every one of
+them was written when the nav was the only thing down there. Once the music bar arrived they
+were all short by exactly one music bar.
+
+The video shows it four separate times: a topic chip cut in half on the dashboard,
+`Quiz Master: +100 XP` covered on the leaderboard, `YOUR FRIENDS (0)` covered on Friends, and
+the level bar and account row half-hidden at the bottom of the sidebar. The last one had
+already been "fixed" once for the nav alone.
+
+The heights now live in `index.css` as `--app-nav-h` and `--app-music-h`, and one utility
+reserves them:
+
+```css
+.pb-chrome { padding-bottom: calc(var(--app-nav-h) + var(--app-music-h) + 1.5rem); }
+```
+
+`--app-music-h` is `0px` until `MusicBar` sets `data-music-bar` on the body — it is the only
+thing that knows whether it is on screen, and minimised it is a corner button that covers
+nothing and so reserves nothing.
+
+The study music panel was anchored the same way. It was `bottom-24 md:bottom-8`, which
+cleared an iPhone by about six pixels; and on a tablet, where the `md:` rules apply but the
+nav is still on screen (it is `lg:hidden`), the panel sat behind the nav completely. Both
+offsets are variables now, so the desktop gap is unchanged and the tablet case is covered.
+
+### Get out of the way while the keyboard is up
+
+The Friends frame with the keyboard open is the worst thing in the video. The keyboard takes
+roughly two thirds of the screen, and of the sliver left, the nav and the music bar cover the
+friends list the person is typing into the box to find. iOS Safari pins fixed elements to the
+*visual* viewport, so both ride up with the keyboard and land on top of the page.
+
+Neither is any use mid-sentence. `src/lib/keyboardInset.ts` watches `visualViewport` and
+marks the body while the keyboard is up; the nav and the music bar hide, and the space they
+were reserving goes back to the page.
+
+It measures rather than watching focus events, because focus is wrong in both directions: a
+focused input does not always mean a keyboard (hardware keyboard, iPad case, date picker),
+and a keyboard can close while the field keeps focus. The threshold is 160px — well above the
+~60–100px Safari's collapsing address bar moves, and well below the ~300px a keyboard takes,
+so neither case is near the line. Browsers without `visualViewport` never fire it and the
+layout is exactly as it was.
+
+### "No Data — 100%"
+
+The subject donut carries a single grey placeholder slice when there is nothing to show, so
+the chart is a ring rather than an empty box. That same array was also feeding the legend, so
+Analytics printed **No Data · 100%** as though it were a subject someone had studied — the one
+reading of an empty chart that is actively wrong. The ring keeps its placeholder; the legend
+now says what is true.
+
+### Confirmed working in this video
+
+Worth recording, because these were all defects in earlier passes: the sidebar opens
+full-width with every label; ambient layers stack and the Focus tones list correctly; the
+generative music plays and the bar's minimise / expand / stop all work; friend search runs
+without the permissions error and returns the honest "Nobody found" message; password reset,
+data export and delete account are all present in Settings.

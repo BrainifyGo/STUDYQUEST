@@ -494,7 +494,7 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
 
         {/* Collaborative Canvas / Study Material */}
         <div className="flex-1 p-4 sm:p-6 md:p-8 overflow-y-auto scrollbar-hide">
-          <div className="max-w-4xl mx-auto space-y-8 sm:space-y-12 pb-28 md:pb-8">
+          <div className="max-w-4xl mx-auto space-y-8 sm:space-y-12 pb-chrome md:pb-8">
             <div className="text-center space-y-4">
               <motion.div 
                 initial={{ scale: 0.9, opacity: 0 }}
