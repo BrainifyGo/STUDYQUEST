@@ -2797,3 +2797,79 @@ verified.
 The shared **quiz** now persists and replays like the notes, but making one still calls the AI —
 so it stays broken until the rotated provider keys are on Render. The relay half is fixed and
 tested; the generation half is the same blocker as study kits.
+
+---
+
+## [2026-08-20] — Voice and video calls, ported from GhostChat
+
+**Editor:** Claude Code (Opus 5)
+
+RED: *"the mic and video call feature for the study room doesnt work we can get those features from ghostchat"*.
+
+### What was there
+
+Two `useState` booleans, `isMuted` and `isVideoOff`, wired to two icons that changed colour. There
+was no call to be muted on. Both are gone.
+
+### What was ported, and why it ported cleanly
+
+GhostChat's `services/webrtc/` is good code and its `Peer` class is **transport-agnostic** —
+everything it needs to say goes out through callbacks, so it does not know whether signalling
+rides Supabase's broadcast channel (GhostChat) or a Socket.IO room (here). That is why this was a
+port rather than a rewrite.
+
+The piece worth not reinventing is **perfect negotiation**. When two people press Join at the same
+moment, both fire an offer; a naive implementation deadlocks or drops the call. Exactly one side
+of each pair is designated *polite* by comparing ids, and the polite side yields. Deterministic,
+no timers, no retry loop. The ICE-candidate queueing matters just as much: candidates routinely
+arrive before the description they belong to, and queueing them is the difference between a call
+that connects and one that sometimes does.
+
+New files: `src/lib/call/peer.ts`, `media.ts`, `session.ts`.
+
+### The server relays sealed envelopes
+
+Audio and video are peer-to-peer and never touch the server; it forwards SDP and ICE between two
+members of the same room and cannot read either.
+
+**The membership check is the security.** Without it, anyone who guessed a six-character room code
+could offer a peer connection to a child inside it. Both ends must be in the room the sending
+socket is in, and a socket id from anywhere else is dropped.
+
+A socket vanishing also emits `call-leave`, because closing the tab is the commonest way a call
+ends and the peers need telling.
+
+### STUN only — a real, documented limitation
+
+STUN tells each side what its own public address looks like and the media then flows directly,
+which is what makes this free to run. It works on most home and mobile networks.
+
+It does **not** work behind a symmetric NAT or a firewall that blocks UDP, and plenty of schools
+block exactly that. Those calls need a TURN server, which relays the actual media and costs real
+money per gigabyte; there is no free TURN worth depending on. So a peer link that fails says so —
+*"this usually means a school or office network is blocking it"* — rather than showing
+"Connecting…" forever.
+
+Mesh, not a server-side mix: N people means N−1 connections each. Fine for three or four, wrong
+for thirty, so `MAX_CALL_PEERS` is 6 and the reason is the upload cost on a phone.
+
+### Verified
+
+Ten checks against three live socket clients and real accounts:
+
+```
+1. call-join reaches the other member  PASS   3. outsider cannot offer into room  PASS
+   sender does not hear itself         PASS   4. ice reaches its target           PASS
+   a different room hears nothing      PASS   5. explicit hang-up is broadcast    PASS
+2. offer reaches its target            PASS      closing the tab ends the call    PASS
+   stamped with sender's socket id     PASS
+   server adds the verified name       PASS
+```
+
+**What this does not prove.** The signalling layer is tested end to end; the media path — actual
+audio and video between two `RTCPeerConnection`s — cannot be exercised from Node and needs two
+real browsers. The `Peer` class is a near-verbatim port of code already working in GhostChat, but
+"already worked there" is not the same as "tested here". Two people on two devices should try it.
+
+### Files
+`server.ts`, `src/lib/call/*`, `src/components/CollaborativeRoom.tsx`.

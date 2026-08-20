@@ -524,12 +524,53 @@ async function startServer() {
       }
     });
 
+    /*
+      CALL SIGNALLING - RELAY ONLY.
+
+      Ported from GhostChat, whose calls ride Supabase's broadcast channel; here
+      they ride the socket that already carries the room. The server's whole job
+      is to pass sealed envelopes between two members of the same room: it never
+      looks inside an SDP or a candidate, and it cannot - the media itself is
+      peer-to-peer and never touches this process.
+
+      The membership check is the security. Without it, anyone who guessed a
+      six-character room code could offer a peer connection to a child in it.
+    */
+    const relayToPeer = (event: string, payload: any) => {
+      const here = whereAmI();
+      if (!here) return;
+      const targetId = String(payload?.to || "");
+      // Both ends must be in the room this socket is in. A socket id from
+      // somewhere else is simply dropped.
+      if (!here.room.users.has(targetId)) return;
+      io.to(targetId).emit(event, { ...payload, from: socket.id, name: here.me.name });
+    };
+
+    socket.on("call-join", ({ media }) => {
+      const here = whereAmI();
+      if (!here) return;
+      socket.to(here.roomId).emit("call-join", { from: socket.id, name: here.me.name, media });
+    });
+
+    socket.on("call-leave", () => {
+      const here = whereAmI();
+      if (!here) return;
+      socket.to(here.roomId).emit("call-leave", { from: socket.id });
+    });
+
+    socket.on("call-offer", (p) => relayToPeer("call-offer", p));
+    socket.on("call-answer", (p) => relayToPeer("call-answer", p));
+    socket.on("call-ice", (p) => relayToPeer("call-ice", p));
+
     socket.on("disconnecting", () => {
       for (const roomId of socket.rooms) {
         const room = rooms.get(roomId);
         if (!room) continue;
         if (room.users.delete(socket.id)) {
           socket.to(roomId).emit("user-left", socket.id);
+          // Closing the tab is the commonest way to end a call, so the peers
+          // need telling here as well as on an explicit hang-up.
+          socket.to(roomId).emit("call-leave", { from: socket.id });
         }
         // The room dies with its last member, and its notes die with it.
         if (room.users.size === 0) rooms.delete(roomId);

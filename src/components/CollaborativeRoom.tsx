@@ -5,7 +5,7 @@ import {
   Video, Mic, MicOff, VideoOff, Settings, X, 
   Sparkles, Brain, Zap, Target, Award, Calendar, 
   ChevronRight, Activity, Plus, Search, MoreVertical,
-  Clock, Trash2, Edit2, Grid, List, ChevronDown,
+  Clock, Trash2, Edit2, Grid, List, ChevronDown, PhoneOff,
   Filter, Star, Download, ExternalLink, User, Bot
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
@@ -17,6 +17,8 @@ import { buildStudyPrompt, parseJsonReply, normaliseQuiz } from '../lib/studyPro
 import { GameMode } from './GameMode';
 import { MODE_ORDER, MODES } from '../lib/gameModes';
 import type { QuizQuestion } from '../App';
+import { CallSession, type CallSnapshot } from '../lib/call/session';
+import { MediaError } from '../lib/call/media';
 
 interface ChatMessage {
   id: string;
@@ -35,6 +37,73 @@ interface CollaborativeRoomProps {
   onStartQuiz?: () => void;
 }
 
+/**
+ * Turn a media failure into something the person can act on.
+ *
+ * The distinction that matters most is "you refused permission" versus "this
+ * page is not on https" — they look identical from the outside and have
+ * completely different fixes.
+ */
+function describeMediaError(err: unknown): string {
+  if (err instanceof MediaError) return err.message;
+  return "Couldn't start your mic or camera.";
+}
+
+/**
+ * One person's video (or their initial, when the camera is off).
+ *
+ * A `<video>` cannot take a MediaStream through an attribute — `srcObject` is a
+ * property, so it has to be set imperatively against a ref. Writing
+ * `<video src={stream}>` silently shows nothing, which is the classic first
+ * WebRTC bug.
+ */
+function CallTile({ name, stream, speaking, muted, state }: {
+  name: string;
+  stream: MediaStream | null;
+  speaking: boolean;
+  muted?: boolean;
+  state?: RTCPeerConnectionState;
+}) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const hasVideo = !!stream && stream.getVideoTracks().some((t) => t.readyState === 'live');
+
+  useEffect(() => {
+    if (ref.current && stream) ref.current.srcObject = stream;
+  }, [stream]);
+
+  return (
+    <div className={cn(
+      "relative aspect-video rounded-2xl overflow-hidden bg-white/5 border transition-all",
+      speaking ? "border-brand-purple shadow-[0_0_0_2px_rgba(124,124,255,0.35)]" : "border-white/10"
+    )}>
+      <video
+        ref={ref}
+        autoPlay
+        playsInline
+        // Your own tile must be muted or you hear yourself on a half-second
+        // delay, which makes it impossible to speak.
+        muted={muted}
+        className={cn("w-full h-full object-cover", !hasVideo && "hidden")}
+      />
+      {!hasVideo && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="w-12 h-12 rounded-full bg-brand-purple/25 border border-brand-purple/30 flex items-center justify-center text-brand-purple font-black">
+            {name.charAt(0).toUpperCase()}
+          </span>
+        </div>
+      )}
+      <div className="absolute bottom-0 inset-x-0 px-2 py-1.5 bg-gradient-to-t from-black/70 to-transparent flex items-center gap-1.5">
+        <span className="text-[11px] font-bold text-white truncate">{name}</span>
+        {state && state !== 'connected' && (
+          <span className="text-[9px] uppercase tracking-widest font-black text-white/40 ml-auto shrink-0">
+            {state === 'failed' ? 'failed' : 'connecting'}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const generateRoomId = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
 export default function CollaborativeRoom({ roomId: initialRoomId, userName, onClose, onPickStudyKit, currentStudyKit, onStartQuiz }: CollaborativeRoomProps) {
@@ -44,8 +113,19 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
   const [input, setInput] = useState('');
   const [users, setUsers] = useState<{ id: string, name: string }[]>([]);
   const [copied, setCopied] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isVideoOff, setIsVideoOff] = useState(true);
+  /*
+    THE CALL.
+
+    `isMuted` and `isVideoOff` used to be two booleans that toggled two icons and
+    did nothing else — there was no call to be muted on. They are gone; this is
+    the real thing, driven by lib/call/session.ts (ported from GhostChat).
+  */
+  const [call, setCall] = useState<CallSnapshot>({
+    active: false, peers: [], media: { audioEnabled: true, videoEnabled: false },
+    localStream: null, warning: null,
+  });
+  const [joiningCall, setJoiningCall] = useState(false);
+  const callRef = useRef<CallSession | null>(null);
   const [sharedNotes, setSharedNotes] = useState('');
   /*
     Chat can be put away.
@@ -161,6 +241,31 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
     socketRef.current?.emit('block-user', { targetSocketId });
     setMenuFor(null);
     toast.success(`${name} was removed and cannot rejoin this room.`);
+  };
+
+  /*
+    The call lives as long as the socket does, and is torn down with it — a
+    dangling RTCPeerConnection keeps the microphone open after you have left.
+  */
+  useEffect(() => {
+    if (!socketRef.current || !activeRoomId) return;
+    const session = new CallSession(socketRef.current, userName, setCall);
+    callRef.current = session;
+    return () => {
+      session.destroy();
+      callRef.current = null;
+    };
+  }, [activeRoomId, userName]);
+
+  const joinCall = async (withVideo: boolean) => {
+    setJoiningCall(true);
+    try {
+      await callRef.current?.join(withVideo);
+    } catch (err) {
+      toast.error(describeMediaError(err));
+    } finally {
+      setJoiningCall(false);
+    }
   };
 
   const toggleVisibility = () => {
@@ -644,6 +749,37 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
             )}
           </div>
 
+          {/* The call, when there is one */}
+          {call.active && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-white/20 font-black uppercase tracking-widest">
+                  In the call
+                </span>
+                <span className="text-[10px] font-bold text-brand-purple">
+                  {call.peers.length + 1} connected
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <CallTile
+                  name={`${userName} (you)`}
+                  stream={call.localStream}
+                  speaking={false}
+                  muted
+                />
+                {call.peers.map((p) => (
+                  <CallTile
+                    key={p.id}
+                    name={p.name}
+                    stream={p.stream}
+                    speaking={p.speaking}
+                    state={p.connectionState}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* User List */}
           <div className="space-y-4">
             <div className="text-[10px] text-white/20 font-black uppercase tracking-widest">Participants</div>
@@ -703,29 +839,66 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
           </div>
         </div>
 
-        {/* Controls */}
-        <div className="p-6 border-t border-white/10 bg-white/5 grid grid-cols-3 gap-3">
-          <button 
-            onClick={() => setIsMuted(!isMuted)}
-            className={cn(
-              "p-3 rounded-2xl flex items-center justify-center transition-all",
-              isMuted ? "bg-red-500/10 text-red-400 border border-red-500/20" : "bg-white/5 text-white/40 border border-white/10 hover:text-white"
-            )}
-          >
-            {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
-          </button>
-          <button 
-            onClick={() => setIsVideoOff(!isVideoOff)}
-            className={cn(
-              "p-3 rounded-2xl flex items-center justify-center transition-all",
-              isVideoOff ? "bg-red-500/10 text-red-400 border border-red-500/20" : "bg-white/5 text-white/40 border border-white/10 hover:text-white"
-            )}
-          >
-            {isVideoOff ? <VideoOff size={20} /> : <Video size={20} />}
-          </button>
-          <button className="p-3 rounded-2xl bg-white/5 text-white/40 border border-white/10 hover:text-white flex items-center justify-center transition-all">
-            <Settings size={20} />
-          </button>
+        {/* Call controls */}
+        <div className="p-6 border-t border-white/10 bg-white/5 space-y-3">
+          {call.warning && (
+            <p className="text-[11px] leading-relaxed text-amber-300/80 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
+              {call.warning}
+            </p>
+          )}
+
+          {!call.active ? (
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => joinCall(false)}
+                disabled={joiningCall}
+                className="p-3 rounded-2xl bg-white/5 text-white/70 border border-white/10 hover:text-white hover:border-brand-purple/40 flex items-center justify-center gap-2 transition-all text-sm font-bold disabled:opacity-40"
+              >
+                <Mic size={17} /> Voice
+              </button>
+              <button
+                onClick={() => joinCall(true)}
+                disabled={joiningCall}
+                className="p-3 rounded-2xl bg-white/5 text-white/70 border border-white/10 hover:text-white hover:border-brand-purple/40 flex items-center justify-center gap-2 transition-all text-sm font-bold disabled:opacity-40"
+              >
+                <Video size={17} /> Video
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-3">
+              <button
+                onClick={() => callRef.current?.toggleAudio()}
+                aria-label={call.media.audioEnabled ? 'Mute' : 'Unmute'}
+                className={cn(
+                  "p-3 rounded-2xl flex items-center justify-center transition-all",
+                  call.media.audioEnabled
+                    ? "bg-white/5 text-white/70 border border-white/10 hover:text-white"
+                    : "bg-red-500/10 text-red-400 border border-red-500/20"
+                )}
+              >
+                {call.media.audioEnabled ? <Mic size={20} /> : <MicOff size={20} />}
+              </button>
+              <button
+                onClick={() => callRef.current?.toggleVideo().catch((e) => toast.error(describeMediaError(e)))}
+                aria-label={call.media.videoEnabled ? 'Turn camera off' : 'Turn camera on'}
+                className={cn(
+                  "p-3 rounded-2xl flex items-center justify-center transition-all",
+                  call.media.videoEnabled
+                    ? "bg-white/5 text-white/70 border border-white/10 hover:text-white"
+                    : "bg-red-500/10 text-red-400 border border-red-500/20"
+                )}
+              >
+                {call.media.videoEnabled ? <Video size={20} /> : <VideoOff size={20} />}
+              </button>
+              <button
+                onClick={() => callRef.current?.leave()}
+                aria-label="Leave the call"
+                className="p-3 rounded-2xl bg-red-500/15 text-red-400 border border-red-500/30 hover:bg-red-500/25 flex items-center justify-center transition-all"
+              >
+                <PhoneOff size={20} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
