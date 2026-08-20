@@ -176,10 +176,20 @@ export const Settings: React.FC = () => {
     }
   };
 
-  const tabs: { id: SettingsTab; label: string; icon: typeof Bell }[] = [
-    { id: 'notifications', label: 'Notifications', icon: Bell },
-    { id: 'privacy', label: 'Privacy & Security', icon: Shield },
-    { id: 'subscription', label: 'Subscription', icon: CreditCard },
+  /*
+    `short` is what a phone shows.
+    
+    All three tabs were laid out with `flex-1`, which asks each one for an equal
+    third of the row, while `whitespace-nowrap` stops the text giving any of it
+    back. On a 390px screen "Privacy & Security" alone is wider than its third,
+    so the row overflowed and Subscription was pushed off the right edge —
+    reachable only by a horizontal scroll with no affordance suggesting it was
+    there. Daniel reported it, reasonably, as the Subscription tab being missing.
+  */
+  const tabs: { id: SettingsTab; label: string; short: string; icon: typeof Bell }[] = [
+    { id: 'notifications', label: 'Notifications', short: 'Alerts', icon: Bell },
+    { id: 'privacy', label: 'Privacy & Security', short: 'Privacy', icon: Shield },
+    { id: 'subscription', label: 'Subscription', short: 'Plan', icon: CreditCard },
   ];
 
   return (
@@ -272,14 +282,15 @@ export const Settings: React.FC = () => {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                "flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold whitespace-nowrap transition-all",
+                "flex-1 min-w-0 flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-3 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all",
                 isActive
                   ? "bg-brand-purple text-white shadow-lg shadow-brand-purple/20"
                   : "text-text-dim hover:text-text-main hover:bg-glass-bg"
               )}
             >
-              <Icon size={16} />
-              <span>{tab.label}</span>
+              <Icon size={16} className="shrink-0" />
+              <span className="sm:hidden">{tab.short}</span>
+              <span className="hidden sm:inline">{tab.label}</span>
             </button>
           );
         })}

@@ -2657,3 +2657,49 @@ All test accounts and names were deleted afterwards, and the deletion verified.
 ### Note
 The client still runs both checks, so the form can say what is wrong as you type rather than
 after a round trip. The server repeats both, and the server's answer is the one that counts.
+
+---
+
+## [2026-08-20] — Three small ones from the test pass
+
+**Editor:** Claude Code (Opus 5)
+
+### Settings → Subscription was off the edge of the screen
+
+All three Settings tabs were laid out with `flex-1`, which asks each for an equal third of the
+row, while `whitespace-nowrap` stops the text giving any of it back. On a 390px screen "Privacy &
+Security" alone is wider than its third, so the row overflowed and Subscription was pushed off
+the right — reachable only by a horizontal scroll with nothing to suggest it was there. Daniel
+reported it, reasonably, as the tab being missing.
+
+Each tab now carries a `short` label for phones (`Alerts` / `Privacy` / `Plan`) with the full
+label from `sm:` up, plus tighter padding and smaller text on mobile. All three fit without
+scrolling, which is what "not cut off" has to mean.
+
+### Tapping your profile does nothing
+
+The account row in the sidebar already had `cursor-pointer` and a hover background — it looked
+tappable and had no click handler. The only way through was a 16px gear icon beside it, well
+under the 44px a finger reliably hits.
+
+The whole row now opens Settings, with a keyboard handler and a focus ring since it is a control
+now. The gear was removed as a second control doing what its own container does, and the sign-out
+button inside the row got `stopPropagation` — without it, signing out would open Settings on the
+way past.
+
+### The challenge screen's odd control
+
+RED said the Challenges UI "doesn't match the app". Its classes are in fact identical to the ones
+`FriendsView` uses — the odd one out was the native `<select>`, which draws the OS chevron and OS
+control chrome next to a custom-styled input and button.
+
+`appearance-none` plus a matching `ChevronDown` fixes it. The option ROWS are still drawn by the
+OS and cannot be styled beyond colour; that is handled globally in `index.css` and was the
+separate bug that made the list invisible in dark mode.
+
+The country-code picker on the sign-in form has the same OS chrome and was left alone: its
+options are already covered by the global colour rule, and removing the arrow without drawing a
+replacement would be worse than leaving it.
+
+### Files
+`src/components/Settings.tsx`, `src/App.tsx`, `src/components/Challenges.tsx`.

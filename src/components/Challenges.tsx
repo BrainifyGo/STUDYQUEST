@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Swords, Loader2, Trophy, Clock, Trash2, ArrowLeft } from 'lucide-react';
+import { Swords, Loader2, Trophy, Clock, Trash2, ArrowLeft, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
 import { auth } from '../lib/firebase';
@@ -146,16 +146,39 @@ export const Challenges: React.FC<ChallengesProps> = ({ friends, onBack }) => {
         ) : (
           <>
             <div className="flex flex-col sm:flex-row gap-3">
-              <select
-                value={target}
-                onChange={(e) => setTarget(e.target.value)}
-                className="sm:w-52 px-4 py-3 rounded-xl bg-glass-bg border border-border-main text-text-main focus:outline-none focus:border-brand-purple/60 transition-all"
-              >
-                <option value="">Choose a friend</option>
-                {friends.map((f) => (
-                  <option key={f.uid} value={f.uid}>{f.name}</option>
-                ))}
-              </select>
+              {/*
+                A NATIVE SELECT LOOKS LIKE THE OPERATING SYSTEM, NOT LIKE THIS APP.
+
+                Left with its default appearance it draws the OS chevron and the
+                OS control chrome, sitting next to a custom-styled text input and
+                a custom-styled button. That is the "UI doesn't match the app" RED
+                reported on this screen: the classes here are already identical to
+                the ones FriendsView uses, and this control was the odd one out.
+
+                `appearance-none` removes the OS chrome so the shared input
+                styling actually shows, and the chevron is drawn to match. The
+                option ROWS are still OS-drawn and cannot be styled beyond colour
+                — that is handled globally in index.css, and is what made this
+                list invisible in dark mode.
+              */}
+              <div className="relative sm:w-52">
+                <select
+                  value={target}
+                  onChange={(e) => setTarget(e.target.value)}
+                  aria-label="Choose a friend to challenge"
+                  className="w-full appearance-none px-4 py-3 pr-10 rounded-xl bg-glass-bg border border-border-main text-text-main cursor-pointer focus:outline-none focus:border-brand-purple/60 transition-all"
+                >
+                  <option value="">Choose a friend</option>
+                  {friends.map((f) => (
+                    <option key={f.uid} value={f.uid}>{f.name}</option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={16}
+                  aria-hidden="true"
+                  className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-dim"
+                />
+              </div>
               <input
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}

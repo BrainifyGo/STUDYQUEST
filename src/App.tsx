@@ -17,7 +17,6 @@ import {
   ChevronRight, 
   Brain, 
   History, 
-  Settings, 
   LogOut, 
   Menu, 
   X,
@@ -2209,8 +2208,29 @@ export default function App() {
                 </div>
               )}
 
-              <div className={cn(
+              {/*
+                The whole row opens Settings.
+
+                It already had `cursor-pointer` and a hover background, so it
+                looked tappable — and did nothing. The only way through was a
+                16px gear icon beside it, which is under the 44px a finger can
+                reliably hit. RED asked for the obvious thing: tap your profile,
+                get your settings.
+              */}
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => setActiveView('settings')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setActiveView('settings');
+                  }
+                }}
+                title="Open settings"
+                className={cn(
                 "flex items-center gap-3 p-2 rounded-xl hover:bg-glass-bg transition-colors cursor-pointer group",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-purple/60",
                 railCollapsed && "justify-center"
               )}>
                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-brand-purple to-brand-purple-dark flex items-center justify-center font-bold text-white shrink-0">
@@ -2224,19 +2244,13 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {!railCollapsed && (
-                  <button
-                    onClick={() => setActiveView('settings')}
-                    title="Settings"
-                    className="text-text-dim hover:text-brand-purple transition-colors shrink-0"
-                  >
-                    <Settings size={16} />
-                  </button>
-                )}
                 {!railCollapsed && !isGuest && (
                   <button
-                    onClick={handleLogout}
-                    className="text-text-dim group-hover:text-red-400 transition-colors"
+                    // Inside the row, so without this it would open Settings on
+                    // the way out.
+                    onClick={(e) => { e.stopPropagation(); handleLogout(); }}
+                    title="Sign out"
+                    className="text-text-dim group-hover:text-red-400 transition-colors shrink-0"
                   >
                     <LogOut size={18} />
                   </button>
