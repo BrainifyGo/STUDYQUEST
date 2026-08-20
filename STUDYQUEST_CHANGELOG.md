@@ -2703,3 +2703,97 @@ replacement would be worse than leaving it.
 
 ### Files
 `src/components/Settings.tsx`, `src/App.tsx`, `src/components/Challenges.tsx`.
+
+---
+
+## [2026-08-20] — Study rooms: state, public rooms, reporting and blocking
+
+**Editor:** Claude Code (Opus 5)
+
+### Why shared notes "didn't work"
+
+`notes-update` and `room-quiz` were pure relays. Whatever you typed was forwarded to everyone
+currently connected and then forgotten — the room held no state at all. Two failures fall straight
+out of that, and both were reported as the same thing:
+
+1. Join a room that already has notes and you see an **empty box**. Nothing replays what you missed.
+2. Then type one character. Your near-empty box is relayed to everyone else and **overwrites what
+   they wrote.**
+
+The room now holds its own notes and quiz. A joiner is sent `room-state` on arrival, and updates
+mutate that state rather than flying past it. Still in memory on purpose: a study room is
+ephemeral, dies with its last member, and persisting it would mean a retention policy for
+children's writing that nobody has agreed to.
+
+`notes-update` and `room-quiz` also now check that the sender is actually **in** the room. Without
+that, a socket could type into any room whose six-character code it could guess.
+
+### Public and private rooms
+
+Private is the default and the only kind that existed — a code somebody had to send you. That
+works if you already have friends on the app and is a dead end if you do not.
+
+The first person through the door owns the room and chooses whether it is listed. `GET /api/rooms`
+reads the same in-memory map the sockets use, so a room appears when it opens and vanishes when
+the last person leaves. **Private rooms are never listed** — that is the entire difference. The
+"List publicly" box is unticked by default, because being findable by strangers has to be
+something a child chooses, never something that happens to them.
+
+### Reporting and blocking
+
+They solve different problems and both were needed:
+
+- **Blocking** is the owner's, immediate and local: get this person out of my room now. The
+  blocked uid is checked on join, so it is a bar and not a nudge.
+- **Reporting** is everyone's, slower and global. Three reports from **different** people suspend
+  the account from all rooms for 24 hours.
+
+Distinct reporters is the part that matters. Counting raw reports would let one child suspend
+anyone they had fallen out with by pressing the button three times, so reports are stored one
+document per reporter/target pair.
+
+A report button that files a ticket nobody reads is worse than no button — it tells a child they
+have been helped when they have not. This one has a consequence attached.
+
+**The suspension is pinned in the rules.** `roomsSuspendedUntil` lives on the user's own document,
+every other field of which the owner may write, and nothing used `hasOnly` — so dropping the field
+from a normal profile write would have cleared the suspension, from the browser console, by the
+person serving it. It is now pinned like the paid fields, and only the server can set or clear it.
+
+`reports` is closed to clients completely: a child reporting harassment must not be discoverable
+by the person they reported.
+
+### The refusal screen that was never drawn
+
+`denied` was being set by the `join-denied` handler and rendered **nowhere**, so every refusal —
+wrong plan, signed out, suspended, blocked — looked identical to the room simply never loading.
+That is its own bug report ("study rooms don't work"). There is now a screen for each reason.
+
+The member menu is always visible rather than `opacity-0 group-hover:opacity-100`: hover does not
+exist on a phone, and a child who needs the report button is on a phone.
+
+### Verified
+
+Fourteen checks against two real socket clients and real accounts:
+
+```
+1. owner joins, is owner              PASS      5. private room is NOT listed        PASS
+   room is public                     PASS      6. non-owner cannot list the room    PASS
+2. late joiner gets existing notes    PASS      7. blocked user is told why          PASS
+   late joiner is NOT owner           PASS         blocked user cannot rejoin        PASS
+3. owner sees the appended text       PASS      8. one reporter twice = not suspended PASS
+4. public room is listed              PASS         three distinct reporters suspend  PASS
+                                                   target was ejected                PASS
+                                                   suspended user cannot join at all PASS
+```
+
+All four test accounts and every report they generated were deleted afterwards, and the deletion
+verified.
+
+### Files
+`server.ts`, `src/components/CollaborativeRoom.tsx`, `firestore.rules`.
+
+### Note
+The shared **quiz** now persists and replays like the notes, but making one still calls the AI —
+so it stays broken until the rotated provider keys are on Render. The relay half is fixed and
+tested; the generation half is the same blocker as study kits.

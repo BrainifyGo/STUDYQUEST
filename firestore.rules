@@ -167,6 +167,23 @@ service cloud.firestore {
           && request.resource.data.get('subscriptionType', 'none') == resource.data.get('subscriptionType', 'none');
     }
 
+    /*
+      A SUSPENSION THE SUSPENDED PERSON CAN LIFT IS NOT A SUSPENSION.
+
+      `roomsSuspendedUntil` is written to the user's own document by the
+      moderation code in server.ts. Every other field on that document is
+      writable by its owner, and nothing here used `hasOnly`, so dropping the
+      field from a normal profile write would have cleared the suspension —
+      from the browser console, by the person serving it.
+
+      Pinned the same way the paid fields are. The server writes it with admin
+      credentials, which bypass these rules, so only the server can set OR clear
+      it.
+    */
+    function suspensionUnchanged() {
+      return request.resource.data.get('roomsSuspendedUntil', 0) == resource.data.get('roomsSuspendedUntil', 0);
+    }
+
     // THE FIELDS THAT DO COST MONEY.
     //
     // Every AI call is charged against `tokensUsedToday`/`tokensUsedThisMonth`, which the server
@@ -253,6 +270,7 @@ service cloud.firestore {
                         && isValidUser(request.resource.data)
                         && (!('role' in resource.data) || request.resource.data.role == resource.data.role)
                         && budgetUnchanged()
+                        && suspensionUnchanged()
                         && ((paidFieldsUnchanged() && redeemedKeyUnchanged())
                             || redeemedWithMyKey()));
       // There was NO delete rule here, so "Delete Account" was rejected by the
@@ -297,6 +315,21 @@ service cloud.firestore {
     // `key`/`type` frozen so nobody can rewrite a spent monthly key into a fresh annual one.
     // Once claimed, `resource.data.isUsed == false` fails forever, so a shared key is worth
     // exactly one upgrade to exactly one account.
+    /*
+      REPORTS ARE WRITTEN BY THE SERVER AND READ BY NOBODY.
+
+      A child reporting harassment must not be discoverable by the person they
+      reported, so this collection is closed to clients completely. The socket
+      handler writes it with admin credentials, counts DISTINCT reporters, and
+      suspends at the threshold — see report-user in server.ts.
+
+      Admin can read them, because somebody eventually has to look.
+    */
+    match /reports/{reportId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
     match /upgrade_keys/{keyId} {
       allow get: if isAuthenticated();
       allow list: if isAdmin();

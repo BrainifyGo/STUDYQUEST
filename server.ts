@@ -240,10 +240,89 @@ async function startServer() {
   });
 
   // --- Socket.io Logic ---
-  const rooms = new Map<string, Set<{ id: string, name: string, uid?: string }>>();
+  /*
+    ROOM STATE LIVES HERE, BECAUSE NOTHING ELSE WAS HOLDING IT.
+
+    `notes-update` and `room-quiz` used to be pure relays: whatever you typed was
+    forwarded to everyone currently connected, and then forgotten. Two failures
+    came straight out of that, and both were reported as "shared notes doesn't
+    work":
+
+      1. Join a room that already has notes in it and you see an empty box —
+         nothing replays the state you missed.
+      2. Then type one character. Your near-empty box is relayed to everybody
+         else and OVERWRITES what they had written.
+
+    So the room now holds its own notes and quiz, a joiner is sent the current
+    state, and updates mutate that state rather than flying past it.
+
+    Still deliberately in memory: a study room is ephemeral, dies with the last
+    member, and persisting it would mean a retention policy for children's
+    writing that nobody has agreed to.
+  */
+  interface RoomMember { id: string; name: string; uid: string }
+
+  interface RoomState {
+    users: Map<string, RoomMember>;      // socket.id -> member
+    notes: string;
+    quiz: unknown[] | null;
+    /*
+      PRIVATE BY DEFAULT.
+
+      The people in these rooms are schoolchildren, so the safe default is the
+      one where a stranger cannot find you. Public is something the owner opts
+      into, never something a room becomes by accident.
+    */
+    visibility: 'public' | 'private';
+    title: string;
+    ownerUid: string;
+    /** uids the owner has barred. Checked on join, so a kick is not just a nudge. */
+    blocked: Set<string>;
+    createdAt: number;
+  }
+
+  const rooms = new Map<string, RoomState>();
+
+  const publicMembers = (r: RoomState) => Array.from(r.users.values());
+
+  /*
+    REPORTING HAS TO COST THE REPORTED PERSON SOMETHING, OR IT IS A PLACEBO.
+
+    A report button that files a ticket nobody reads is worse than no button: it
+    tells a child they have been helped when they have not. So reports are
+    counted, and enough of them from DIFFERENT people suspends the account from
+    rooms automatically.
+
+    Distinct reporters is the part that matters. Counting raw reports would let
+    one person suspend anyone they liked by pressing the button three times.
+  */
+  const REPORTS_TO_SUSPEND = 3;
+  const SUSPENSION_HOURS = 24;
+
+  async function isSuspended(uid: string): Promise<boolean> {
+    try {
+      const snap = await admin.firestore().collection('users').doc(uid).get();
+      const until = snap.data()?.roomsSuspendedUntil;
+      return typeof until === 'number' && until > Date.now();
+    } catch {
+      // Fail OPEN on suspension only: a Firestore blip should not lock a child
+      // out of their lesson. The Pro check above still fails closed, because
+      // that one guards who gets in at all.
+      return false;
+    }
+  }
 
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
+
+    /** The room this socket is actually in, and who they are in it. */
+    const whereAmI = (): { roomId: string; room: RoomState; me: RoomMember } | null => {
+      for (const [roomId, room] of rooms) {
+        const me = room.users.get(socket.id);
+        if (me) return { roomId, room, me };
+      }
+      return null;
+    };
 
     /*
       JOINING A ROOM NOW REQUIRES PROOF OF WHO YOU ARE.
@@ -261,7 +340,7 @@ async function startServer() {
       against the project, and the plan is read from Firestore — never from
       anything the client claimed about itself.
     */
-    socket.on("join-room", async ({ roomId, userName, idToken }) => {
+    socket.on("join-room", async ({ roomId, userName, idToken, visibility, title }) => {
       if (typeof roomId !== 'string' || !roomId.trim()) {
         socket.emit("join-denied", { reason: 'BAD_ROOM' });
         return;
@@ -294,21 +373,52 @@ async function startServer() {
         return;
       }
 
+      if (await isSuspended(uid)) {
+        socket.emit("join-denied", { reason: 'SUSPENDED' });
+        return;
+      }
+
+      const existing = rooms.get(roomId);
+      if (existing?.blocked.has(uid)) {
+        socket.emit("join-denied", { reason: 'BLOCKED' });
+        return;
+      }
+
       socket.join(roomId);
 
-      if (!rooms.has(roomId)) {
-        rooms.set(roomId, new Set());
-      }
+      // The first person through the door owns the room and chooses whether it
+      // is listed. Everyone after that inherits what they set.
+      const room: RoomState = existing ?? {
+        users: new Map(),
+        notes: '',
+        quiz: null,
+        visibility: visibility === 'public' ? 'public' : 'private',
+        title: String(title || 'Study room').slice(0, 60),
+        ownerUid: uid,
+        blocked: new Set(),
+        createdAt: Date.now(),
+      };
+      if (!existing) rooms.set(roomId, room);
 
       // The name is still cosmetic, but it is attached to a verified uid now, so
       // someone in a room can be identified rather than merely labelled.
-      const user = { id: socket.id, name: String(userName || 'Student').slice(0, 40), uid };
-      rooms.get(roomId)?.add(user);
+      const user: RoomMember = { id: socket.id, name: String(userName || 'Student').slice(0, 40), uid };
+      room.users.set(socket.id, user);
+
+      // The state they missed. Without this a joiner sees an empty notes box and
+      // then wipes everyone else's the moment they type.
+      socket.emit("room-state", {
+        notes: room.notes,
+        quiz: room.quiz,
+        visibility: room.visibility,
+        title: room.title,
+        isOwner: room.ownerUid === uid,
+      });
 
       socket.to(roomId).emit("user-joined", user);
-      io.to(roomId).emit("room-users", Array.from(rooms.get(roomId) || []));
+      io.to(roomId).emit("room-users", publicMembers(room));
 
-      console.log(`${user.name} (${uid}) joined room: ${roomId}`);
+      console.log(`${user.name} (${uid}) joined ${room.visibility} room: ${roomId}`);
     });
 
     socket.on("send-message", ({ roomId, message }) => {
@@ -322,41 +432,139 @@ async function startServer() {
       socket.to(roomId).emit("typing", { userName, typing: !!typing });
     });
 
-    // A quiz built inside a room, shared with everyone in it. Relayed rather
-    // than stored: the room is ephemeral and so is the quiz.
+    // A quiz built inside a room, shared with everyone in it — and kept, so
+    // somebody arriving mid-session gets the quiz rather than an empty panel.
     socket.on("room-quiz", ({ roomId, quiz }) => {
-      socket.to(roomId).emit("room-quiz", quiz);
+      const room = rooms.get(roomId);
+      if (!room || !room.users.has(socket.id)) return;
+      room.quiz = Array.isArray(quiz) ? quiz : null;
+      socket.to(roomId).emit("room-quiz", room.quiz);
     });
 
     socket.on("notes-update", ({ roomId, notes }) => {
-      socket.to(roomId).emit("notes-update", notes);
+      const room = rooms.get(roomId);
+      // Only someone actually in the room may write to it. Without this check a
+      // socket could type into any room whose code it could guess.
+      if (!room || !room.users.has(socket.id)) return;
+      room.notes = String(notes ?? '').slice(0, 20000);
+      socket.to(roomId).emit("notes-update", room.notes);
+    });
+
+    /*
+      The owner can list or unlist the room while it is running — the equivalent
+      of closing the door once everybody who was invited has arrived.
+    */
+    socket.on("room-visibility", ({ visibility }) => {
+      const here = whereAmI();
+      if (!here || here.room.ownerUid !== here.me.uid) return;
+      here.room.visibility = visibility === 'public' ? 'public' : 'private';
+      io.to(here.roomId).emit("room-visibility", here.room.visibility);
+    });
+
+    /*
+      BLOCKING IS THE OWNER'S TOOL; REPORTING IS EVERYONE'S.
+
+      They solve different problems. Blocking is immediate and local: get this
+      person out of my room now. Reporting is slower and global: this person
+      should not be in anyone's room. A child being harassed needs the first one
+      to work in a single tap, without waiting for anybody to review anything.
+    */
+    socket.on("block-user", ({ targetSocketId }) => {
+      const here = whereAmI();
+      if (!here || here.room.ownerUid !== here.me.uid) return;
+
+      const target = here.room.users.get(String(targetSocketId));
+      if (!target || target.uid === here.me.uid) return;   // never block yourself
+
+      here.room.blocked.add(target.uid);
+      here.room.users.delete(target.id);
+
+      io.to(target.id).emit("removed-from-room", { reason: 'BLOCKED' });
+      io.sockets.sockets.get(target.id)?.leave(here.roomId);
+      io.to(here.roomId).emit("room-users", publicMembers(here.room));
+    });
+
+    socket.on("report-user", async ({ targetSocketId, reason }) => {
+      const here = whereAmI();
+      if (!here) return;
+
+      const target = here.room.users.get(String(targetSocketId));
+      if (!target || target.uid === here.me.uid) return;   // reporting yourself is not a thing
+
+      try {
+        const db = admin.firestore();
+        // One document per reporter/target pair, so pressing the button five
+        // times is still one report. THIS is what stops a single child
+        // suspending somebody they have fallen out with.
+        await db.collection('reports').doc(`${target.uid}__${here.me.uid}`).set({
+          targetUid: target.uid,
+          reporterUid: here.me.uid,
+          roomId: here.roomId,
+          reason: String(reason || '').slice(0, 300),
+          at: Date.now(),
+        });
+
+        const all = await db.collection('reports').where('targetUid', '==', target.uid).get();
+        const distinct = new Set(all.docs.map((d) => d.data().reporterUid)).size;
+
+        socket.emit("report-filed", { name: target.name });
+
+        if (distinct >= REPORTS_TO_SUSPEND) {
+          const until = Date.now() + SUSPENSION_HOURS * 3600 * 1000;
+          await db.collection('users').doc(target.uid).set({ roomsSuspendedUntil: until }, { merge: true });
+
+          here.room.users.delete(target.id);
+          io.to(target.id).emit("removed-from-room", { reason: 'SUSPENDED' });
+          io.sockets.sockets.get(target.id)?.leave(here.roomId);
+          io.to(here.roomId).emit("room-users", publicMembers(here.room));
+          console.log(`[moderation] ${target.uid} suspended from rooms until ${new Date(until).toISOString()}`);
+        }
+      } catch (err) {
+        console.error('report-user failed', err);
+      }
     });
 
     socket.on("disconnecting", () => {
       for (const roomId of socket.rooms) {
-        if (rooms.has(roomId)) {
-          const roomUsers = rooms.get(roomId);
-          if (roomUsers) {
-            for (const user of roomUsers) {
-              if (user.id === socket.id) {
-                roomUsers.delete(user);
-                socket.to(roomId).emit("user-left", socket.id);
-                break;
-              }
-            }
-            if (roomUsers.size === 0) {
-              rooms.delete(roomId);
-            } else {
-              io.to(roomId).emit("room-users", Array.from(roomUsers));
-            }
-          }
+        const room = rooms.get(roomId);
+        if (!room) continue;
+        if (room.users.delete(socket.id)) {
+          socket.to(roomId).emit("user-left", socket.id);
         }
+        // The room dies with its last member, and its notes die with it.
+        if (room.users.size === 0) rooms.delete(roomId);
+        else io.to(roomId).emit("room-users", publicMembers(room));
       }
     });
 
     socket.on("disconnect", () => {
       console.log("User disconnected:", socket.id);
     });
+  });
+
+  /*
+    The public room list. Reads the same in-memory map the sockets use, so a
+    room appears the moment somebody opens it and vanishes when the last person
+    leaves — no separate store to fall out of step.
+
+    Private rooms are never listed. That is the whole difference between the two.
+  */
+  app.get('/api/rooms', async (req, res) => {
+    const header = req.headers.authorization;
+    if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Sign in first.' });
+    try {
+      await admin.auth().verifyIdToken(header.slice(7));
+    } catch {
+      return res.status(401).json({ error: 'Sign in first.' });
+    }
+
+    const open = Array.from(rooms.entries())
+      .filter(([, r]) => r.visibility === 'public' && r.users.size > 0)
+      .map(([id, r]) => ({ id, title: r.title, members: r.users.size, createdAt: r.createdAt }))
+      .sort((a, b) => b.members - a.members)
+      .slice(0, 50);
+
+    res.json({ rooms: open });
   });
 
   // --- AI generation (server-side — provider keys never reach the browser) ---

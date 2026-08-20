@@ -106,10 +106,68 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
   */
   const [playingGame, setPlayingGame] = useState(false);
   /** Set when the server refuses the join, and why. */
-  const [denied, setDenied] = useState<'pro' | 'signin' | 'error' | null>(null);
+  const [denied, setDenied] = useState<'pro' | 'signin' | 'error' | 'suspended' | 'blocked' | null>(null);
 
   const [roomQuiz, setRoomQuiz] = useState<QuizQuestion[]>([]);
   const [isMakingQuiz, setIsMakingQuiz] = useState(false);
+
+  /*
+    PUBLIC AND PRIVATE ROOMS.
+
+    Private is the default and always has been the only kind — a six-character
+    code you had to be told. Public rooms are listed so somebody with nobody to
+    revise with can still find a table, which is the whole point of the feature
+    for a child who does not already have three friends on the app.
+
+    `isOwner` comes from the server on join (first person through the door), and
+    it is the server that enforces every owner-only action. This flag only
+    decides which buttons are drawn.
+  */
+  const [visibility, setVisibility] = useState<'public' | 'private'>('private');
+  const [isOwner, setIsOwner] = useState(false);
+  const [newRoomPublic, setNewRoomPublic] = useState(false);
+  const [newRoomTitle, setNewRoomTitle] = useState('');
+  const [openRooms, setOpenRooms] = useState<{ id: string; title: string; members: number }[]>([]);
+  const [loadingRooms, setLoadingRooms] = useState(false);
+  /** Which member's moderation menu is open, by socket id. */
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+
+  /** The public rooms with somebody in them, refreshed when the lobby opens. */
+  const loadOpenRooms = async () => {
+    setLoadingRooms(true);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      const res = await fetch('/api/rooms', { headers: { Authorization: `Bearer ${idToken}` } });
+      const data = await res.json();
+      setOpenRooms(Array.isArray(data.rooms) ? data.rooms : []);
+    } catch {
+      setOpenRooms([]);
+    } finally {
+      setLoadingRooms(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!activeRoomId) loadOpenRooms();
+  }, [activeRoomId]);
+
+  const reportUser = (targetSocketId: string, name: string) => {
+    socketRef.current?.emit('report-user', { targetSocketId, reason: 'Reported from a study room' });
+    setMenuFor(null);
+    toast.success(`Reported ${name}. Enough reports from different people suspends the account.`);
+  };
+
+  const blockUser = (targetSocketId: string, name: string) => {
+    socketRef.current?.emit('block-user', { targetSocketId });
+    setMenuFor(null);
+    toast.success(`${name} was removed and cannot rejoin this room.`);
+  };
+
+  const toggleVisibility = () => {
+    const next = visibility === 'public' ? 'private' : 'public';
+    socketRef.current?.emit('room-visibility', { visibility: next });
+    setVisibility(next);
+  };
 
   /** Build a quiz from whatever the room has written, and share it with everyone. */
   const generateRoomQuiz = async () => {
@@ -162,13 +220,21 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
       // The server verifies this token and reads the plan from Firestore. The
       // client cannot assert either — see the note on join-room in server.ts.
       const idToken = await auth.currentUser?.getIdToken().catch(() => null);
-      socketRef.current?.emit('join-room', { roomId: activeRoomId, userName, idToken });
+      socketRef.current?.emit('join-room', {
+        roomId: activeRoomId, userName, idToken,
+        // Only honoured when this socket is the one that CREATES the room; a
+        // joiner inherits whatever the owner set.
+        visibility: newRoomPublic ? 'public' : 'private',
+        title: newRoomTitle || `${userName}'s room`,
+      });
     });
 
     socketRef.current.on('join-denied', ({ reason }: { reason: string }) => {
       setDenied(
         reason === 'PRO_REQUIRED' ? 'pro'
         : reason === 'SIGN_IN_REQUIRED' ? 'signin'
+        : reason === 'SUSPENDED' ? 'suspended'
+        : reason === 'BLOCKED' ? 'blocked'
         : 'error'
       );
       socketRef.current?.disconnect();
@@ -207,6 +273,33 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
 
     socketRef.current.on('room-users', (roomUsers: { id: string, name: string }[]) => {
       setUsers(roomUsers);
+    });
+
+    /*
+      The state that already existed before you arrived.
+
+      Without this a joiner saw an empty notes box, and then wiped everybody
+      else's notes with it on the first keystroke.
+    */
+    socketRef.current.on('room-state', (state: {
+      notes: string; quiz: QuizQuestion[] | null;
+      visibility: 'public' | 'private'; isOwner: boolean;
+    }) => {
+      setSharedNotes(state.notes || '');
+      setRoomQuiz(Array.isArray(state.quiz) ? state.quiz : []);
+      setVisibility(state.visibility);
+      setIsOwner(!!state.isOwner);
+    });
+
+    socketRef.current.on('room-visibility', (v: 'public' | 'private') => setVisibility(v));
+
+    socketRef.current.on('removed-from-room', ({ reason }: { reason: string }) => {
+      setDenied(reason === 'SUSPENDED' ? 'suspended' : 'blocked');
+      socketRef.current?.disconnect();
+    });
+
+    socketRef.current.on('report-filed', ({ name }: { name: string }) => {
+      addSystemMessage(`Your report about ${name} was recorded.`);
     });
 
     socketRef.current.on('notes-update', (notes: string) => {
@@ -261,6 +354,45 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
     setTimeout(() => setCopied(false), 2000);
   };
 
+  /*
+    WHY YOU ARE NOT IN THE ROOM.
+
+    `denied` was being set by the join-denied handler and rendered nowhere, so
+    every refusal — wrong plan, signed out, suspended — looked identical to the
+    room simply never loading. A refusal the person cannot see is a bug report
+    saying "study rooms don't work".
+  */
+  if (denied) {
+    const copy = {
+      pro: { title: 'Study Rooms are part of Pro', body: 'Rooms let you revise with friends in real time. Upgrade to join one.' },
+      signin: { title: 'Sign in to join', body: 'Rooms are tied to your account so people know who they are studying with.' },
+      suspended: { title: 'You cannot join rooms right now', body: 'Several people reported this account, so it is suspended from study rooms for 24 hours.' },
+      blocked: { title: 'You were removed from this room', body: 'The person who owns this room removed you. You can still join other rooms.' },
+      error: { title: 'Could not join', body: 'Something went wrong reaching the room. Try again in a moment.' },
+    }[denied];
+
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-bg-dark p-6">
+        <div className="w-full max-w-md glass-panel rounded-[2rem] border border-white/10 p-8 space-y-5 text-center">
+          <div className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto text-white/50">
+            <Users size={24} />
+          </div>
+          <h2 className="text-xl font-black text-white tracking-tight">{copy.title}</h2>
+          <p className="text-white/50 text-sm leading-relaxed">{copy.body}</p>
+          <button
+            onClick={() => { setDenied(null); setActiveRoomId(''); }}
+            className="btn-primary w-full py-3 rounded-2xl font-bold"
+          >
+            Back to rooms
+          </button>
+          <button onClick={onClose} className="w-full py-2 text-white/40 hover:text-white text-sm font-medium transition-colors">
+            Leave
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!activeRoomId) {
     return (
       <div className="fixed inset-0 z-[100] flex items-center justify-center bg-bg-dark p-6">
@@ -301,18 +433,98 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
             </button>
           </div>
 
+          {/*
+            OPEN ROOMS.
+
+            Until now the only way in was a code somebody had to send you, which
+            works if you already have friends on the app and is a dead end if you
+            do not. These are rooms whose owner chose to be listed.
+          */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] text-white/40 font-black uppercase tracking-widest">Open Rooms</label>
+              <button
+                onClick={loadOpenRooms}
+                className="text-[10px] font-bold text-brand-purple hover:text-white transition-colors uppercase tracking-widest"
+              >
+                Refresh
+              </button>
+            </div>
+
+            {loadingRooms ? (
+              <p className="text-white/30 text-sm py-2">Looking…</p>
+            ) : openRooms.length === 0 ? (
+              <p className="text-white/30 text-sm py-2 leading-relaxed">
+                No open rooms right now. Make one below and tick “List publicly” so
+                other people can find it.
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-44 overflow-y-auto scrollbar-hide">
+                {openRooms.map((r) => (
+                  <button
+                    key={r.id}
+                    onClick={() => setActiveRoomId(r.id)}
+                    className="w-full flex items-center gap-3 p-3 rounded-2xl bg-white/5 border border-white/10 hover:border-brand-purple/40 transition-all text-left"
+                  >
+                    <span className="w-9 h-9 rounded-xl bg-brand-purple/20 border border-brand-purple/30 flex items-center justify-center text-brand-purple shrink-0">
+                      <Users size={15} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-bold text-white truncate">{r.title}</span>
+                      <span className="block text-[11px] text-white/40 font-mono">{r.id}</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-white/40 shrink-0">
+                      {r.members} in
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="flex items-center gap-3">
             <div className="h-px flex-1 bg-white/10" />
             <span className="text-white/20 text-[10px] font-black uppercase tracking-widest">Or</span>
             <div className="h-px flex-1 bg-white/10" />
           </div>
 
-          <button
-            onClick={handleCreateRoom}
-            className="w-full py-3 rounded-2xl bg-white/5 border border-white/10 text-white font-bold hover:border-brand-purple/40 hover:bg-white/10 transition-all"
-          >
-            Create New Room
-          </button>
+          <div className="space-y-3">
+            <input
+              type="text"
+              value={newRoomTitle}
+              onChange={(e) => setNewRoomTitle(e.target.value.slice(0, 60))}
+              placeholder="Room name — e.g. GCSE Biology revision"
+              className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white text-sm focus:outline-none focus:border-brand-purple/50 transition-all placeholder:text-white/20"
+            />
+
+            {/*
+              Unticked by default, and that is deliberate. The people in these
+              rooms are children, so being findable by strangers has to be a
+              thing you choose, never a thing that happens to you.
+            */}
+            <label className="flex items-start gap-3 p-3 rounded-2xl bg-white/5 border border-white/10 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={newRoomPublic}
+                onChange={(e) => setNewRoomPublic(e.target.checked)}
+                className="mt-0.5 w-4 h-4 accent-brand-purple shrink-0"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-bold text-white">List publicly</span>
+                <span className="block text-[11px] text-white/40 leading-relaxed">
+                  Anyone can find and join. Leave it off and only people with the
+                  code can get in.
+                </span>
+              </span>
+            </label>
+
+            <button
+              onClick={handleCreateRoom}
+              className="w-full py-3 rounded-2xl bg-white/5 border border-white/10 text-white font-bold hover:border-brand-purple/40 hover:bg-white/10 transition-all"
+            >
+              Create New Room
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -400,7 +612,17 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
         <div className="flex-1 overflow-y-auto p-6 space-y-8 scrollbar-hide">
           {/* Room Info */}
           <div className="space-y-4">
-            <div className="text-[10px] text-white/20 font-black uppercase tracking-widest">Share This Room</div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] text-white/20 font-black uppercase tracking-widest">Share This Room</span>
+              <span className={cn(
+                "text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded",
+                visibility === 'public'
+                  ? "bg-brand-purple/20 text-brand-purple"
+                  : "bg-white/10 text-white/40"
+              )}>
+                {visibility}
+              </span>
+            </div>
             <div className="flex items-center gap-2 p-3 bg-white/5 rounded-2xl border border-white/10 group">
               <code className="flex-1 text-sm font-mono text-white/60 truncate">{activeRoomId}</code>
               <button
@@ -410,26 +632,73 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
                 {copied ? <Check size={16} className="text-green-400" /> : <Copy size={16} />}
               </button>
             </div>
+
+            {/* Only the owner sees this, and the server checks that again. */}
+            {isOwner && (
+              <button
+                onClick={toggleVisibility}
+                className="w-full py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/70 hover:text-white hover:border-brand-purple/40 transition-all text-xs font-bold"
+              >
+                {visibility === 'public' ? 'Stop listing publicly' : 'List this room publicly'}
+              </button>
+            )}
           </div>
 
           {/* User List */}
           <div className="space-y-4">
             <div className="text-[10px] text-white/20 font-black uppercase tracking-widest">Participants</div>
             <div className="space-y-3">
-              {users.map((user) => (
-                <div key={user.id} className="flex items-center gap-3 p-3 rounded-2xl bg-white/5 border border-white/5 group hover:border-brand-purple/30 transition-all">
+              {users.map((user) => {
+                const isMe = user.id === socketRef.current?.id;
+                return (
+                <div key={user.id} className="relative flex items-center gap-3 p-3 rounded-2xl bg-white/5 border border-white/5 group hover:border-brand-purple/30 transition-all">
                   <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-white/40 group-hover:bg-brand-purple/20 group-hover:text-brand-purple transition-all">
                     <User size={20} />
                   </div>
-                  <div className="flex-1">
-                    <div className="text-sm font-bold text-white">{user.name}</div>
-                    <div className="text-[10px] text-white/20 font-medium">{user.id === socketRef.current?.id ? 'You' : 'Student'}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-bold text-white truncate">{user.name}</div>
+                    <div className="text-[10px] text-white/20 font-medium">{isMe ? 'You' : 'Student'}</div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                  </div>
+                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+
+                  {/*
+                    REPORTING AND BLOCKING, ON THE PERSON.
+
+                    Deliberately not `opacity-0 group-hover:opacity-100`: hover
+                    does not exist on a phone, and a child who needs this control
+                    is on a phone. It is always visible and a real tap target.
+                  */}
+                  {!isMe && (
+                    <button
+                      onClick={() => setMenuFor(menuFor === user.id ? null : user.id)}
+                      aria-label={`Options for ${user.name}`}
+                      className="p-2 -mr-1 rounded-lg text-white/30 hover:text-white hover:bg-white/10 transition-all shrink-0"
+                    >
+                      <MoreVertical size={16} />
+                    </button>
+                  )}
+
+                  {menuFor === user.id && !isMe && (
+                    <div className="absolute right-2 top-full mt-1 z-20 w-48 glass-panel rounded-xl border border-white/10 shadow-2xl overflow-hidden">
+                      <button
+                        onClick={() => reportUser(user.id, user.name)}
+                        className="w-full px-4 py-3 text-left text-sm font-bold text-white/70 hover:text-white hover:bg-white/10 transition-all"
+                      >
+                        Report
+                      </button>
+                      {isOwner && (
+                        <button
+                          onClick={() => blockUser(user.id, user.name)}
+                          className="w-full px-4 py-3 text-left text-sm font-bold text-red-400 hover:bg-red-500/10 transition-all border-t border-white/5"
+                        >
+                          Remove from room
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
