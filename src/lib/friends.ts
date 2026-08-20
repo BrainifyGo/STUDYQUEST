@@ -25,7 +25,7 @@ import {
   db, auth, doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs,
   onSnapshot, Timestamp, orderBy, limit,
 } from './firebase';
-import { checkUsernameSafety, checkDisplayNameSafety, safetyMessage } from './usernameSafety';
+import { checkUsernameSafety, checkDisplayNameSafety, safetyMessage, usernameShapeProblem } from './usernameSafety';
 
 export interface FriendRequest {
   id: string;
@@ -85,11 +85,8 @@ function me(): string {
  */
 export function usernameProblem(name: string): string | null {
   const u = name.trim().toLowerCase();
-  if (u.length < 3) return 'Usernames need at least 3 characters.';
-  if (u.length > 20) return 'Usernames can be at most 20 characters.';
-  if (!/^[a-z0-9._]+$/.test(u)) return 'Use letters, numbers, dots and underscores only.';
-  if (/^[._]|[._]$/.test(u)) return 'It cannot start or end with a dot or underscore.';
-  if (/[._]{2,}/.test(u)) return 'No two dots or underscores in a row.';
+  const shape = usernameShapeProblem(u);
+  if (shape) return shape;
 
   /*
     SHAPE FIRST, THEN MEANING.
@@ -122,35 +119,20 @@ export async function isUsernameFree(name: string): Promise<boolean> {
  * exists, and on the rules forbidding `update` — so two people racing for the
  * same name cannot both win, with no transaction and no server.
  */
+/**
+ * Claim a username.
+ *
+ * The write itself happens on the server (`POST /api/identity`), because the
+ * safety filter has to run somewhere the browser cannot skip. The shape and
+ * safety checks still run HERE as well, so the form can tell you what is wrong
+ * as you type rather than after a round trip — but the server repeats both, and
+ * the server's answer is the one that counts.
+ */
 export async function claimUsername(name: string, displayName: string, email: string | null): Promise<void> {
-  const uid = me();
   const u = normaliseUsername(name);
   const problem = usernameProblem(u);
   if (problem) throw new Error(problem);
-
-  const existing = await getDoc(doc(db, 'usernames', u));
-  if (existing.exists()) {
-    if ((existing.data() as any)?.uid !== uid) throw new Error('That username is taken.');
-    return;                                   // already yours; nothing to do
-  }
-
-  // The old name is released only after the new one is secured, so a failure
-  // here leaves you with your existing username rather than none at all.
-  const profile = await getDoc(doc(db, 'public_profiles', uid));
-  const previous = (profile.data() as any)?.username as string | undefined;
-
-  await setDoc(doc(db, 'usernames', u), { uid });
-  await publishProfile(displayName, email, u);
-
-  if (previous && previous !== u) {
-    try {
-      await deleteDoc(doc(db, 'usernames', previous));
-    } catch (err) {
-      // A stranded claim costs one unusable name; failing the rename here would
-      // cost the user their new one.
-      console.warn('[friends] could not release the old username:', err);
-    }
-  }
+  await postIdentity({ username: u, displayName, email });
 }
 
 /* -------------------------------------------------------------- profiles */
@@ -172,31 +154,44 @@ export async function publishProfile(
   email: string | null,
   username?: string
 ): Promise<void> {
-  const uid = auth.currentUser?.uid;
-  if (!uid) return;
-  let name = (displayName || email?.split('@')[0] || 'Student').slice(0, 60);
-  // A filtered username beside an unfiltered display name is not a filter — the
-  // display name is what people actually read in a friends list.
-  if (!checkDisplayNameSafety(name).ok) name = 'Student';
-
-  const payload: Record<string, unknown> = {
-    uid,
-    displayName: name,
-    displayLower: name.toLowerCase(),
-    emailLower: (email || '').toLowerCase().slice(0, 256),
-  };
-
-  // Never blank an existing username by republishing without one — this runs on
-  // every sign-in, and that would silently unclaim the name every time.
-  const current = username ?? (await getDoc(doc(db, 'public_profiles', uid))).data()?.username;
-  if (current) payload.username = current;
-
+  if (!auth.currentUser) return;
   try {
-    await setDoc(doc(db, 'public_profiles', uid), payload);
+    await postIdentity({ username, displayName, email });
   } catch (err) {
     // Not being findable is a smaller problem than not being able to sign in.
     console.warn('[friends] could not publish profile:', err);
   }
+}
+
+/**
+ * The one route that writes `usernames` and `public_profiles`.
+ *
+ * Both collections refuse client writes now — see the note on /api/identity in
+ * server.ts, and the proof that the old client-side filter could be walked
+ * straight past with a REST call.
+ */
+async function postIdentity(body: {
+  username?: string;
+  displayName: string;
+  email: string | null;
+}): Promise<{ username?: string; displayName: string }> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sign in first.');
+  const idToken = await user.getIdToken();
+
+  const res = await fetch('/api/identity', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({
+      username: body.username,
+      displayName: body.displayName,
+      email: body.email || '',
+    }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as any).error || 'Could not save that.');
+  return data as any;
 }
 
 export async function myProfile(): Promise<{ username?: string; displayName?: string } | null> {

@@ -2579,3 +2579,81 @@ Test key and both test accounts were deleted afterwards, and the deletion verifi
 6. Password reset by pasted code rather than an emailed link.
 7. Study rooms: shared notes and shared quiz; public/private rooms; reporting and blocking.
 8. Mic and video calls (port from GhostChat).
+
+---
+
+## [2026-08-20] — The username filter was never a gate
+
+**Editor:** Claude Code (Opus 5)
+
+RED: *"you could make inappropriate usernames … you can find a way around it."*
+
+### Proved before fixing
+
+The slur filter in `lib/usernameSafety.ts` is good — confusables folded, separators stripped,
+repeated letters collapsed, so `n1gger`, `n.i.g.g.e.r` and `niiigger` all normalise to the same
+string. None of that mattered, because **it only ever ran in the browser.** The Firestore rules
+for `usernames/{name}` checked length and `^[a-z0-9._]+$` and nothing else.
+
+Tested against the deployed rules with a throwaway account, POSTing straight to the Firestore
+REST API:
+
+```
+claim "<slur>" straight to Firestore -> HTTP 200
+** BYPASS CONFIRMED ** the filter is client-side only.
+```
+
+It had never been a gate. It was a suggestion the sign-up form made to people who used the
+sign-up form. The same was true of `public_profiles.displayName`, which is the string people
+actually read in a friends list.
+
+### The gate moved to the server
+
+Rules cannot run that filter — it needs confusable folding, separator stripping and run
+collapsing, none of which exist in the rules language. So `usernames` and `public_profiles` now
+refuse client writes entirely (`allow create: if false`), and `POST /api/identity` is the only way
+in. It verifies the token, runs the same shape and safety checks the form runs, and writes with
+admin credentials, which bypass rules by design.
+
+**Atomicity was preserved.** The old client flow relied on Firestore `create` failing when the
+document exists, with `update` forbidden, so two people racing for one name could not both win.
+The Admin SDK's `.create()` fails the same way, so the race is still decided by the database
+rather than by checking first and hoping.
+
+`usernameShapeProblem()` moved from `friends.ts` into `usernameSafety.ts`, because `friends.ts`
+imports the Firebase **client** SDK and the server cannot reach it without pulling a browser
+library into Node. A shape check the server cannot run is one the server has to duplicate, and a
+duplicated validator drifts.
+
+### Verified after deploying the rules
+
+Bypass routes, all against the live deployed rules:
+
+```
+1. slur, direct to Firestore   -> HTTP 403  DENIED
+2. clean name, direct          -> HTTP 403  DENIED (server-only, correct)
+3. slur as displayName, direct -> HTTP 403  DENIED
+```
+
+And the legitimate path, against the real endpoint — because a filter that also breaks sign-up is
+not a fix:
+
+```
+1. claim a clean name        -> 200  {"ok":true,"username":"testuser88223"}
+2. B claims the SAME name    -> 409  "That username is taken."
+3. B claims a slur           -> 400  "That username is not allowed."
+4. B sets slur as display    -> 200  displayName="Student"   (scrubbed)
+5. A renames                 -> 200  old name released: yes
+```
+
+All test accounts and names were deleted afterwards, and the deletion verified.
+
+### Files
+- `server.ts` — `POST /api/identity`.
+- `firestore.rules` — `usernames` and `public_profiles` writes denied to clients.
+- `src/lib/usernameSafety.ts` — `usernameShapeProblem()`.
+- `src/lib/friends.ts` — `claimUsername` and `publishProfile` go through the server.
+
+### Note
+The client still runs both checks, so the form can say what is wrong as you type rather than
+after a round trip. The server repeats both, and the server's answer is the one that counts.

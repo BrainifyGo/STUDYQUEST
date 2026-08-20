@@ -12,6 +12,7 @@ import { generateWithAI, analyzeImage } from "./src/lib/aiProviders.server";
 import { getMonthlyLimit, getDailyLimit, estimateTokens, getExpandMessageCost, TOKEN_LIMIT_EXCEEDED, TOKEN_MONTHLY_LIMIT_EXCEEDED, currentMonthKey, currentDayKey } from "./src/lib/tokenService";
 import { can, planOf, type Feature } from "./src/lib/entitlements";
 import { eraseAccount } from "./src/lib/accountData.server";
+import { checkUsernameSafety, checkDisplayNameSafety, safetyMessage, usernameShapeProblem } from "./src/lib/usernameSafety";
 
 dotenv.config();
 
@@ -465,6 +466,103 @@ async function startServer() {
     The Admin SDK has none of those limits. Authorisation is the ID token: you
     may only erase yourself.
   */
+  /*
+    IDENTITY IS WRITTEN HERE, NOT BY THE BROWSER.
+
+    Usernames and display names are the two strings other children read: in a
+    friends list, in a study room, on a challenge scoreboard. Both were filtered
+    in `lib/usernameSafety.ts` — and both filters ran ONLY in the browser, while
+    the Firestore rules checked nothing but shape (3-20 chars, `^[a-z0-9._]+$`).
+
+    Proved on 2026-08-20 against the deployed rules: a signed-in account POSTed
+    straight to the Firestore REST API and claimed a slur as its username. HTTP
+    200. The filter had never been a gate — it was a suggestion the sign-up form
+    made to people who used the sign-up form.
+
+    So the rules now refuse `usernames` and `public_profiles` writes from clients
+    entirely, and this route is the only way in. It runs the same shape check and
+    the same safety check the form runs, then writes with admin credentials.
+
+    ATOMICITY IS PRESERVED. The old client flow relied on Firestore `create`
+    failing when the document exists, with `update` forbidden, so two people
+    racing for one name could not both win. `.create()` on the Admin SDK fails
+    the same way, so the race is still decided by the database rather than by
+    checking first and hoping.
+  */
+  app.post('/api/identity', async (req, res) => {
+    const header = req.headers.authorization;
+    if (!header?.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Sign in first.' });
+    }
+
+    let uid: string;
+    try {
+      uid = (await admin.auth().verifyIdToken(header.slice(7))).uid;
+    } catch {
+      return res.status(401).json({ error: 'Sign in first.' });
+    }
+
+    const db = admin.firestore();
+    const rawUsername = typeof req.body?.username === 'string' ? req.body.username : '';
+    const rawDisplay = typeof req.body?.displayName === 'string' ? req.body.displayName : '';
+    const email = typeof req.body?.email === 'string' ? req.body.email : '';
+
+    // The display name is what people actually read, so an unfiltered one beside
+    // a filtered username would not be a filter at all.
+    let displayName = (rawDisplay || email.split('@')[0] || 'Student').slice(0, 60);
+    if (!checkDisplayNameSafety(displayName).ok) displayName = 'Student';
+
+    const profileRef = db.doc(`public_profiles/${uid}`);
+    const existing = (await profileRef.get()).data() || {};
+    let username: string | undefined = existing.username;
+
+    if (rawUsername) {
+      const wanted = rawUsername.trim().toLowerCase();
+
+      const shape = usernameShapeProblem(wanted);
+      if (shape) return res.status(400).json({ error: shape });
+
+      const verdict = checkUsernameSafety(wanted);
+      if (!verdict.ok) {
+        return res.status(400).json({ error: safetyMessage(verdict.reason || 'offensive') });
+      }
+
+      if (wanted !== username) {
+        try {
+          // Fails if it already exists. That failure IS the lock.
+          await db.doc(`usernames/${wanted}`).create({ uid });
+        } catch {
+          const holder = (await db.doc(`usernames/${wanted}`).get()).data() as any;
+          if (holder?.uid !== uid) {
+            return res.status(409).json({ error: 'That username is taken.' });
+          }
+        }
+
+        const previous = username;
+        username = wanted;
+
+        // Released only after the new one is secured, so a failure here leaves
+        // you with a spare name rather than none.
+        if (previous && previous !== wanted) {
+          await db.doc(`usernames/${previous}`).delete().catch(() => {});
+        }
+      }
+    }
+
+    const payload: Record<string, unknown> = {
+      uid,
+      displayName,
+      displayLower: displayName.toLowerCase(),
+      emailLower: email.toLowerCase().slice(0, 256),
+    };
+    // Never blank an existing username by republishing without one — this runs
+    // on every sign-in, and that would silently unclaim the name each time.
+    if (username) payload.username = username;
+
+    await profileRef.set(payload);
+    return res.json({ ok: true, username, displayName });
+  });
+
   app.post('/api/delete-account', async (req, res) => {
     const header = req.headers.authorization;
     if (!header?.startsWith('Bearer ')) {

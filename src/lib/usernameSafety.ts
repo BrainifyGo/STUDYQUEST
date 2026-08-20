@@ -193,3 +193,22 @@ export function safetyMessage(reason: 'offensive' | 'reserved'): string {
  * anyway, so the same function does the job.
  */
 export const checkDisplayNameSafety = checkUsernameSafety;
+
+/**
+ * SHAPE, not meaning — and it lives here so the SERVER can use it too.
+ *
+ * This was in `friends.ts`, which imports the Firebase *client* SDK, so the
+ * server could not reach it without pulling a browser library into Node. That
+ * mattered once the real gate moved server-side: a shape check the server cannot
+ * run is a shape check the server has to duplicate, and a duplicated validator
+ * drifts. This module imports nothing, so both sides call the same function.
+ */
+export function usernameShapeProblem(name: string): string | null {
+  const u = name.trim().toLowerCase();
+  if (u.length < 3) return 'Usernames need at least 3 characters.';
+  if (u.length > 20) return 'Usernames can be at most 20 characters.';
+  if (!/^[a-z0-9._]+$/.test(u)) return 'Use letters, numbers, dots and underscores only.';
+  if (/^[._]|[._]$/.test(u)) return 'It cannot start or end with a dot or underscore.';
+  if (/[._]{2,}/.test(u)) return 'No two dots or underscores in a row.';
+  return null;
+}

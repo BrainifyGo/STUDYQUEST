@@ -441,21 +441,12 @@ service cloud.firestore {
     match /public_profiles/{userId} {
       allow read: if isAuthenticated();
 
-      allow create, update: if isAuthenticated()
-                            && request.auth.uid == userId
-                            && request.resource.data.uid == userId
-                            && request.resource.data.keys().hasOnly(['uid', 'username', 'displayName', 'displayLower', 'emailLower'])
-                            && request.resource.data.displayName is string
-                            && request.resource.data.displayName.size() <= 60
-                            && (!('username' in request.resource.data)
-                                || (request.resource.data.username is string
-                                    && request.resource.data.username.size() <= 32))
-                            && (!('emailLower' in request.resource.data)
-                                || (request.resource.data.emailLower is string
-                                    && request.resource.data.emailLower.size() <= 256))
-                            && (!('displayLower' in request.resource.data)
-                                || (request.resource.data.displayLower is string
-                                    && request.resource.data.displayLower.size() <= 60));
+      /*
+        Written only by POST /api/identity, for the same reason as `usernames`
+        above: `displayName` is what people actually read in a friends list, and
+        a filtered username beside an unfiltered display name is not a filter.
+      */
+      allow create, update: if false;
 
       allow delete: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
     }
@@ -475,11 +466,21 @@ service cloud.firestore {
       // It holds a uid and nothing else.
       allow read: if isAuthenticated();
 
-      allow create: if isAuthenticated()
-                    && request.resource.data.uid == request.auth.uid
-                    && request.resource.data.keys().hasOnly(['uid'])
-                    && name.size() >= 3 && name.size() <= 20
-                    && name.matches('^[a-z0-9._]+$');
+      /*
+        CLIENTS MAY NO LONGER CREATE A USERNAME.
+
+        These conditions checked SHAPE and nothing else, so the slur filter in
+        lib/usernameSafety.ts — which only ever ran in the browser — could be
+        walked straight past. Proved on 2026-08-20: a signed-in account POSTed to
+        the Firestore REST API and claimed a slur. HTTP 200.
+
+        Rules cannot run that filter; it needs confusable folding, separator
+        stripping and run collapsing, none of which exist here. So the claim now
+        goes through POST /api/identity, which runs the real check and writes
+        with admin credentials (which bypass these rules). Denying create here is
+        what makes that route the only way in.
+      */
+      allow create: if false;
 
       // Never rewritten — that is what makes the create above a lock.
       allow update: if false;
