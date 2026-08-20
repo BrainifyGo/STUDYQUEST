@@ -331,3 +331,29 @@ body[data-keyboard='open'] {
 body[data-keyboard='open'] .hide-when-typing {
   display: none;
 }
+
+/*
+  NATIVE DROPDOWNS ARE DRAWN BY THE OPERATING SYSTEM, NOT BY THIS STYLESHEET.
+
+  A <select> styled with `text-text-main` gets near-white text in dark mode. The
+  <option> rows inside it, though, are painted by the OS on its own default
+  background — which is white — while still inheriting that near-white colour.
+  The result is white text on white: the friend picker on the Challenges screen
+  looked completely empty, which is what Daniel hit when he tried to pick
+  somebody to challenge.
+
+  Options accept very few CSS properties, but colour and background-color are two
+  of them, so both are stated explicitly here rather than inherited. Set on every
+  select in the app, because the next one added would have had the same bug.
+*/
+select {
+  color: var(--text-main);
+  /* Opaque on purpose: a translucent value composites against the OS dropdown,
+     not against the page, and comes out wrong in both themes. */
+  background-color: var(--bg-secondary);
+}
+
+select option {
+  color: var(--text-main);
+  background-color: var(--bg-secondary);
+}

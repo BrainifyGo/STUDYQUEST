@@ -58,10 +58,51 @@ const runFallbackChain = async (
     }
   }
 
-  // Logged in full for us; the user-facing half stays short.
+  /*
+    "BUSY" IS A DIAGNOSIS, AND IT WAS THE WRONG ONE.
+
+    Every failure here reported "All AI services are currently busy", which reads
+    as rate limiting and tells you to wait. On 2026-08-20 that message was shown
+    for a completely different cause: the provider keys had been rotated and the
+    new ones were never added to Render, so every call failed instantly with an
+    auth error. The site said "busy, try again", and waiting could never fix it.
+    It failed in 1.1s -- far too fast to have been busy, if anyone had been able
+    to see that number.
+
+    A key that is missing, revoked or malformed is not a busy service. Saying so
+    turns an afternoon of guessing into one glance.
+  */
+  const isAuth = (f: string) =>
+    /(^|\W)(401|403)(\W|$)|invalid|unauthor|api[ _-]?key|credential|permission denied/i.test(f);
+  const isRate = (f: string) =>
+    /(^|\W)429(\W|$)|quota|rate.?limit|exceeded|too many requests/i.test(f);
+
   console.error('All providers failed:\n  ' + failures.join('\n  '));
-  const err: any = new Error('All AI services are currently busy. Please try again.');
+
+  let message: string;
+  let kind: 'unconfigured' | 'auth' | 'ratelimit' | 'mixed';
+  if (!failures.length) {
+    // Nothing was even attempted, so no provider had a key set.
+    kind = 'unconfigured';
+    message = 'No AI provider is configured on the server.';
+  } else if (failures.every(isAuth)) {
+    kind = 'auth';
+    message =
+      'The server’s AI keys are being rejected — they are missing, expired or ' +
+      'mistyped. Waiting will not fix this one.';
+  } else if (failures.every(isRate)) {
+    kind = 'ratelimit';
+    message = 'Every AI service has hit its limit for now. Please try again shortly.';
+  } else {
+    kind = 'mixed';
+    message = 'All AI services are currently busy. Please try again.';
+  }
+
+  const err: any = new Error(message);
   err.providerFailures = failures;
+  // Lets a route tell "the configuration is broken" apart from "come back later"
+  // without re-parsing the message text.
+  err.kind = kind;
   throw err;
 };
 

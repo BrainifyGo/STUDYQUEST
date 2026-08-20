@@ -2490,3 +2490,92 @@ full-width with every label; ambient layers stack and the Focus tones list corre
 generative music plays and the bar's minimise / expand / stop all work; friend search runs
 without the permissions error and returns the honest "Nobody found" message; password reset,
 data export and delete account are all present in Settings.
+
+---
+
+## [2026-08-20] — "All AI services are busy" was the wrong diagnosis
+
+**Editor:** Claude Code (Opus 5)
+
+Three reports from RED and Daniel that turned out to share one cause, plus one that turned out
+not to be a bug at all.
+
+### Study kits and the Arcade were the same failure
+
+Reproduced against the live site with a throwaway account:
+
+```
+POST /api/generate -> HTTP 500 in 1.1s
+{"error":"All AI services are currently busy. Please try again."}
+```
+
+**1.1 seconds.** Too fast to have tried five providers. The keys were rotated and the new ones
+were never added to Render, so every call failed instantly on auth — and the site reported it as
+the service being busy, which tells you to wait for something that waiting cannot fix.
+
+The Arcade's *"Could not make questions for that. Try a simpler topic."* is the same failure
+wearing a worse hat: it is the catch-all for **every** exception in `generateRound`, so a dead API
+key is reported as the topic being too hard. That is why easier topics did not help — the topic
+was never the problem.
+
+`runFallbackChain` now classifies what actually happened instead of assuming rate limiting:
+
+| Cause | What it says |
+|---|---|
+| No provider has a key | "No AI provider is configured on the server." |
+| Every failure is 401/403/invalid key | "The server's AI keys are being rejected — they are missing, expired or mistyped. Waiting will not fix this one." |
+| Every failure is 429/quota | "Every AI service has hit its limit for now." |
+| A mix | The original "busy" message, which is now only used when it is true. |
+
+`err.kind` carries the same distinction as a value, so a route can tell "the configuration is
+broken" from "come back later" without matching on message text.
+
+### The friend picker was invisible, and that is why challenges "didn't work"
+
+The Challenges screen renders a native `<select>` with `text-text-main` — near-white in dark
+mode. The `<option>` rows inside it are drawn by the **operating system**, on the OS's own white
+background, while still inheriting that near-white text. White on white: the list looked empty.
+
+With no friend selectable, `disabled={... || !target}` kept the Challenge button dead. The
+feature was working; nobody could reach it.
+
+Fixed globally rather than on this one control, since the app has a second `<select>` and the
+next one added would have had the same bug. Options accept very few CSS properties, but `color`
+and `background-color` are two of them, so both are now stated explicitly instead of inherited.
+
+### The key that worked on three accounts was not a security hole
+
+RED reported a redeem key working on two accounts. It was worse than reported — three accounts
+carried `redeemedKey: SQ-YAUU-…`. The second key was also in an impossible state: `isUsed: false`
+while still stamped with a `usedBy`.
+
+That state cannot be produced by the app, only by an admin edit. Verified against the **deployed**
+rules with two throwaway accounts and a throwaway key:
+
+```
+A claims unused key      -> HTTP 200  ALLOWED (correct)
+B claims the SAME key    -> HTTP 403  DENIED  (correct)
+key now: isUsed=true usedBy=A
+```
+
+Single-use holds. The key had been reset to `isUsed: false` in the Firebase console between
+redemptions — which an admin account can do, and RED is an admin. **Mint a fresh key for testing
+(`npm run keys`) rather than resetting a spent one**; resetting is what produced three accounts
+sharing one key.
+
+Test key and both test accounts were deleted afterwards, and the deletion verified.
+
+### Files
+- `src/lib/aiProviders.server.ts` — failure classification and `err.kind`.
+- `src/index.css` — explicit `select` / `select option` colours.
+
+### Still open, in priority order
+1. **The rotated AI keys are still not on Render.** Nothing above fixes generation; only adding
+   them does. This is the blocker for study kits, the Arcade and shared quizzes.
+2. Challenges screen styling does not match the rest of the app.
+3. The username filter can still be worked around.
+4. Settings → Subscription is cut off on mobile.
+5. Tapping your profile should open Settings.
+6. Password reset by pasted code rather than an emailed link.
+7. Study rooms: shared notes and shared quiz; public/private rooms; reporting and blocking.
+8. Mic and video calls (port from GhostChat).
