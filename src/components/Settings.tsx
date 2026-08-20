@@ -22,6 +22,7 @@ import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { TokenUsageBar } from './TokenUsageBar';
 import { checkDisplayNameSafety, safetyMessage } from '../lib/usernameSafety';
+import PasswordResetDialog from './PasswordResetDialog';
 import { toast } from 'sonner';
 
 type SettingsTab = 'notifications' | 'privacy' | 'subscription';
@@ -186,6 +187,8 @@ export const Settings: React.FC = () => {
     reachable only by a horizontal scroll with no affordance suggesting it was
     there. Daniel reported it, reasonably, as the Subscription tab being missing.
   */
+  const [showResetDialog, setShowResetDialog] = useState(false);
+
   const tabs: { id: SettingsTab; label: string; short: string; icon: typeof Bell }[] = [
     { id: 'notifications', label: 'Notifications', short: 'Alerts', icon: Bell },
     { id: 'privacy', label: 'Privacy & Security', short: 'Privacy', icon: Shield },
@@ -194,6 +197,12 @@ export const Settings: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 animate-fade-up">
+      {showResetDialog && (
+        <PasswordResetDialog
+          initialEmail={user?.email || ''}
+          onClose={() => setShowResetDialog(false)}
+        />
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-black tracking-tight text-text-main">Settings</h1>
@@ -364,20 +373,37 @@ export const Settings: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center justify-between py-2 border-t border-border-main pt-4">
-              <div className="space-y-0.5">
+            {/*
+              CODE FIRST, LINK SECOND.
+
+              RED asked for a code you paste in rather than a link you click.
+              The link is kept underneath because the code flow needs email
+              configured on the server, and a reset that is unavailable is worse
+              than an old-fashioned one that works.
+            */}
+            <div className="flex items-center justify-between py-2 border-t border-border-main pt-4 gap-3">
+              <div className="space-y-0.5 min-w-0">
                 <div className="text-sm font-bold text-text-main">Change Password</div>
-                <div className="text-xs text-text-dim">Sends a password reset link to {user?.email || 'your email'}</div>
+                <div className="text-xs text-text-dim">
+                  We email a 6-digit code to {user?.email || 'your email'} and you type it in here
+                </div>
               </div>
               <button
-                onClick={handleChangePassword}
-                disabled={!user?.email}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-glass-bg border border-border-main text-text-main text-sm font-bold hover:border-brand-purple/50 transition-all disabled:opacity-50 shrink-0"
+                onClick={() => setShowResetDialog(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-glass-bg border border-border-main text-text-main text-sm font-bold hover:border-brand-purple/50 transition-all shrink-0"
               >
                 <KeyRound size={16} />
-                <span>{resetEmailSent ? 'Email Sent!' : 'Send Reset Link'}</span>
+                <span>Change</span>
               </button>
             </div>
+
+            <button
+              onClick={handleChangePassword}
+              disabled={!user?.email}
+              className="text-xs text-text-dim hover:text-text-main transition-colors underline underline-offset-2 disabled:opacity-40 -mt-2 text-left"
+            >
+              {resetEmailSent ? 'Reset link sent' : 'Or email me a reset link instead'}
+            </button>
 
             {resetError && (
               <p className="text-xs text-red-400 -mt-2">{resetError}</p>

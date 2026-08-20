@@ -2873,3 +2873,75 @@ real browsers. The `Peer` class is a near-verbatim port of code already working 
 
 ### Files
 `server.ts`, `src/lib/call/*`, `src/components/CollaborativeRoom.tsx`.
+
+---
+
+## [2026-08-20] — Password reset by code, and the email sender both it and reminders needed
+
+**Editor:** Claude Code (Opus 5)
+
+RED: *"i thought it would be better with a version where they send you a code and you paste the
+code in the app and from there you change the password"*.
+
+### Why a code beats a link here
+
+Firebase's reset emails a **link**, and that is not a setting you can flip — a link and a code are
+different flows. The link is also a poor fit for how this gets used: the email usually arrives on a
+phone while you are sat at the laptop you are locked out of, and tapping it signs you in on the
+wrong device. A six-digit code you read off one screen and type into another does not care which
+device it landed on.
+
+### One email sender, because two features were waiting on it
+
+Reset-by-code and the study-planner reminders — which have been saving reminders nobody ever
+receives — both needed the same missing thing. `src/lib/email.server.ts` is that, via Resend: one
+HTTPS POST with an API key, no SMTP, no new dependency, 3,000 emails a month free.
+
+**It is optional and fails loudly.** With no key set, `sendEmail` throws rather than pretending, and
+the reset route answers *"not switched on yet — use Send reset link instead"*. A reset that
+silently sends nothing is worse than one that admits it is unavailable: the person sits waiting for
+an email that was never coming.
+
+### Five properties, each a real attack if missed
+
+| | Why |
+|---|---|
+| The response never reveals whether an account exists | Otherwise this is a free tool for checking which of your classmates has an account. `request-code` returns the same 200 either way. |
+| The code is stored **hashed** | A Firestore read — leaked service account, mis-set rule — must not hand over live reset codes for every account mid-reset. |
+| It expires | Ten minutes. |
+| Attempts are capped | Six digits is a million combinations, which sounds plenty until you try them all in a loop. Five wrong guesses burns the code. |
+| Verifying returns a **one-use ticket** | Without it the final step would have to trust an email address it was handed. |
+
+`crypto.randomInt` generates the code, not `Math.random() * 900000` — the latter is not uniform, and
+a reset code is the wrong place to be lazy about that. `password_resets` is closed to every client
+in the rules; only the server touches it.
+
+A successful reset **revokes every refresh token**. Someone resetting a password may be doing it
+*because* another person is in their account, and leaving that person signed in defeats the point.
+
+### Verified
+
+```
+1. real vs unknown email look the same  PASS      6. a forged ticket is refused        PASS
+2. wrong code rejected                  PASS      7. valid ticket changes password     PASS
+   the attempt was counted              PASS         the new password signs in         PASS
+3. correct code refused once capped     PASS         the old password stops working    PASS
+4. expired code refused                 PASS      8. reset record deleted afterwards   PASS
+5. correct code returns a ticket        PASS         the ticket cannot be reused       PASS
+   code hash cleared after use          PASS
+```
+
+Sign-in was checked against the real Firebase auth API, both ways round.
+
+**Where that test is weaker than it looks:** check 1 passed because *both* requests hit the
+"email not configured" path, so it proves the two responses match without exercising the
+enumeration guard itself. That guard is written and reviewed but genuinely untested until
+`RESEND_API_KEY` exists. Worth re-running then.
+
+### To switch it on
+Add `RESEND_API_KEY` to Render (and `.env` locally). Both are documented in `.env.example`. Until
+then the emailed reset link still works and is offered underneath the code flow.
+
+### Files
+`src/lib/email.server.ts`, `src/components/PasswordResetDialog.tsx`, `server.ts`,
+`src/components/Settings.tsx`, `firestore.rules`, `.env.example`.

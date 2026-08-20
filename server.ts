@@ -13,6 +13,7 @@ import { getMonthlyLimit, getDailyLimit, estimateTokens, getExpandMessageCost, T
 import { can, planOf, type Feature } from "./src/lib/entitlements";
 import { eraseAccount } from "./src/lib/accountData.server";
 import { checkUsernameSafety, checkDisplayNameSafety, safetyMessage, usernameShapeProblem } from "./src/lib/usernameSafety";
+import { sendEmail, resetCodeEmail, emailConfigured } from "./src/lib/email.server";
 
 dotenv.config();
 
@@ -738,6 +739,169 @@ async function startServer() {
     the same way, so the race is still decided by the database rather than by
     checking first and hoping.
   */
+  /*
+    PASSWORD RESET BY CODE.
+
+    Firebase's own reset sends a LINK, and RED wanted a code you paste into the
+    app. That is not a setting — a link and a code are different flows — so this
+    is built here, and it is built carefully, because a reset endpoint is the
+    softest way into somebody's account.
+
+    Five properties matter, and each one is a real attack if missed:
+
+      1. THE RESPONSE NEVER SAYS WHETHER THE ACCOUNT EXISTS. `request-code`
+         returns the same 200 either way. Otherwise this becomes a free tool for
+         checking which of your classmates has an account.
+      2. THE CODE IS STORED HASHED. A Firestore read — a leaked service account,
+         a mis-set rule — must not hand over live reset codes for every account
+         mid-reset.
+      3. IT EXPIRES. Ten minutes.
+      4. ATTEMPTS ARE CAPPED. Six digits is a million combinations, which sounds
+         plenty until you try them all in a loop. Five wrong guesses burns the
+         code.
+      5. VERIFYING RETURNS A ONE-USE TICKET, not "you may now set a password".
+         Without it, `reset` would have to trust an email address it was handed.
+
+    The document lives at `password_resets/{uid}` and clients can neither read
+    nor write it — see firestore.rules. Only this code touches it, with admin
+    credentials.
+  */
+  const RESET_CODE_TTL_MS = 10 * 60 * 1000;
+  const RESET_MAX_ATTEMPTS = 5;
+  const RESET_COOLDOWN_MS = 60 * 1000;
+
+  const hashCode = (code: string, uid: string) =>
+    crypto.createHash('sha256').update(`${uid}:${code}`).digest('hex');
+
+  app.post('/api/password/request-code', async (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'Enter your email address.' });
+
+    // The same answer whichever way it goes. See property 1 above.
+    const vague = () => res.json({ ok: true });
+
+    if (!emailConfigured()) {
+      console.error('[reset] RESEND_API_KEY is not set — cannot send reset codes.');
+      return res.status(503).json({
+        error: 'Password reset by code is not switched on yet. Use “Send reset link” instead.',
+      });
+    }
+
+    let uid: string;
+    try {
+      uid = (await admin.auth().getUserByEmail(email)).uid;
+    } catch {
+      return vague();          // no such account — say nothing either way
+    }
+
+    const db = admin.firestore();
+    const ref = db.collection('password_resets').doc(uid);
+
+    // One code a minute. Stops this being a way to flood somebody's inbox.
+    const existing = (await ref.get()).data();
+    if (existing?.sentAt && Date.now() - existing.sentAt < RESET_COOLDOWN_MS) {
+      return vague();
+    }
+
+    // randomInt is uniform; `Math.random() * 900000` is not, and a reset code is
+    // exactly the wrong place to be lazy about that.
+    const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+
+    await ref.set({
+      uid,
+      codeHash: hashCode(code, uid),
+      expiresAt: Date.now() + RESET_CODE_TTL_MS,
+      attempts: 0,
+      sentAt: Date.now(),
+      ticket: null,
+    });
+
+    try {
+      await sendEmail({ to: email, ...resetCodeEmail(code) });
+    } catch (err) {
+      console.error('[reset] could not send code:', err);
+      return res.status(502).json({ error: 'Could not send the email. Try again in a moment.' });
+    }
+
+    return vague();
+  });
+
+  app.post('/api/password/verify-code', async (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const code = String(req.body?.code || '').replace(/\D/g, '');
+    if (!email || code.length !== 6) {
+      return res.status(400).json({ error: 'Enter the 6-digit code from your email.' });
+    }
+
+    let uid: string;
+    try {
+      uid = (await admin.auth().getUserByEmail(email)).uid;
+    } catch {
+      // Same wording as a wrong code, so this cannot be used to probe for
+      // accounts either.
+      return res.status(400).json({ error: 'That code is wrong or has expired.' });
+    }
+
+    const ref = admin.firestore().collection('password_resets').doc(uid);
+    const data = (await ref.get()).data();
+
+    if (!data || Date.now() > (data.expiresAt || 0)) {
+      return res.status(400).json({ error: 'That code is wrong or has expired.' });
+    }
+    if ((data.attempts || 0) >= RESET_MAX_ATTEMPTS) {
+      await ref.delete().catch(() => {});
+      return res.status(429).json({ error: 'Too many attempts. Ask for a new code.' });
+    }
+
+    if (data.codeHash !== hashCode(code, uid)) {
+      await ref.update({ attempts: (data.attempts || 0) + 1 });
+      return res.status(400).json({ error: 'That code is wrong or has expired.' });
+    }
+
+    // Correct. Swap the code for a single-use ticket, so the last step never has
+    // to take an email address on trust.
+    const ticket = crypto.randomBytes(32).toString('hex');
+    await ref.update({ ticket, ticketExpiresAt: Date.now() + RESET_CODE_TTL_MS, codeHash: null });
+
+    return res.json({ ok: true, ticket });
+  });
+
+  app.post('/api/password/reset', async (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const ticket = String(req.body?.ticket || '');
+    const password = String(req.body?.password || '');
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Passwords need at least 6 characters.' });
+    }
+    if (!ticket) return res.status(400).json({ error: 'Start again — that reset has expired.' });
+
+    let uid: string;
+    try {
+      uid = (await admin.auth().getUserByEmail(email)).uid;
+    } catch {
+      return res.status(400).json({ error: 'Start again — that reset has expired.' });
+    }
+
+    const ref = admin.firestore().collection('password_resets').doc(uid);
+    const data = (await ref.get()).data();
+
+    if (!data?.ticket || data.ticket !== ticket || Date.now() > (data.ticketExpiresAt || 0)) {
+      return res.status(400).json({ error: 'Start again — that reset has expired.' });
+    }
+
+    await admin.auth().updateUser(uid, { password });
+    /*
+      Every existing session is killed. Someone resetting a password may be
+      doing it BECAUSE another person is in their account, and leaving that
+      person signed in would defeat the whole exercise.
+    */
+    await admin.auth().revokeRefreshTokens(uid);
+    await ref.delete().catch(() => {});
+
+    return res.json({ ok: true });
+  });
+
   app.post('/api/identity', async (req, res) => {
     const header = req.headers.authorization;
     if (!header?.startsWith('Bearer ')) {

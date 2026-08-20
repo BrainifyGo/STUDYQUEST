@@ -325,6 +325,18 @@ service cloud.firestore {
 
       Admin can read them, because somebody eventually has to look.
     */
+    /*
+      RESET CODES ARE CLOSED TO EVERYBODY.
+
+      The document holds a hashed reset code and a one-use ticket. A client that
+      could read it could reset the account it belongs to, so nothing reads it
+      but the server, with admin credentials. Not even an admin, because there is
+      no reason for a person to look.
+    */
+    match /password_resets/{uid} {
+      allow read, write: if false;
+    }
+
     match /reports/{reportId} {
       allow read: if isAdmin();
       allow create, update, delete: if false;
