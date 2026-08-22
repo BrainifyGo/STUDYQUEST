@@ -193,14 +193,44 @@ describe('the friends blocks', () => {
     expect(requests).toMatch(/resource == null/);
   });
 
-  it('keeps public profiles to the searchable fields only', () => {
-    // hasOnly is the guard that stops a token count or a plan flag being
-    // mirrored into the one collection every signed-in user can read.
-    expect(profiles).toMatch(/hasOnly\(\['uid', 'username', 'displayName', 'displayLower', 'emailLower'\]\)/);
+  it('refuses client writes entirely', () => {
+    // STRONGER THAN THE RULE THIS REPLACED, and the reason it changed. These
+    // used to be client writes guarded by `hasOnly([...])` and a uid check.
+    // That guarded the FIELDS but not the VALUES, and the username filter it
+    // relied on lived in the client bundle -- so a plain REST call could claim
+    // an offensive username with a clean-looking payload. Firestore rules
+    // cannot do confusable folding, so the check had to move server-side, and
+    // once it did, letting clients write here at all was pointless risk.
+    expect(profiles).toMatch(/allow create, update: if false/);
   });
 
-  it('only lets you write your own public profile', () => {
-    expect(profiles).toMatch(/allow create, update: if isAuthenticated\(\)\s*&& request\.auth\.uid == userId/);
+  it('has no surviving client write path', () => {
+    // Firestore ORs allow statements, so one leftover permissive line would
+    // silently defeat the `if false` above -- exactly the 2026-08-11 shape.
+    const writes = profiles.match(/allow (create|update|write)[^;]*;/g) || [];
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatch(/if false/);
+  });
+
+  it('and the one server writer publishes only the searchable fields', () => {
+    // The field guarantee did not disappear with `hasOnly` -- it moved to the
+    // single writer. Checked here because "the rules no longer restrict fields"
+    // is only safe while something else does.
+    const server = readFileSync('server.ts', 'utf8');
+    const start = server.indexOf('const payload: Record<string, unknown> = {');
+    expect(start, 'the public_profiles payload moved').toBeGreaterThan(-1);
+    const body = server.slice(start, server.indexOf('}', start));
+
+    for (const field of ['uid', 'displayName', 'displayLower', 'emailLower']) {
+      expect(body).toContain(field);
+    }
+    // A token count or plan flag mirrored into the one collection every signed-in
+    // user can read is the leak this has always been about.
+    for (const leak of ['isPro', 'plan', 'tokens', 'email:', 'xp']) {
+      expect(body).not.toContain(leak);
+    }
+    // set(), not merge: a field written once by an older build cannot linger.
+    expect(server.slice(start, start + 900)).toMatch(/profileRef\.set\(payload\)/);
   });
 
   it('does NOT open the users collection up for searching', () => {

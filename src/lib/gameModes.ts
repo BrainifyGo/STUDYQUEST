@@ -8,8 +8,9 @@
 
 import type { QuizQuestion } from '../App';
 import { type Boss, pickBoss, phaseFor, playerDamageFor, justEnraged } from './bosses';
+import { DUEL_MAX_HP, DUEL_ROUNDS, DUEL_ROUND_SECONDS } from './duel';
 
-export type ModeId = 'speed-run' | 'boss-battle' | 'sudden-death' | 'marathon';
+export type ModeId = 'speed-run' | 'boss-battle' | 'sudden-death' | 'marathon' | 'duel';
 
 export interface ModeRules {
   id: ModeId;
@@ -96,10 +97,33 @@ export const MODES: Record<ModeId, ModeRules> = {
     scoreLabel: 'correct',
     questionLimit: 20,
   },
+
+  /*
+    DUEL is listed here so the Arcade can show it, but it does NOT run on this
+    engine. Its rules live in `duel.ts`: two fighters, seven rounds, a per-round
+    clock and damage that scales with how fast you answered. None of that fits
+    ModeState, and bending ModeState to hold it would make every other mode
+    carry fields it does not use.
+
+    The fields below are what the mode CARD shows. `startState` is never called
+    with them -- GameMode routes 'duel' to its own component before that.
+  */
+  duel: {
+    id: 'duel',
+    name: 'Duel',
+    blurb: 'Seven rounds, head to head. Answer faster to hit harder.',
+    duration: DUEL_ROUND_SECONDS,
+    wrongPenalty: 0,
+    rightBonus: 0,
+    bossHP: DUEL_MAX_HP,
+    playerHP: DUEL_MAX_HP,
+    scoreLabel: 'damage',
+    questionLimit: DUEL_ROUNDS,
+  },
 };
 
 /** The modes, in the order the Arcade lists them. */
-export const MODE_ORDER: ModeId[] = ['speed-run', 'boss-battle', 'sudden-death', 'marathon'];
+export const MODE_ORDER: ModeId[] = ['duel', 'speed-run', 'boss-battle', 'sudden-death', 'marathon'];
 
 export interface ModeState {
   mode: ModeRules;

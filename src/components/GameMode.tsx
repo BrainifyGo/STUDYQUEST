@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, Check, X, Flame, Timer, Target, Heart, Trophy, Zap, Ghost, Loader2,
-  Skull, Mountain, Sparkles, Volume2, VolumeX,
+  Skull, Mountain, Sparkles, Swords, Volume2, VolumeX,
 } from 'lucide-react';
 import {
   MODES, MODE_ORDER, startState, applyAnswer, tickClock, completionBonus, accuracy,
@@ -25,6 +25,13 @@ import { useUserStore } from '../store/useUserStore';
   chunk means the cost lands only on the accounts that get the feature.
 */
 const BossArena3D = React.lazy(() => import('./BossArena3D'));
+
+/*
+  DUEL runs on its own rules module, not on ModeState, so it is a screen rather
+  than a branch inside this one. Lazy for the same reason as the arena: the duel
+  drags in its own arena and nobody who never opens it should pay for that.
+*/
+const DuelMode = React.lazy(() => import('./DuelMode'));
 
 /**
  * THE ARCADE — Speed Run and Boss Battle, ported from ReviseGo.
@@ -152,11 +159,28 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP, questions
     });
   }, [state?.over, awarded, state, onAwardXP, onFinished]);
 
+  /*
+    Duel is a different game with a different state shape, so it gets its own
+    screen rather than a branch through ModeState. Holding the deck here means
+    both ways in — your mistakes and Quick Play — reach it the same way.
+  */
+  const [duelDeck, setDuelDeck] = useState<{ questions: QuizQuestion[]; subject: string } | null>(null);
+
   /** Start a round from any deck. Shared by the mistakes pool and Quick Play. */
   const startRound = useCallback((id: ModeId, deck: QuizQuestion[], subject: string) => {
     if (!deck.length) return;
-    // Enough to keep a 60-second run going without repeating immediately.
     const shuffled = shuffle(deck);
+
+    if (id === 'duel') {
+      // Seven DISTINCT questions where possible. Padding a duel by repeating a
+      // question would hand the second showing to whoever remembered it, which
+      // is a memory test rather than a duel. `startDuel` shortens the match
+      // instead when the pool is small.
+      setDuelDeck({ questions: shuffled.slice(0, 7), subject });
+      return;
+    }
+
+    // Enough to keep a 60-second run going without repeating immediately.
     const filled = shuffled.length >= 25 ? shuffled : Array.from(
       { length: 25 }, (_, i) => shuffled[i % shuffled.length]
     );
@@ -306,6 +330,27 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP, questions
     return lineFor(state.boss, wasRight ? 'hit' : 'playerHit', state.answered);
   }, [state?.boss, state?.over, state?.won, state?.enragedThisTurn, state?.answered, picked, current]);
 
+  /* ── duel ────────────────────────────────────────────── */
+  if (duelDeck) {
+    return (
+      <React.Suspense fallback={
+        <div className="flex items-center justify-center py-24" role="status" aria-label="Loading the duel">
+          <Loader2 className="w-8 h-8 animate-spin text-brand-purple" />
+        </div>
+      }>
+        <DuelMode
+          questions={duelDeck.questions}
+          subject={duelDeck.subject}
+          youName={userData?.displayName || 'You'}
+          onBack={() => setDuelDeck(null)}
+          onAwardXP={onAwardXP}
+          canUse3D={canUse3D}
+          sfxOn={sfxOn}
+        />
+      </React.Suspense>
+    );
+  }
+
   /* ── loading ─────────────────────────────────────────── */
   if (pool === null) {
     return (
@@ -347,6 +392,7 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP, questions
   if (!state) {
     const enough = pool.length >= 4;
     const ICONS: Record<ModeId, typeof Zap> = {
+      duel: Swords,
       'speed-run': Zap, 'boss-battle': Ghost, 'sudden-death': Skull, marathon: Mountain,
     };
 

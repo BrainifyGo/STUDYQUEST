@@ -2945,3 +2945,134 @@ then the emailed reset link still works and is offered underneath the code flow.
 ### Files
 `src/lib/email.server.ts`, `src/components/PasswordResetDialog.tsx`, `server.ts`,
 `src/components/Settings.tsx`, `firestore.rules`, `.env.example`.
+
+---
+
+## [2026-08-22] — Duel: the Arcade's 3D game, built so a real opponent drops straight in
+
+**Editor:** Claude Code (Opus 5)
+
+RED sent a screenshot of a 1v1 quiz battle — two fighters on lit podiums, health bars with both
+names, ROUND 1/7, a countdown, a 2×2 answer grid — and said *"this is how the 3dgame should go for
+the arcade something like this"*.
+
+The 3D arena that existed was a single rotating icosahedron with no player character, no rounds and
+no opponent. This is the duel.
+
+### The one decision everything else follows from
+
+He wanted the boss now and real friends later. So a round is resolved from **two committed answers**:
+
+```ts
+resolveRound(state, yours, theirs) -> next state
+```
+
+`theirs` comes from a bot today, decided the moment the round **starts** — before the player has
+seen the question. Tomorrow it arrives over a socket. **The engine cannot tell the difference**, and
+`test_duel` asserts exactly that: the same round resolved against `bot: null` produces identical
+health, damage and winner.
+
+Committing up front also rules out the obvious cheat by construction. A bot that chose its answer
+*after* seeing yours could be made to always win by a round, and no amount of care in the UI would
+fix that.
+
+### The numbers, and why they are those numbers
+
+100 HP each, 7 rounds, 10 seconds a round. A clean hit is 12 damage plus up to 12 more for speed.
+
+- Winning all seven rounds **slowly** deals 84 — *not* a knockout. You still win, on health, at the
+  end of round 7.
+- Winning all seven **fast** deals up to 168, so a knockout lands around round 5.
+
+That gap is the whole design: **speed decides how fast you win, accuracy decides whether you do.**
+If a slow correct player could be knocked out, this would be a reflex test with quiz questions stuck
+on top. Both halves are pinned as tests.
+
+Two more rules earn their place:
+
+- **Both right is a trade**, worth 5 rather than 12, won by whoever was quicker. Beating someone who
+  also knew the answer has to be worth less than beating someone who did not, or tapping fast
+  quietly replaces knowing the material.
+- **Both wrong is a dead round.** No chip damage. Punishing both players for a hard question invents
+  damage neither of them can attribute to anything they did.
+
+XP pays for correct answers whether you win or lose, because a close loss in a revision app has to
+be worth something.
+
+### Two arenas, one gate
+
+`DuelArena3D` is **raw WebGL, not three.js** — the same call as the boss arena, for the same reason:
+three.js is ~600 KB against a 2.2 MB bundle. This is **7.7 KB**, confirmed as its own chunk.
+
+Each fighter is six boxes — head, torso, two arms, two legs — sharing one 36-vertex cube with a
+different model matrix each. A jointed figure can lunge, flinch and fall over. That is precisely why
+the icosahedron could never read as a person.
+
+`DuelArena2D` takes the **same props**, deliberately. It is what a free account sees, what WebGL
+failure falls back to, and what reduced-motion gets — and if the two drifted apart, the fallback
+would become the buggy one, because nobody testing on a Pro desktop would ever see it.
+
+The gate is on the spectacle, never the mechanics: same duel, same questions, same damage, same
+opponent. Pro gets it in WebGL.
+
+### Three bugs found by rendering it, none of them findable by reading it
+
+This was built, then actually opened in a browser and photographed. All three of these looked
+perfectly correct in the source.
+
+**1. The arena rebuilt its WebGL context ten times a second.** It fell back to 2D on a machine where
+WebGL demonstrably worked. `onUnsupported` was in the effect's dependency array and the parent
+passes it as an inline arrow — a new function identity on every render — and the round clock
+re-renders 10×/sec. So the effect tore the context down and made a new one every 100 ms. Browsers
+cap live GL contexts; past the cap, creation quietly starts failing and shaders refuse to compile.
+On a phone this would have read as *"3D doesn't work on my device"*.
+
+Diagnosed by a control experiment rather than a guess: the **already-shipped** `BossArena3D` was
+rendered in the same headless browser and compiled fine, which ruled out the environment and pointed
+at the new component. The callback now lives in a ref and the GL effect depends on nothing.
+
+**2. The camera framed the fighters against the bottom edge** with dead space above them. The
+original view matrix was a hand-rolled "pitch about X and translate", which is *approximately* a
+camera right up until you care where the subject sits in frame. Replaced with a real `lookAt(eye,
+target)`, so framing is now two editable vectors.
+
+**3. And that `lookAt` rendered the scene upside down with left and right swapped.**
+`cross(forward, +Y)` is `(-f.z, 0, f.x)`; it had been written `(f.z, 0, -f.x)`. One sign, and it
+flips the right vector, which flips the derived up vector with it. Caught in a screenshot in
+seconds; it would have survived any amount of code review.
+
+### Verified
+
+```
+tests/duel.test.ts        30/30  (new)
+npm test                 271/271
+tsc --noEmit             clean
+eslint (new files)       clean
+npm run build            clean — DuelArena3D 7.71 KB as its own chunk
+```
+
+Rendered in headless Edge and inspected: the picker, the 2D arena, and the 3D arena. Confirmed by
+DOM probe rather than by eye that the 3D path renders a `<canvas>` with **no** 2D fallback and no
+console warnings, and that the page has **zero horizontally overflowing elements** at phone width —
+an earlier screenshot looked clipped and that turned out to be a headless scaling artefact, not a
+layout bug.
+
+### Two stale tests, fixed while here
+
+`rules-structure.test.ts` had been failing since the username work: it still asserted the old
+client-write rules for `public_profiles`, which are now `allow create, update: if false` because
+writes moved to `POST /api/identity`. Updated to assert the **stronger** current rule, plus a new
+check that the one server writer still publishes only the searchable fields and uses `set()` rather
+than a merge — the field guarantee did not disappear with `hasOnly`, it moved, and "the rules no
+longer restrict fields" is only safe while something else does.
+
+### What is deliberately not built
+
+Live PvP. The screen says so rather than hiding it: *"Duelling a friend live is next. The arena and
+the rules are already built for it — only the matchmaking is missing."* That is true, and it is the
+honest version of a coming-soon note.
+
+### Files
+`src/lib/duel.ts` (new), `src/components/DuelMode.tsx` (new), `src/components/DuelArena3D.tsx`
+(new), `src/components/DuelArena2D.tsx` (new), `src/lib/gameModes.ts`, `src/components/GameMode.tsx`,
+`src/index.css`, `tests/duel.test.ts` (new), `tests/rules-structure.test.ts`.
