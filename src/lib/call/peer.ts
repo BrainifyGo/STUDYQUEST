@@ -56,6 +56,50 @@ export class Peer {
   private audioSender: RTCRtpSender | null = null;
   private pendingCandidates: RTCIceCandidateInit[] = [];
 
+  /*
+    ONE SIGNALLING OPERATION AT A TIME.
+
+    `onnegotiationneeded` and `handleDescription` both call
+    `setLocalDescription` on the same connection, and both are async. The
+    `makingOffer` flag was supposed to keep them apart, but it is read BEFORE
+    the first await and set INSIDE the other handler — so the two interleave and
+    the flag is stale by the time it matters.
+
+    Measured, not theorised. Two browsers joining within ~100ms of each other
+    produced this tape on the polite side:
+
+        t=436  in   call-offer      (remote offer arrives)
+        t=439  out  call-offer      (negotiationneeded fires mid-await)
+        t=443  out  call-answer
+
+    An offer AND an answer for the same peer, from two setLocalDescription calls
+    racing each other. SDP still settled to `stable` on both sides, so it looked
+    fine — but that side then emitted **zero ICE candidates** for the rest of the
+    call, received seven, and sat at `iceGatheringState: 'gathering'` forever.
+
+    For a user that is a call which simply never connects, roughly one time in
+    three, with nothing in the UI to explain it. Serialising every SDP operation
+    through this chain makes the interleave impossible rather than unlikely.
+  */
+  private chain: Promise<unknown> = Promise.resolve();
+
+  /*
+    Has this pair ever completed a negotiation? Until it has, only ONE side is
+    allowed to open one -- see the note on `onnegotiationneeded`.
+  */
+  private negotiated = false;
+
+  /** Run `fn` after every previously queued operation, in order. */
+  private queue<T>(fn: () => Promise<T>): Promise<T> {
+    // `.then(run, run)` rather than `.then(run)`: a rejected earlier operation
+    // must not stall every later one. A failed renegotiation is recoverable;
+    // a permanently blocked queue is not.
+    const run = () => fn();
+    const next = this.chain.then(run, run);
+    this.chain = next.catch(() => {});
+    return next;
+  }
+
   constructor(peerId: string, selfId: string, cb: PeerCallbacks) {
     this.peerId = peerId;
     // Exactly one side of the pair is polite. Comparing ids is enough, and
@@ -64,16 +108,50 @@ export class Peer {
     this.cb = cb;
     this.pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
-    this.pc.onnegotiationneeded = async () => {
-      try {
-        this.makingOffer = true;
-        await this.pc.setLocalDescription();
-        if (this.pc.localDescription) this.cb.sendDescription(this.pc.localDescription);
-      } catch {
-        /* transient; renegotiation will retry */
-      } finally {
-        this.makingOffer = false;
-      }
+    this.pc.onnegotiationneeded = () => {
+      void this.queue(async () => {
+        try {
+          /*
+            ONLY ONE SIDE OPENS THE FIRST NEGOTIATION.
+
+            Both peers add their local tracks at almost the same moment, so both
+            fire `onnegotiationneeded` and both offer. Perfect negotiation is
+            supposed to absorb that: the polite side rolls back and answers.
+
+            It does resolve the SDP -- both ends reach `stable` with senders and
+            receivers, which is why this looked fine. But measured in Chromium,
+            **the side that rolls back then emits no ICE candidates at all**. It
+            receives the other side's seven and sends none, and sits at
+            `iceGatheringState: 'gathering'` forever. For a user that is a call
+            that never connects, about one time in three, with nothing in the UI
+            to explain it.
+
+            Serialising the operations (the queue above) was not enough -- it
+            only moved which side rolled back. So the collision is avoided
+            instead of survived: before the first successful negotiation, the
+            polite side creates its peer, adds its tracks and waits to be
+            called. Exactly one offer is ever made, and neither side rolls back.
+
+            AFTER that first negotiation, either side may renegotiate freely --
+            turning a camera on has to work from both ends — and by then the
+            queue plus perfect negotiation handle it, because an established
+            connection keeps its ICE.
+          */
+          if (!this.negotiated && this.polite) return;
+
+          this.makingOffer = true;
+          // Re-check inside the queue: by the time this runs, a remote offer may
+          // already have moved us out of `stable`, and creating an offer here
+          // would be the collision this queue exists to prevent.
+          if (this.pc.signalingState !== 'stable') return;
+          await this.pc.setLocalDescription();
+          if (this.pc.localDescription) this.cb.sendDescription(this.pc.localDescription);
+        } catch {
+          /* transient; renegotiation will retry */
+        } finally {
+          this.makingOffer = false;
+        }
+      });
     };
 
     this.pc.onicecandidate = ({ candidate }) => {
@@ -112,7 +190,13 @@ export class Peer {
     else if (track) this.audioSender = this.pc.addTrack(track);
   }
 
-  async handleDescription(description: RTCSessionDescriptionInit): Promise<void> {
+  handleDescription(description: RTCSessionDescriptionInit): Promise<void> {
+    // Through the queue, so this can never interleave with an offer being
+    // created by `onnegotiationneeded`. See the note on `chain` above.
+    return this.queue(() => this.applyDescription(description));
+  }
+
+  private async applyDescription(description: RTCSessionDescriptionInit): Promise<void> {
     const readyForOffer =
       !this.makingOffer &&
       (this.pc.signalingState === 'stable' || this.isSettingRemoteAnswerPending);
@@ -126,6 +210,10 @@ export class Peer {
     this.isSettingRemoteAnswerPending = description.type === 'answer';
     await this.pc.setRemoteDescription(description);
     this.isSettingRemoteAnswerPending = false;
+    // From here on both sides may renegotiate: the connection exists, so a
+    // later offer (someone turning their camera on) cannot cost us the ICE
+    // gathering the way a collision on the FIRST negotiation does.
+    this.negotiated = true;
 
     // The remote description is set, so any candidates that arrived early can
     // be applied now.

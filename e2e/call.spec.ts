@@ -33,24 +33,16 @@ import { adminAvailable, cleanup, mintTokens } from './fixtures/testUsers';
  *
  * SERIAL, because both browsers share one signalling room on one server.
  *
- * ── KNOWN FLAKE, NOT YET ISOLATED ─────────────────────────────────────────
- * On this machine roughly one run in three fails with the peer's LIVE
- * `RTCPeerConnection.connectionState` stuck at 'new' — no candidate pair, SDP
- * already stable on both sides. It is worse under `--repeat-each`, where the
- * first repeat passes and later ones fail, which points at something degrading
- * inside the single reused Chromium process rather than at the test order.
+ * ── THIS SUITE FOUND A REAL BUG ──────────────────────────────────────────
+ * It was flaky at roughly one run in three, with the live connection stuck at
+ * 'new'. That was not the test: two browsers joining within ~100ms of each
+ * other both opened a negotiation, and on the side that rolled back, Chromium
+ * then emitted NO ICE candidates for the rest of the call. SDP still settled to
+ * `stable` on both ends, which is why it looked healthy.
  *
- * What has been RULED OUT: the auth gate (a separate PRO_REQUIRED race, fixed
- * in testUsers.ts), contexts leaking between tests (each test now closes its
- * own), and ICE candidate generation (fixed by
- * --force-webrtc-ip-handling-policy=default; candidates are now host + srflx).
- *
- * What has NOT been ruled out: a genuine race in `CallSession.join()` versus
- * the `call-join` handler, and plain resource exhaustion — this laptop runs
- * these with about 1.5 GB free.
- *
- * Retries are deliberately NOT enabled locally to paper over it. A flake you
- * cannot see is a flake nobody fixes.
+ * Fixed in `src/lib/call/peer.ts` by not colliding in the first place. 15/15
+ * green afterwards, and the suite runs in a third of the time because the
+ * connections now come up immediately instead of limping.
  */
 test.describe.configure({ mode: 'serial' });
 

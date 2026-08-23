@@ -3176,3 +3176,88 @@ tsc --noEmit          clean
 `playwright.config.ts` (new), `e2e/call.spec.ts` (new), `e2e/pages/CallHarnessPage.ts` (new),
 `e2e/fixtures/call-harness.{html,ts}` (new), `e2e/fixtures/testUsers.ts` (new), `package.json`,
 `.gitignore`.
+
+---
+
+## [2026-08-22] — The flaky call test was right: calls really did fail one time in three
+
+**Editor:** Claude Code (Opus 5)
+
+Yesterday's entry shipped the two-browser call suite and admitted it was flaky at about one run in
+three, with the live `RTCPeerConnection` stuck at `new`, cause unknown. It was not the test.
+
+**Two people joining a call within about 100ms of each other could produce a call that never
+connects, silently, with nothing in the UI to explain it.** That is the normal case, not an edge
+case: both people are looking at the room and both tap Join.
+
+### The tape
+
+Guessing from the end state was hopeless — `new` with `signalingState: stable` looks identical
+whether an offer was never made, never sent, never arrived, or arrived and was ignored. So the
+harness was made to record every `call-*` message, in order, both directions. One stalled run:
+
+```
+ALICE   t=436  in   call-offer          BOB   t=343  out  call-offer
+        t=439  out  call-offer                t=344  in   call-offer
+        t=443  out  call-answer               t=349  out  call-answer
+        ...    in   call-ice  x7              ...    in   call-ice  x0
+        ...    out  call-ice  x0              ...    out  call-ice  x7
+```
+
+Both sides offered. One rolled back and answered, exactly as perfect negotiation intends. SDP settled
+to `stable` on both ends with senders and receivers in place — everything looked healthy.
+
+**And the side that rolled back sent zero ICE candidates for the rest of the call.** It received all
+seven of the other side's and emitted none, sitting at `iceGatheringState: 'gathering'` forever.
+
+### Two fixes, and why the first was not enough
+
+**1. Signalling operations are now serialised.** `onnegotiationneeded` and `handleDescription` both
+call `setLocalDescription` on the same connection, both are async, and the `makingOffer` guard meant
+to keep them apart is read *before* the first `await` and set *inside* the other handler. So they
+interleaved: one side produced an offer AND an answer for the same peer, three milliseconds apart.
+Every SDP operation now goes through a promise chain, which makes the interleave impossible rather
+than unlikely.
+
+That was a real defect and worth fixing. **It did not fix the stall** — it only changed which side
+rolled back. Recorded here because "the obvious fix did not work" is the useful part.
+
+**2. The collision is now avoided rather than survived.** Before a pair has completed one
+negotiation, only one side opens it: the polite side creates its peer, adds its tracks, and waits to
+be called. Which side is which is already decided by comparing socket ids, so no agreement is needed
+and exactly one offer is ever made.
+
+After the first negotiation succeeds, either side may renegotiate freely — turning a camera on has to
+work from both ends — and by then a collision is survivable, because an established connection keeps
+its ICE.
+
+### The honest reading
+
+Perfect negotiation is correct, and this is not a claim that it is broken. What is true is narrower:
+in Chromium, a rollback during the **first** negotiation of a connection cost that side its ICE
+gathering entirely. Avoiding the collision is cheap, needs no coordination, and removes a whole class
+of "it just doesn't connect" that nobody could have debugged from the UI.
+
+### Verified
+
+```
+playwright --repeat-each=5     15/15   (was ~10/15)
+                                       and 21s, down from 57s — the connections
+                                       now come up immediately instead of limping
+hunt loop, 8 consecutive calls   8/8   (previously stalled by attempt 2 or 3)
+npm test                     271/271
+tsc --noEmit                   clean
+npm run build                  clean
+```
+
+### What this means for the live app
+Anyone who tried a call and found it dead may simply have lost the coin flip. Worth telling Daniel it
+is fixed and asking him to try again — including the case that triggers it, both people joining at
+once.
+
+Still outstanding, and unchanged by this: there is **no TURN server**, so calls remain STUN-only and
+will fail on networks that block peer-to-peer — which is most school networks.
+
+### Files
+`src/lib/call/peer.ts`, `e2e/call.spec.ts`, `e2e/fixtures/call-harness.ts`,
+`e2e/pages/CallHarnessPage.ts`.

@@ -30,6 +30,8 @@ interface HarnessState {
   inboundBytes: number;
   warning: string | null;
   joinDenied: string | null;
+  /** Every call-* signalling message, in order, both directions. */
+  events: Array<{ t: number; dir: 'in' | 'out'; name: string; peer?: string; kind?: string }>;
 }
 
 declare global {
@@ -57,6 +59,7 @@ const state: HarnessState = {
   inboundBytes: 0,
   warning: null,
   joinDenied: null,
+  events: [],
 };
 window.__call = state;
 
@@ -120,6 +123,41 @@ async function boot() {
 
     socket.on('room-users', () => {
       if (state.phase === 'signed-in') { state.phase = 'joined'; render(); }
+    });
+
+    /*
+      EVENT TAPE. Every call-* message in and out, with a timestamp.
+
+      Diagnosing a stalled negotiation from the end state is guesswork: 'new'
+      with stable signalling looks the same whether an offer was never made,
+      never sent, never arrived, or arrived and was ignored. The order is the
+      answer, so it is recorded.
+    */
+    const t0 = performance.now();
+    const stamp = () => Math.round(performance.now() - t0);
+
+    const realEmit = socket.emit.bind(socket);
+    (socket as unknown as { emit: (...a: unknown[]) => unknown }).emit =
+      (name: string, ...args: unknown[]) => {
+        if (String(name).startsWith('call-')) {
+          const p0 = args[0] as { to?: string; sdp?: { type?: string } } | undefined;
+          state.events.push({
+            t: stamp(), dir: 'out', name,
+            peer: p0?.to, kind: p0?.sdp?.type,
+          });
+          render();
+        }
+        return realEmit(name as never, ...(args as never[]));
+      };
+
+    socket.onAny((name: string, payload: { from?: string; sdp?: { type?: string } }) => {
+      if (String(name).startsWith('call-')) {
+        state.events.push({
+          t: stamp(), dir: 'in', name,
+          peer: payload?.from, kind: payload?.sdp?.type,
+        });
+        render();
+      }
     });
 
     session = new CallSession(socket, userName, onSnapshot);

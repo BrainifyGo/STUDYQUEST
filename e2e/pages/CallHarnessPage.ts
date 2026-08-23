@@ -12,6 +12,7 @@ export interface CallState {
   inboundBytes: number;
   warning: string | null;
   joinDenied: string | null;
+  events: Array<{ t: number; dir: 'in' | 'out'; name: string; peer?: string; kind?: string }>;
 }
 
 /**
