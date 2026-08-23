@@ -3425,3 +3425,101 @@ room rather than to one person, so anyone studying with you can take it.
 `src/components/LiveDuelPanel.tsx` (new), `server.ts`, `src/components/DuelMode.tsx`,
 `src/components/CollaborativeRoom.tsx`, `tests/duelMatch.test.ts` (new), `e2e/duel.spec.ts` (new),
 `e2e/fixtures/duel-harness.{html,ts}` (new).
+
+---
+
+## [2026-08-22] — Study reminders actually send now
+
+**Editor:** Claude Code (Opus 5)
+
+Settings has had a "study reminders" toggle for months. The planner has been saving exams and study
+tasks. `email.server.ts` has been able to send mail since the password-reset work — and said so in
+its own header: *"the study-planner reminders, which have been saving reminders nobody ever
+receives."*
+
+Nothing ever sent one. A switch that promises something and does nothing is worse than no switch,
+and this one is in a paid app.
+
+**They are not, and were not, a Pro feature.** The five gated features are `ai-tutor`,
+`study-rooms`, `advanced-analytics`, `unlimited-kits` and `3d-arena`. Reminders were simply missing.
+
+### One digest a day, not one email per task
+
+Six tasks is six emails under the obvious design. That is how a helpful feature becomes the reason
+somebody marks you as spam — and it spends the mail quota six times as fast.
+
+So: one email, listing today's sessions with a total time, plus any exam inside seven days, counted
+in words (*"Maths is tomorrow"*, not *"Maths in 1 days"*). And every one of them says how to turn it
+off, because an email you cannot stop is the definition of spam and the toggle already exists.
+
+### Nothing to say means nothing is sent
+
+`composeReminder` returns **null** rather than an empty email. A daily *"you have 0 tasks"* is the
+clearest possible way to teach people to ignore you. Completed tasks, tasks for another day, past
+exams, exams beyond the horizon and malformed dates all fall through to null — each its own test.
+
+### The one that would have hurt
+
+`lastReminderDay` is written **before** the send, not after.
+
+If it were written after and the process died in between, the next run would send the same email
+again — and the person receiving it cannot tell a bug from nagging. Losing one reminder to a crash is
+a much smaller harm than sending it twice, so the ordering is deliberate.
+
+That mark is also what makes the schedule safe to poll. The scheduler checks every fifteen minutes
+rather than firing one daily timer, because a single daily timer is one restart away from being
+missed entirely and this host restarts on every deploy. The extra checks find nothing to do.
+
+### It scales with who is studying, not who ever signed up
+
+The obvious implementation reads every user and asks each one whether they need an email. This starts
+from **today's tasks** and the **upcoming exams** and works back to their owners, so the work is
+proportional to people actually studying. Somebody with nothing planned is never even considered —
+which is the same conclusion the compose step would have reached anyway, reached for free.
+
+Dates are ISO strings, so a lexicographic range is a date range, and a single-field range needs no
+composite index.
+
+### A cap, because this failure is expensive and public
+
+`REMINDER_MAX_PER_RUN` defaults to 100. Resend's free tier is 3,000 emails a month — about a hundred
+a day — and a bug that emails everyone twice would spend it before anyone noticed. If the cap is ever
+genuinely reached, that is a signal to move to a paid tier on purpose rather than to discover it
+through bounced mail.
+
+Timezone is explicit (`Europe/London`, overridable). Using the server's own clock would put reminders
+on the wrong day the moment the host moved region.
+
+### Verified
+
+```
+tests/reminders.test.ts   23/23  (new)
+npm test                318/318
+tsc, eslint, build        clean
+```
+
+And a **dry run against real Firestore**, seeding a user with two tasks and an exam, exercising the
+real queries and the real compose step, printing what would be sent and sending nothing:
+
+```
+today 2026-08-23 | tasks today: 2 | exams within 7d: 1
+  e2e-reminder-user: gate=true compose=YES
+    SUBJECT: 2 study sessions today
+    | You have 2 study sessions planned today:
+    |   • Past paper (Maths) — 45 min
+    |   • Quadratic equations (Maths) — 30 min
+    | That is about 75 minutes in total.
+    | Maths is in 3 days.
+WOULD SEND: 1. Nothing was sent.
+```
+
+The first version of that dry run reported a confident **zero**, and it was wrong: the query said
+`>= today AND < today`, which matches nothing. Worth recording, because a verification script that
+quietly proves nothing is more dangerous than no verification at all.
+
+### What RED has to check
+`RESEND_API_KEY` must be set on Render. Without it the scheduler logs `email-not-configured` and
+sends nothing — deliberately, rather than pretending to work.
+
+### Files
+`src/lib/reminders.ts` (new), `tests/reminders.test.ts` (new), `server.ts`.

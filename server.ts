@@ -15,6 +15,7 @@ import { eraseAccount } from "./src/lib/accountData.server";
 import { checkUsernameSafety, checkDisplayNameSafety, safetyMessage, usernameShapeProblem } from "./src/lib/usernameSafety";
 import { sendEmail, resetCodeEmail, emailConfigured } from "./src/lib/email.server";
 import { DuelMatch, type MatchPlayer } from "./src/lib/duelMatch";
+import { composeReminder, dayKey, hourIn, shouldSend, EXAM_HORIZON_DAYS } from "./src/lib/reminders";
 
 dotenv.config();
 
@@ -78,6 +79,137 @@ if (!admin.apps.length) {
 
 async function startServer() {
   const app = express();
+  /* ── STUDY REMINDERS ──────────────────────────────────────────────────────
+     Settings has had a reminders toggle and the planner has been saving exams
+     and tasks since long before this, and nothing ever sent anything. A switch
+     that promises something and does nothing is worse than no switch.
+
+     The rules — who gets one, what it says, and never twice in a day — are in
+     `reminders.ts` and tested there. This part is the plumbing: when to look,
+     who to look at, and writing down what was sent.
+
+     WHO IT LOOKS AT. Not "every user": it starts from today's TASKS and the
+     upcoming EXAMS and works back to their owners, so the work scales with how
+     many people are actually studying rather than with how many have ever
+     signed up. It also means somebody with nothing planned is never considered,
+     which is the same thing the compose step would have decided anyway.
+  */
+  const REMINDER_HOUR = Number(process.env.REMINDER_HOUR ?? 7);
+  const REMINDER_TZ = process.env.REMINDER_TZ || 'Europe/London';
+  /*
+     A CAP, because the failure mode here is expensive and public. Resend's free
+     tier is 3,000 emails a month — about 100 a day — and a bug that emails
+     everyone twice would spend it before anyone noticed. If this limit is ever
+     actually reached it is a signal to move to a paid tier deliberately, not to
+     discover it through bounced mail.
+  */
+  const REMINDER_MAX_PER_RUN = Number(process.env.REMINDER_MAX_PER_RUN ?? 100);
+
+  let reminderRunning = false;
+
+  async function sendDailyReminders(force = false): Promise<{ sent: number; considered: number; skipped: string }> {
+    if (reminderRunning) return { sent: 0, considered: 0, skipped: 'already-running' };
+    if (!emailConfigured()) return { sent: 0, considered: 0, skipped: 'email-not-configured' };
+
+    const now = new Date();
+    if (!force && hourIn(now, REMINDER_TZ) !== REMINDER_HOUR) {
+      return { sent: 0, considered: 0, skipped: 'wrong-hour' };
+    }
+
+    reminderRunning = true;
+    const today = dayKey(now, REMINDER_TZ);
+    let sent = 0;
+    let considered = 0;
+
+    try {
+      const db = admin.firestore();
+      const horizon = new Date(now.getTime() + EXAM_HORIZON_DAYS * 86_400_000);
+      const horizonDay = dayKey(horizon, REMINDER_TZ);
+
+      // Dates are ISO strings, so a lexicographic range is a date range — and a
+      // single-field range needs no composite index.
+      const [taskSnap, examSnap] = await Promise.all([
+        db.collection('study_tasks')
+          .where('date', '>=', today).where('date', '<', `${today}\uf8ff`).get(),
+        db.collection('exams')
+          .where('date', '>=', today).where('date', '<=', `${horizonDay}\uf8ff`).get(),
+      ]);
+
+      const byUser = new Map<string, { tasks: any[]; exams: any[] }>();
+      const bucket = (uid: string) => {
+        if (!byUser.has(uid)) byUser.set(uid, { tasks: [], exams: [] });
+        return byUser.get(uid)!;
+      };
+      for (const d of taskSnap.docs) {
+        const t = d.data();
+        if (t?.userId) bucket(t.userId).tasks.push(t);
+      }
+      for (const d of examSnap.docs) {
+        const e = d.data();
+        if (e?.userId) bucket(e.userId).exams.push(e);
+      }
+
+      for (const [uid, work] of byUser) {
+        if (sent >= REMINDER_MAX_PER_RUN) {
+          console.warn(`[reminders] hit the per-run cap of ${REMINDER_MAX_PER_RUN}`);
+          break;
+        }
+        considered += 1;
+
+        const userRef = db.collection('users').doc(uid);
+        const user = (await userRef.get()).data();
+        if (!user) continue;
+        if (!shouldSend({
+          studyReminders: user.studyReminders,
+          email: user.email,
+          lastReminderDay: user.lastReminderDay,
+        }, today)) continue;
+
+        const reminder = composeReminder({
+          displayName: user.displayName || '',
+          tasks: work.tasks as any,
+          exams: work.exams as any,
+          today,
+        });
+        if (!reminder) continue;
+
+        /*
+          WRITTEN BEFORE SENDING, deliberately. If the mark is written after and
+          the process dies in between, the next run sends the same email again —
+          and the person receiving it cannot tell a bug from nagging. Losing one
+          reminder to a crash is a much smaller harm than sending it twice.
+        */
+        await userRef.set({ lastReminderDay: today }, { merge: true });
+
+        try {
+          await sendEmail({ to: user.email, subject: reminder.subject, text: reminder.text });
+          sent += 1;
+        } catch (err) {
+          console.error(`[reminders] send failed for ${uid}:`, (err as Error).message);
+        }
+      }
+
+      if (sent) console.log(`[reminders] sent ${sent} of ${considered} considered (${today})`);
+      return { sent, considered, skipped: '' };
+    } catch (err) {
+      console.error('[reminders] run failed:', (err as Error).message);
+      return { sent, considered, skipped: 'error' };
+    } finally {
+      reminderRunning = false;
+    }
+  }
+
+  /*
+    Checked every fifteen minutes rather than scheduled for exactly 07:00. A
+    single daily timer is one restart away from being missed entirely, and this
+    host restarts on every deploy. `lastReminderDay` is what makes polling safe:
+    the extra checks find nothing to do.
+  */
+  if (process.env.NODE_ENV === 'production' || process.env.REMINDERS_IN_DEV === 'true') {
+    setInterval(() => { void sendDailyReminders(); }, 15 * 60 * 1000);
+    console.log(`[reminders] scheduler on — ${REMINDER_HOUR}:00 ${REMINDER_TZ}, max ${REMINDER_MAX_PER_RUN}/run`);
+  }
+
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     cors: {
