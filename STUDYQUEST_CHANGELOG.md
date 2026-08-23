@@ -3261,3 +3261,80 @@ will fail on networks that block peer-to-peer — which is most school networks.
 ### Files
 `src/lib/call/peer.ts`, `e2e/call.spec.ts`, `e2e/fixtures/call-harness.ts`,
 `e2e/pages/CallHarnessPage.ts`.
+
+---
+
+## [2026-08-22] — TURN wired: calls can now work on school networks
+
+**Editor:** Claude Code (Opus 5)
+
+Calls have been STUN-only since they shipped, which the code was honest about: *"calls will work
+between two people at home and may well fail on a school network."* That is a bad place to leave a
+feature in an app for students, and the previous entry's fix — which made calls connect reliably —
+only made the remaining gap more obvious.
+
+TURN is now wired. It is **inert until credentials exist**, so this ships safely before anyone has
+created an account.
+
+### How it is arranged, and the one thing that matters
+
+The Cloudflare TURN API token is a **long-term secret**: anyone holding it can relay traffic on the
+account and spend the bandwidth. So it never leaves the server.
+
+```
+browser  ──GET /api/turn-credentials──▶  server  ──POST (secret)──▶  Cloudflare
+         ◀──short-lived iceServers───           ◀──ttl'd creds────
+```
+
+The browser only ever sees credentials that expire. Putting the key in the client bundle would be
+handing it to everyone who opens the site.
+
+Credentials are issued with a two-hour TTL and cached server-side until five minutes before expiry —
+long enough that one set covers any realistic study session, short enough that a leaked set is worth
+little, and cached so that everyone joining every call is not a round trip to Cloudflare for
+identical credentials.
+
+### Unconfigured is a supported state, not an error
+
+Three ways this can fail, and all three land in the same place — the STUN-only list the app has
+always used:
+
+| Situation | Response | Calls |
+|---|---|---|
+| No keys set | `{turn: false, reason: 'not-configured'}` | exactly as before |
+| Bad keys | `{turn: false, reason: 'upstream-error'}` | exactly as before |
+| Cloudflare unreachable | `{turn: false, reason: 'unreachable'}` | exactly as before |
+
+**All three verified by running them**, not by reading the code: unconfigured returns STUN and
+`not-configured`; fake credentials produce a logged `404` from Cloudflare and still return usable
+STUN with HTTP 200. A credential service that can take calls down is worse than no credential
+service.
+
+The client has the same posture: a 4-second timeout on the fetch, because joining a call must not
+wait on it. If credentials are slow, going ahead on STUN beats a button that does nothing. A failed
+fetch is deliberately **not** cached — one bad request should not strand a whole session on STUN.
+
+### The bit that needed a small refactor
+
+`Peer` took its ICE servers from a module constant. TURN credentials expire, so they cannot be a
+constant. `Peer` now accepts them, defaulting to the old STUN list so every existing caller and test
+is unaffected, and `CallSession` resolves them **once** when the call is joined — fetching per peer
+would mean a round trip whenever somebody new arrives, and could hand different people in the same
+call different credentials.
+
+### What RED still has to do
+Create a TURN key at `dash.cloudflare.com` → Calls, and set `CLOUDFLARE_TURN_KEY_ID` and
+`CLOUDFLARE_TURN_API_TOKEN` on Render. Nothing else. The free tier is 1,000 GB/month — roughly 27,000
+audio call-hours — and only calls that **cannot** go peer-to-peer consume any of it.
+
+### Verified
+```
+/api/turn-credentials   unconfigured / bad keys / cached — all return usable STUN, HTTP 200
+playwright --repeat-each=3   9/9   (calls still connect; the wiring changed nothing on STUN)
+npm test                   271/271
+tsc --noEmit                 clean
+```
+
+### Files
+`server.ts` (`/api/turn-credentials`), `src/lib/call/ice.ts` (new), `src/lib/call/peer.ts`,
+`src/lib/call/session.ts`, `.env.example`.

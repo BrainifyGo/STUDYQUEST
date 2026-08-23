@@ -18,7 +18,8 @@
  * the note on ICE_SERVERS in peer.ts.
  */
 import type { Socket } from 'socket.io-client';
-import { Peer } from './peer';
+import { ICE_SERVERS, Peer } from './peer';
+import { fetchIceServers } from './ice';
 import { createVad, getLocalMedia, stopStream } from './media';
 
 /** Above this, a mesh stops being kind to the people in it. */
@@ -62,6 +63,12 @@ export class CallSession {
   private localStream: MediaStream | null = null;
   private stopVad: (() => void) | null = null;
   private media: CallMediaState = { audioEnabled: true, videoEnabled: false };
+  /*
+    Resolved once when the call is joined, then reused for every peer in it.
+    Fetching per peer would mean a round trip each time somebody new arrives,
+    and hand different people in the same call different credentials.
+  */
+  private iceServers: RTCIceServer[] = ICE_SERVERS;
   private active = false;
   private warning: string | null = null;
 
@@ -113,6 +120,11 @@ export class CallSession {
   /** Join the call, turning on the mic (and camera, if asked). */
   async join(withVideo: boolean): Promise<void> {
     if (this.active) return;
+
+    // Before any peer exists, because a peer's ICE servers are fixed at
+    // construction. Never throws: falls back to STUN and the call still works
+    // everywhere it worked before.
+    this.iceServers = await fetchIceServers();
 
     this.localStream = await getLocalMedia({ audio: true, video: withVideo });
     this.media = { audioEnabled: true, videoEnabled: withVideo };
@@ -235,7 +247,7 @@ export class CallSession {
         }
         this.emit();
       },
-    });
+    }, this.iceServers);
 
     this.peers.set(peerId, peer);
     if (this.localStream) peer.setLocalStream(this.localStream);

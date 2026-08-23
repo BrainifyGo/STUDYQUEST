@@ -100,13 +100,23 @@ export class Peer {
     return next;
   }
 
-  constructor(peerId: string, selfId: string, cb: PeerCallbacks) {
+  constructor(
+    peerId: string,
+    selfId: string,
+    cb: PeerCallbacks,
+    /*
+      Passed in rather than read from the module, because they are fetched at
+      call time: TURN credentials expire, so they cannot be a constant. Defaults
+      to the STUN-only list so every existing caller and test behaves as before.
+    */
+    iceServers: RTCIceServer[] = ICE_SERVERS,
+  ) {
     this.peerId = peerId;
     // Exactly one side of the pair is polite. Comparing ids is enough, and
     // needs no agreement between the two ends.
     this.polite = selfId > peerId;
     this.cb = cb;
-    this.pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    this.pc = new RTCPeerConnection({ iceServers });
 
     this.pc.onnegotiationneeded = () => {
       void this.queue(async () => {

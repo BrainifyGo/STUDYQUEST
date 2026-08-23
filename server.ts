@@ -591,6 +591,94 @@ async function startServer() {
 
     Private rooms are never listed. That is the whole difference between the two.
   */
+  /*
+    TURN CREDENTIALS.
+
+    Calls are peer-to-peer and free wherever the network allows it. Where it does
+    not -- symmetric NAT, or a school firewall blocking UDP -- the media has to be
+    relayed, and that is what TURN does. StudyQuest is for students, so "works at
+    home, fails at school" was not somewhere to leave it.
+
+    THE KEY STAYS ON THE SERVER. `CLOUDFLARE_TURN_API_TOKEN` is a long-term
+    secret: anyone holding it can relay traffic on the account and spend the
+    bandwidth. So it is exchanged here for credentials that expire, and only
+    those reach the browser. Putting the key in the client bundle would be
+    handing it to everyone who opens the site.
+
+    UNCONFIGURED IS A SUPPORTED STATE, not an error. With no keys set this
+    answers with the same STUN-only list the app has always used, so calls behave
+    exactly as before rather than breaking. That is what lets this ship before
+    anyone has created a Cloudflare account.
+
+    Cached until shortly before expiry, because every person joining every call
+    would otherwise be a round trip to Cloudflare for credentials that are
+    identical anyway.
+  */
+  let turnCache: { iceServers: unknown[]; expires: number; turn: boolean } | null = null;
+
+  app.get('/api/turn-credentials', async (_req, res) => {
+    const stunOnly = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    ];
+
+    const keyId = process.env.CLOUDFLARE_TURN_KEY_ID;
+    const token = process.env.CLOUDFLARE_TURN_API_TOKEN;
+    if (!keyId || !token) {
+      return res.json({ iceServers: stunOnly, turn: false, reason: 'not-configured' });
+    }
+
+    if (turnCache && Date.now() < turnCache.expires) {
+      return res.json({ iceServers: turnCache.iceServers, turn: turnCache.turn });
+    }
+
+    // Two hours. Long enough that one set covers any realistic study session,
+    // short enough that a leaked set is worth little.
+    const ttl = 2 * 60 * 60;
+    try {
+      const r = await fetch(
+        `https://rtc.live.cloudflare.com/v1/turn/keys/${keyId}/credentials/generate-ice-servers`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ ttl }),
+        },
+      );
+
+      if (!r.ok) {
+        // Log the status, never the body: an error response can echo the request.
+        console.error('[turn] Cloudflare refused the credential request:', r.status);
+        return res.json({ iceServers: stunOnly, turn: false, reason: 'upstream-error' });
+      }
+
+      const data = await r.json() as { iceServers?: unknown };
+      // Cloudflare returns either one object or an array depending on the key.
+      const raw = data?.iceServers;
+      const servers = Array.isArray(raw) ? raw : raw ? [raw] : [];
+      if (!servers.length) {
+        return res.json({ iceServers: stunOnly, turn: false, reason: 'empty-response' });
+      }
+
+      const hasRelay = JSON.stringify(servers).includes('turn:')
+        || JSON.stringify(servers).includes('turns:');
+
+      // Refreshed a few minutes early, so nobody is ever handed a set that
+      // expires halfway through their call.
+      turnCache = {
+        iceServers: servers,
+        expires: Date.now() + (ttl - 300) * 1000,
+        turn: hasRelay,
+      };
+      return res.json({ iceServers: servers, turn: hasRelay });
+    } catch (err) {
+      console.error('[turn] credential request failed:', (err as Error).message);
+      return res.json({ iceServers: stunOnly, turn: false, reason: 'unreachable' });
+    }
+  });
+
   app.get('/api/rooms', async (req, res) => {
     const header = req.headers.authorization;
     if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Sign in first.' });
