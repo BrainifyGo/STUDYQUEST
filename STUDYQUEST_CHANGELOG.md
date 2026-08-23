@@ -3076,3 +3076,103 @@ honest version of a coming-soon note.
 `src/lib/duel.ts` (new), `src/components/DuelMode.tsx` (new), `src/components/DuelArena3D.tsx`
 (new), `src/components/DuelArena2D.tsx` (new), `src/lib/gameModes.ts`, `src/components/GameMode.tsx`,
 `src/index.css`, `tests/duel.test.ts` (new), `tests/rules-structure.test.ts`.
+
+---
+
+## [2026-08-22] — The calls work. Now there is a test that says so.
+
+**Editor:** Claude Code (Opus 5)
+
+StudyQuest had 271 unit tests and **zero** that opened a browser. So everything that only breaks in a
+real browser was unproven — and the worst of those was the study-room call, ported from GhostChat,
+wired up, shipped, and **never once run between two browsers**. "Do the calls work?" was an open
+question about a feature people are about to be asked to pay for.
+
+They work. Two real browsers, real Firebase auth, the real Pro gate, the real `server.ts` relay, real
+peer connections, and **real audio bytes crossing between them**.
+
+### What the test actually proves, and what it refuses to accept as proof
+
+Three things could make a green call test meaningless, so each is closed:
+
+| Cheap "proof" | Why it is not enough | What is asserted instead |
+|---|---|---|
+| Two pages loaded without errors | Proves nothing about negotiation | The **live** `RTCPeerConnection.connectionState` |
+| `connectionState === 'connected'` | A peer can sit there with nothing crossing it | `getStats()` → `bytesReceived > 0` |
+| "media arrived" on a video call | A video call degrading to audio still passes | The **kinds** of live track: `['audio','video']` |
+
+And it runs the real server rather than a stand-in, because the room-membership check and the auth
+gate are exactly the parts that break quietly.
+
+**Proven to fail:** dropping `call-offer` from the server's relay turns it red with
+*"alice never connected to &lt;id&gt;"*. A test that has never been seen to fail is a guess.
+
+### Getting there took three wrong turns, all worth recording
+
+**1. Zero ICE candidates.** The call negotiated perfectly — `signalingState: stable`, an audio
+receiver on both sides — and then ICE sat in `gathering` forever. Every symptom pointed at the
+product. Reading `localDescription.sdp` settled it: **not one candidate**, not even a host candidate.
+`--force-webrtc-ip-handling-policy=default` fixed it, and the candidate list is now host + srflx —
+which incidentally proves **STUN reaches Google's server from here**, good news for the STUN-only
+config.
+
+The first theory was mDNS `.local` candidates being unresolvable in headless.
+`--disable-features=WebRtcHideLocalIpsWithMdns` did **not** fix it. The flag is kept because it makes
+candidates readable while diagnosing, and the config says plainly that it was not the cause.
+
+**2. The app's own state cannot be trusted as a test oracle.** `CallSession.emit()` reports
+`this.states.get(id) || 'new'`, so `'new'` means both *"never started"* and *"no event recorded
+yet"*. Asserting on it cannot tell a stalled call from an unobserved one. The test now reads the live
+`RTCPeerConnection`, and separately asserts the app's reported state **catches up** — because a call
+that works while the tile sits on "Connecting…" is its own user-facing bug.
+
+**3. Two flakes that were mine, not the app's.**
+- Browser contexts were kept open until the end of the file, so the first test's live calls were
+  still holding fake media devices while the second ran. Each test now owns and closes its own.
+- `cleanup()` deleted the test users' Pro flag in `afterAll`, which under `--repeat-each` ran while
+  later repeats were still going. One browser was refused with `PRO_REQUIRED`; the other, which had
+  joined fine, reported only *"never connected"*. Two unrelated-looking failures, one cause. The two
+  fixed `e2e-` accounts are now left in place.
+
+### A flake that is NOT yet explained, and is not being hidden
+
+About **one run in three** still fails with the live connection stuck at `new` — SDP stable on both
+sides, no candidate pair. It is worse under `--repeat-each`, where the first repeat passes and later
+ones fail, which points at something degrading inside the reused Chromium process rather than at test
+order.
+
+Ruled out: the auth gate, context leakage, and candidate generation. **Not** ruled out: a genuine
+race between `CallSession.join()` and the `call-join` handler, or plain resource exhaustion — this
+laptop runs these with about 1.5 GB free.
+
+Retries are deliberately **not** switched on locally to paper over it. A flake you cannot see is a
+flake nobody fixes. It is written at the top of the spec so the next person starts from the evidence
+rather than from scratch.
+
+### The harness, and why it is not a UI test
+
+`e2e/fixtures/call-harness.html` mounts the **real** `src/lib/call/session.ts` against the **real**
+socket server and publishes state on `window.__call`. Reaching the in-app call button needs a sign-in,
+a Pro plan, a room and an invitation — none of which is the thing that was untested. It lives under
+`e2e/`, so Vite's dev server serves it and `npm run build` (which bundles from `index.html`) does
+**not** ship it.
+
+Auth is real: the Admin SDK mints custom tokens for two fixed `e2e-` uids and writes their Pro flag
+before handing the token over, because `join-room` reads the plan the moment the socket connects. The
+whole suite **skips itself cleanly** when admin credentials are absent, so a fresh clone gets an
+honest "skipped" rather than a wall of red.
+
+### Also fixed while here
+`npm test` was collecting the Playwright spec into Vitest and reporting a failing file. Excluded.
+
+### Verified
+```
+npx playwright test     3/3 on a clean run (flaky ~1 in 3 — see above)
+npm test              271/271
+tsc --noEmit          clean
+```
+
+### Files
+`playwright.config.ts` (new), `e2e/call.spec.ts` (new), `e2e/pages/CallHarnessPage.ts` (new),
+`e2e/fixtures/call-harness.{html,ts}` (new), `e2e/fixtures/testUsers.ts` (new), `package.json`,
+`.gitignore`.

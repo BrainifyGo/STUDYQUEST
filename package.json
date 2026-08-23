@@ -10,10 +10,12 @@
     "lint": "eslint src",
     "preview": "vite preview",
     "start": "cross-env NODE_ENV=production tsx server.ts",
-    "test": "vitest run --exclude tests/rules.test.ts --exclude \"**/node_modules/**\" --exclude \"**/dist/**\"",
+    "test": "vitest run --exclude tests/rules.test.ts --exclude \"e2e/**\" --exclude \"**/node_modules/**\" --exclude \"**/dist/**\"",
     "test:rules": "firebase emulators:exec --only firestore \"vitest run tests/rules.test.ts\"",
     "typecheck": "tsc --noEmit",
-    "check:ai": "node scripts/checkProviders.cjs"
+    "check:ai": "node scripts/checkProviders.cjs",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
@@ -53,6 +55,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@firebase/rules-unit-testing": "^5.0.1",
+    "@playwright/test": "^1.62.1",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",

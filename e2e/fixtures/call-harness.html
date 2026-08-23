@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>StudyQuest call harness (test only)</title>
+</head>
+<body style="background:#07080f;color:#e2e8f0;font-family:system-ui;padding:16px">
+  <!--
+    TEST HARNESS. Not part of the app.
+
+    It lives under e2e/ so Vite's dev server will serve it (dev runs in
+    middleware mode from the project root) while `npm run build` will NOT ship
+    it: the production bundle is built from index.html, so nothing here reaches
+    a real user.
+
+    WHY A HARNESS RATHER THAN DRIVING THE UI. The thing that has never been
+    tested is the call itself -- peer negotiation, ICE, and whether media
+    actually flows between two browsers. Reaching the in-app call button
+    requires signing in, holding a Pro plan, creating a room and inviting
+    someone, none of which is what is broken. This mounts the REAL
+    `src/lib/call/session.ts` against the REAL socket server, so a pass means
+    the call code works, not that a mock does.
+  -->
+  <h1 id="title" style="font-size:14px;letter-spacing:.1em">CALL HARNESS</h1>
+  <pre id="state" style="font-size:12px;line-height:1.6">booting…</pre>
+  <div id="videos"></div>
+  <script type="module" src="/e2e/fixtures/call-harness.ts"></script>
+</body>
+</html>
