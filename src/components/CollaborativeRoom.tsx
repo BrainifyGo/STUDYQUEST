@@ -16,6 +16,9 @@ import { callAI } from '../lib/aiService';
 import { buildStudyPrompt, parseJsonReply, normaliseQuiz } from '../lib/studyPrompts';
 import { GameMode } from './GameMode';
 import { MODE_ORDER, MODES } from '../lib/gameModes';
+import LiveDuelPanel from './LiveDuelPanel';
+import { can, planOf } from '../lib/entitlements';
+import { useUserStore } from '../store/useUserStore';
 import type { QuizQuestion } from '../App';
 import { CallSession, type CallSnapshot } from '../lib/call/session';
 import { MediaError } from '../lib/call/media';
@@ -189,6 +192,15 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
   const [denied, setDenied] = useState<'pro' | 'signin' | 'error' | 'suspended' | 'blocked' | null>(null);
 
   const [roomQuiz, setRoomQuiz] = useState<QuizQuestion[]>([]);
+  /*
+    A live duel runs over the room's own quiz, so it needs a room and a deck —
+    which is exactly why it lives in here rather than in the Arcade, where there
+    is nobody to duel.
+  */
+  const [duelling, setDuelling] = useState(false);
+  // Same gate as the Arcade: the 3D arena is the Pro spectacle, the duel
+  // itself is not gated at all.
+  const { userData } = useUserStore();
   const [isMakingQuiz, setIsMakingQuiz] = useState(false);
 
   /*
@@ -635,6 +647,26 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
     );
   }
 
+  /*
+    The duel takes the whole screen while it runs, the same way the in-room game
+    does. A seven-round head-to-head is not something to play in a side panel
+    with the chat scrolling next to it.
+  */
+  if (duelling && socketRef.current) {
+    return (
+      <div className="fixed inset-0 z-[100] bg-bg-dark overflow-y-auto">
+        <LiveDuelPanel
+          socket={socketRef.current}
+          userName={userName}
+          deck={roomQuiz}
+          subject={currentStudyKit?.subject}
+          canUse3D={can(planOf(!!userData?.isPro), '3d-arena')}
+          onClose={() => setDuelling(false)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-[100] flex flex-row bg-bg-dark overflow-hidden">
       {/* A round, played over the room. Leaving it drops you straight back in. */}
@@ -1037,13 +1069,23 @@ export default function CollaborativeRoom({ roomId: initialRoomId, userName, onC
                       : 'Make a quiz from the shared notes first, then race each other through it.'}
                   </p>
                 </div>
-                <button
-                  onClick={() => setPlayingGame(true)}
-                  disabled={roomQuiz.length < 4}
-                  className="btn-primary px-8 py-3 rounded-2xl font-bold shadow-2xl shadow-brand-purple/20 disabled:opacity-40 disabled:grayscale"
-                >
-                  Play together
-                </button>
+                <div className="flex flex-wrap gap-3 justify-center">
+                  <button
+                    onClick={() => setPlayingGame(true)}
+                    disabled={roomQuiz.length < 4}
+                    className="btn-primary px-8 py-3 rounded-2xl font-bold shadow-2xl shadow-brand-purple/20 disabled:opacity-40 disabled:grayscale"
+                  >
+                    Play together
+                  </button>
+                  {/* Head to head on the same questions, at the same time. */}
+                  <button
+                    onClick={() => setDuelling(true)}
+                    disabled={roomQuiz.length < 4}
+                    className="px-8 py-3 rounded-2xl font-bold border border-brand-purple/60 text-white hover:bg-brand-purple/10 transition-all disabled:opacity-40 disabled:grayscale"
+                  >
+                    Duel someone
+                  </button>
+                </div>
               </div>
             </div>
           </div>

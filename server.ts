@@ -14,6 +14,7 @@ import { can, planOf, type Feature } from "./src/lib/entitlements";
 import { eraseAccount } from "./src/lib/accountData.server";
 import { checkUsernameSafety, checkDisplayNameSafety, safetyMessage, usernameShapeProblem } from "./src/lib/usernameSafety";
 import { sendEmail, resetCodeEmail, emailConfigured } from "./src/lib/email.server";
+import { DuelMatch, type MatchPlayer } from "./src/lib/duelMatch";
 
 dotenv.config();
 
@@ -283,6 +284,34 @@ async function startServer() {
   }
 
   const rooms = new Map<string, RoomState>();
+
+  /*
+    Live duels, in memory alongside the rooms. A duel is a few minutes long and
+    worthless once it is over, so persisting it would be storage nobody reads —
+    the same call the study rooms make.
+  */
+  const duels = new Map<string, DuelMatch>();
+  const duelTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const duelRoom = (id: string) => `duel:${id}`;
+
+  /**
+   * End every duel this socket was in, and tell the other player.
+   *
+   * Called both on an explicit leave and on disconnect, because closing the tab
+   * is the commonest way to abandon a duel — the same reason the call code
+   * handles `disconnecting` as well as a hang-up. Without it the person left
+   * behind watches a clock that never moves.
+   */
+  const leaveDuels = (socketId: string) => {
+    for (const [id, match] of duels) {
+      if (!match.has(socketId)) continue;
+      match.forfeit(socketId);
+      clearTimeout(duelTimers.get(id));
+      duelTimers.delete(id);
+      io.to(duelRoom(id)).emit("duel-over", { forfeitedBy: socketId });
+      duels.delete(id);
+    }
+  };
 
   const publicMembers = (r: RoomState) => Array.from(r.users.values());
 
@@ -563,7 +592,116 @@ async function startServer() {
     socket.on("call-answer", (p) => relayToPeer("call-answer", p));
     socket.on("call-ice", (p) => relayToPeer("call-ice", p));
 
+    /* ── LIVE DUEL ──────────────────────────────────────────────────────────
+       Two people, seven rounds, the same questions at the same time.
+
+       The scoring is NOT re-implemented here. `duel.ts` already resolves a round
+       from two committed answers and is deterministic, so both browsers reach an
+       identical state from the same inputs — a second copy of the rules on the
+       server would be the first thing to drift.
+
+       What the server owns is the two facts a client must not be trusted with:
+       whether an answer was right (the correct option is never sent until the
+       round closes) and how long it took (measured here, from when the question
+       went out). Both are covered by `duelMatch.test.ts`.
+
+       AUTH IS THE SAME GATE AS EVERYTHING ELSE: a duel is created from inside a
+       room, so `whereAmI()` has already established a verified, Pro, unsuspended
+       member. There is no separate door here to leave unlocked.
+    */
+    const startRound = (match: DuelMatch) => {
+      const prompt = match.nextRound(Date.now());
+      if (!prompt) { finishDuel(match); return; }
+      io.to(duelRoom(match.id)).emit("duel-round", prompt);
+
+      // The buzzer. Cleared when both answer, so an early finish is not waiting
+      // for a timer that has already been overtaken.
+      clearTimeout(duelTimers.get(match.id));
+      duelTimers.set(match.id, setTimeout(() => {
+        if (match.expired(Date.now())) closeRound(match);
+      }, (prompt.endsAt - Date.now()) + 1200));
+    };
+
+    const closeRound = (match: DuelMatch) => {
+      const outcome = match.closeRound();
+      if (!outcome) return;
+      clearTimeout(duelTimers.get(match.id));
+      io.to(duelRoom(match.id)).emit("duel-result", outcome);
+
+      if (match.finished) { setTimeout(() => finishDuel(match), 2200); return; }
+      // The pause is the reveal: both players read the explanation before the
+      // next question replaces it.
+      setTimeout(() => { if (duels.get(match.id) === match) startRound(match); }, 2200);
+    };
+
+    const finishDuel = (match: DuelMatch) => {
+      clearTimeout(duelTimers.get(match.id));
+      duelTimers.delete(match.id);
+      io.to(duelRoom(match.id)).emit("duel-over", {
+        forfeitedBy: match.forfeitedBy,
+      });
+      duels.delete(match.id);
+    };
+
+    socket.on("duel-create", ({ deck }) => {
+      const here = whereAmI();
+      if (!here) return socket.emit("duel-error", { reason: "NOT_IN_ROOM" });
+      if (!Array.isArray(deck) || !deck.length) {
+        return socket.emit("duel-error", { reason: "NO_QUESTIONS" });
+      }
+
+      const id = crypto.randomUUID().slice(0, 8);
+      const host: MatchPlayer = {
+        socketId: socket.id, uid: here.me.uid, name: here.me.name,
+      };
+      const match = new DuelMatch(id, deck, host);
+      duels.set(id, match);
+      socket.join(duelRoom(id));
+
+      socket.emit("duel-created", { duelId: id, rounds: match.rounds });
+      // Announced to the room rather than to one person: a duel is an open
+      // invitation anyone studying with you can take.
+      socket.to(here.roomId).emit("duel-offered", {
+        duelId: id, from: host.name, rounds: match.rounds,
+      });
+    });
+
+    socket.on("duel-accept", ({ duelId }) => {
+      const here = whereAmI();
+      const match = duels.get(String(duelId));
+      if (!here || !match) return socket.emit("duel-error", { reason: "GONE" });
+
+      const joined = match.join({
+        socketId: socket.id, uid: here.me.uid, name: here.me.name,
+      });
+      if (!joined) return socket.emit("duel-error", { reason: "FULL" });
+
+      socket.join(duelRoom(match.id));
+      io.to(duelRoom(match.id)).emit("duel-start", {
+        duelId: match.id,
+        rounds: match.rounds,
+        players: match.players.map((p) => ({ id: p.socketId, name: p.name })),
+      });
+      // Nobody is looking at the question yet, so a beat here is the difference
+      // between "the duel started" and "the duel started and I missed round 1".
+      setTimeout(() => { if (duels.get(match.id) === match) startRound(match); }, 1200);
+    });
+
+    socket.on("duel-answer", ({ duelId, round, option }) => {
+      const match = duels.get(String(duelId));
+      if (!match) return;
+      if (!match.answer(socket.id, Number(round), option, Date.now())) return;
+      // Tell the other side somebody has locked in, without saying what.
+      socket.to(duelRoom(match.id)).emit("duel-opponent-answered", { round: match.round });
+      if (match.everyoneAnswered) closeRound(match);
+    });
+
+    socket.on("duel-leave", () => leaveDuels(socket.id));
+
     socket.on("disconnecting", () => {
+      // Walking out of a duel ends it for the other person, who would otherwise
+      // sit watching a clock that never moves.
+      leaveDuels(socket.id);
       for (const roomId of socket.rooms) {
         const room = rooms.get(roomId);
         if (!room) continue;

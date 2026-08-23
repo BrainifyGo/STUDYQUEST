@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Check, X, Swords, Timer, Trophy, Zap, Users } from 'lucide-react';
+import { ArrowLeft, Swords, Trophy, Zap, Users } from 'lucide-react';
 import {
   BOT_PROFILES, DUEL_MAX_HP, DUEL_ROUND_SECONDS,
   currentQuestion, resolveRound, startDuel, tally,
@@ -7,14 +7,9 @@ import {
 } from '../lib/duel';
 import type { QuizQuestion } from '../App';
 import { playSfx } from '../lib/arcadeSound';
-import DuelArena2D from './DuelArena2D';
-import type { DuelArenaEvent, DuelSide } from './DuelArena3D';
+import DuelStage from './DuelStage';
+import type { DuelArenaEvent } from './DuelArena3D';
 
-/*
-  The 3D arena is Pro and lazy, so a free account never downloads a byte of it.
-  Same arrangement as the boss arena.
-*/
-const DuelArena3D = React.lazy(() => import('./DuelArena3D'));
 
 /**
  * DUEL — the screen.
@@ -54,39 +49,6 @@ const OPPONENTS: Array<{
   { id: 'nemesis', name: 'Nemesis', blurb: 'Fast and rarely wrong. You have to be both.' },
 ];
 
-const HealthBar: React.FC<{
-  name: string; hp: number; side: DuelSide; leading: boolean;
-}> = ({ name, hp, side, leading }) => {
-  const isYou = side === 'you';
-  const pct = Math.max(0, Math.min(100, hp));
-  return (
-    <div className={`flex-1 min-w-0 ${isYou ? '' : 'text-right'}`}>
-      <div className={`flex items-center gap-2 mb-1 ${isYou ? '' : 'flex-row-reverse'}`}>
-        <span
-          className="w-6 h-6 rounded-full shrink-0"
-          style={{ background: isYou ? '#3db4fa' : '#b85afa' }}
-          aria-hidden="true"
-        />
-        <span className="text-xs font-bold truncate text-text-main">{name}</span>
-        {leading && <Trophy className="w-3 h-3 text-yellow-400 shrink-0" aria-label="Leading" />}
-      </div>
-      <div className={`h-2 rounded-full bg-white/10 overflow-hidden ${isYou ? '' : 'flex justify-end'}`}>
-        <div
-          className="h-full rounded-full transition-[width] duration-500 ease-out"
-          style={{
-            width: `${pct}%`,
-            // Turns amber then red as it drops, so the state of the duel is
-            // readable from colour before the number is read.
-            background: pct > 55 ? (isYou ? '#3db4fa' : '#b85afa')
-              : pct > 25 ? '#f59e0b' : '#ef4444',
-          }}
-        />
-      </div>
-      <div className="text-[10px] mt-0.5 tabular-nums text-text-dim">{pct} HP</div>
-    </div>
-  );
-};
-
 export const DuelMode: React.FC<DuelModeProps> = ({
   questions, subject, youName, onBack, onAwardXP, canUse3D, sfxOn,
 }) => {
@@ -96,11 +58,6 @@ export const DuelMode: React.FC<DuelModeProps> = ({
   const [secondsLeft, setSecondsLeft] = useState(DUEL_ROUND_SECONDS);
   const [event, setEvent] = useState<DuelArenaEvent>({ id: 0, winner: null, traded: false });
   const [awarded, setAwarded] = useState(false);
-  const [webglFailed, setWebglFailed] = useState(false);
-  // Stable identity. The arena guards itself against a changing callback now,
-  // but handing a fresh function to a canvas component ten times a second was
-  // the bug — not worth relying on the other side to keep absorbing it.
-  const onUnsupported = useCallback(() => setWebglFailed(true), []);
 
   /** When the current round's question appeared. The clock is measured, not counted. */
   const roundStart = useRef(0);
@@ -205,7 +162,6 @@ export const DuelMode: React.FC<DuelModeProps> = ({
 
   const question = duel ? currentQuestion(duel) : null;
   const rounds = useMemo(() => (duel ? tally(duel) : null), [duel]);
-  const show3D = canUse3D && !webglFailed;
 
   /* ── Pick an opponent ─────────────────────────────────────────────────── */
   if (!duel || !difficulty) {
@@ -306,134 +262,53 @@ export const DuelMode: React.FC<DuelModeProps> = ({
 
   /* ── The duel ─────────────────────────────────────────────────────────── */
   const whole = Math.ceil(secondsLeft);
-  const urgent = whole <= 3 && picked === null;
+  const last = duel.history[duel.history.length - 1];
 
+  /*
+    The layout is shared with the live duel against a friend — see DuelStage.
+    Two components rendering "the same" screen is how two screens stop being the
+    same: one gets a fix and the other keeps the bug.
+  */
   return (
-    <div className="max-w-3xl mx-auto p-4 sm:p-6 pb-chrome">
-      {/* Health, names, round and clock — all HTML, never drawn into the canvas,
-          so a screen reader can read them and zoom does not blur them. */}
-      <div className="flex items-start gap-3 mb-3">
-        <HealthBar name={duel.you.name} hp={duel.you.hp} side="you"
-                   leading={duel.you.hp > duel.foe.hp} />
-
-        <div className="shrink-0 text-center px-2">
-          <div className="text-[10px] uppercase tracking-widest text-text-dim">
-            Round {duel.round}/{duel.rounds}
-          </div>
-          <div
-            className={`text-3xl font-bold tabular-nums leading-none ${urgent ? 'text-red-400' : 'text-text-main'}`}
-            role="timer"
-            aria-live="off"
-          >
-            {whole}
-          </div>
+    <DuelStage
+      youName={duel.you.name}
+      foeName={duel.foe.name}
+      youHp={duel.you.hp}
+      foeHp={duel.foe.hp}
+      round={duel.round}
+      rounds={duel.rounds}
+      secondsLeft={whole}
+      subject={subject}
+      question={question.question}
+      options={question.options}
+      picked={picked}
+      correctAnswer={picked !== null ? question.correctAnswer : null}
+      event={event}
+      canUse3D={canUse3D}
+      onChoose={choose}
+      verdict={picked !== null && last ? (
+        <div className={`p-4 rounded-xl text-sm ${
+          last.winner === 'you' ? 'bg-green-500/10 text-green-400/90'
+            : last.winner === 'foe' ? 'bg-red-500/10 text-red-400/90'
+            : 'bg-white/5 text-text-muted'
+        }`}>
+          <span className="font-bold">
+            {last.winner === 'you'
+              ? (last.traded
+                ? `Both right — you were faster. ${last.damage} damage. `
+                : `Hit! ${last.damage} damage. `)
+              : last.winner === 'foe'
+                ? (last.traded
+                  ? `Both right, but ${duel.foe.name} was faster. `
+                  : last.yours.correct ? '' : `${duel.foe.name} got it. `)
+                : 'Neither of you got it. '}
+          </span>
+          {question.explanation}
         </div>
-
-        <HealthBar name={duel.foe.name} hp={duel.foe.hp} side="foe"
-                   leading={duel.foe.hp > duel.you.hp} />
-      </div>
-
-      <div className="h-52 sm:h-64 mb-4 rounded-2xl overflow-hidden">
-        {show3D ? (
-          <React.Suspense fallback={<DuelArena2D youHpPct={duel.you.hp} foeHpPct={duel.foe.hp} event={event} loser={null} />}>
-            <DuelArena3D
-              youHpPct={duel.you.hp}
-              foeHpPct={duel.foe.hp}
-              event={event}
-              loser={duel.you.hp <= 0 ? 'you' : duel.foe.hp <= 0 ? 'foe' : null}
-              onUnsupported={onUnsupported}
-            />
-          </React.Suspense>
-        ) : (
-          <DuelArena2D
-            youHpPct={duel.you.hp}
-            foeHpPct={duel.foe.hp}
-            event={event}
-            loser={duel.you.hp <= 0 ? 'you' : duel.foe.hp <= 0 ? 'foe' : null}
-          />
-        )}
-      </div>
-
-      {question && (
-        <>
-          <div className="rounded-2xl border border-border-main bg-glass-bg p-5 mb-4 text-center">
-            {subject && (
-              <span className="inline-block mb-2 px-2 py-0.5 rounded-full bg-brand-purple/20 text-brand-purple text-[10px] font-bold uppercase tracking-widest">
-                {subject}
-              </span>
-            )}
-            <h2 className="text-base sm:text-lg font-medium text-text-main">{question.question}</h2>
-          </div>
-
-          <div className="grid gap-3 grid-cols-2">
-            {question.options.map((opt, i) => {
-              const isAnswer = opt === question.correctAnswer;
-              const chosen = picked === opt;
-              const reveal = picked !== null;
-              return (
-                <button
-                  key={i}
-                  onClick={() => choose(opt)}
-                  disabled={reveal}
-                  className={`p-4 rounded-xl text-sm text-center border font-semibold transition-all ${
-                    reveal && isAnswer
-                      ? 'bg-green-500/20 border-green-500/50 text-green-400'
-                      : reveal && chosen
-                        ? 'bg-red-500/20 border-red-500/50 text-red-400'
-                        : 'bg-glass-bg border-border-main text-text-muted hover:text-text-main hover:border-brand-purple'
-                  }`}
-                >
-                  <span className="flex items-center justify-center gap-2">
-                    {/* A tick or a cross as well as the colour — green and red are
-                        close to indistinguishable for red-green colourblindness. */}
-                    {reveal && (isAnswer
-                      ? <Check className="w-4 h-4 shrink-0" aria-label="Correct answer" />
-                      : chosen
-                        ? <X className="w-4 h-4 shrink-0" aria-label="Your answer, incorrect" />
-                        : null)}
-                    {opt}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="mt-4 min-h-[3.5rem]" role="status" aria-live="polite">
-            {picked !== null && (() => {
-              const last = duel.history[duel.history.length - 1];
-              if (!last) return null;
-              const yoursRight = last.yours.correct;
-              return (
-                <div className={`p-4 rounded-xl text-sm ${
-                  last.winner === 'you' ? 'bg-green-500/10 text-green-400/90'
-                    : last.winner === 'foe' ? 'bg-red-500/10 text-red-400/90'
-                    : 'bg-white/5 text-text-muted'
-                }`}>
-                  <span className="font-bold">
-                    {last.winner === 'you'
-                      ? (last.traded
-                        ? `Both right — you were faster. ${last.damage} damage. `
-                        : `Hit! ${last.damage} damage. `)
-                      : last.winner === 'foe'
-                        ? (last.traded
-                          ? `Both right, but ${duel.foe.name} was faster. `
-                          : yoursRight ? '' : `${duel.foe.name} got it. `)
-                        : 'Neither of you got it. '}
-                  </span>
-                  {question.explanation}
-                </div>
-              );
-            })()}
-          </div>
-
-          <div className="mt-3 flex items-center justify-center gap-2 text-[11px] text-text-dim">
-            <Timer className="w-3 h-3" />
-            Answer faster to hit harder
-          </div>
-        </>
-      )}
-    </div>
+      ) : null}
+    />
   );
 };
+
 
 export default DuelMode;

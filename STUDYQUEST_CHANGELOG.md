@@ -3338,3 +3338,90 @@ tsc --noEmit                 clean
 ### Files
 `server.ts` (`/api/turn-credentials`), `src/lib/call/ice.ts` (new), `src/lib/call/peer.ts`,
 `src/lib/call/session.ts`, `.env.example`.
+
+---
+
+## [2026-08-22] — Duelling a friend, live
+
+**Editor:** Claude Code (Opus 5)
+
+The bot duel shipped with a note on its own opponent-picker: *"Duelling a friend live is next. The
+arena and the rules are already built for it — only the matchmaking is missing."* That turned out to
+be exactly true. The scoring engine is **unchanged**; the opponent's answer now arrives over a socket
+instead of from `botAnswer()`, and nothing downstream can tell the difference.
+
+That was the whole point of building `resolveRound(state, yours, theirs)` in the first place.
+
+### The server referees two facts, and only two
+
+Against a bot, cheating is pointless. Against a friend it is the entire game, so the server owns the
+two things a client must not decide:
+
+1. **Whether an answer is correct.** The correct option is **never sent** until the round closes.
+   Otherwise it is sitting in the network tab, and beating your friend is a matter of opening
+   devtools. The prompt carries the four options and nothing that marks one of them — asserted by
+   comparing the payload's exact key set, so a later addition cannot quietly leak it.
+2. **How long it took.** Damage scales with speed. A client reporting its own timing would claim 0.0s
+   every round and out-damage an honest player forever. The server stamps the elapsed time from when
+   **it** sent the question, clamps it to the buzzer, and floors it at zero so clock skew cannot
+   produce a negative.
+
+Everything after those two facts is arithmetic both browsers can do. So the server does **not**
+re-implement scoring — that would be a second copy of the rules and the first thing to drift.
+`resolveRound` is deterministic, both sides run it on identical inputs, and the E2E test asserts they
+agree: Alice's health must equal Bob's opponent's health. If they ever disagree, one of them is
+showing a lie.
+
+A few smaller refusals, each its own test: only the first answer counts (otherwise you answer, watch
+their face, and change your mind); an answer for the wrong round, from a stranger, or after the round
+closed is ignored; and an option that is not on the list is treated as **simply wrong** rather than an
+error, because that is the shape a tampered payload takes and it should lose the round, not crash the
+match for the honest player.
+
+### A deadline, not a duration
+
+The prompt carries `endsAt` — a server timestamp — rather than "you have ten seconds". Two people on
+different connections then count down to the same instant. Counting locally would hand whoever
+received the packet first a real advantage in a mode where speed is damage.
+
+### One screen, not two
+
+The bot duel and the live duel now render the same `DuelStage`: same arena, same health bars, same
+answer grid. They were going to be two components drawing "the same" thing, which is how two things
+stop being the same — one gets a fix, the other keeps the bug, and it surfaces as *"it looks
+different online"*.
+
+`DuelMode` lost about 100 lines to the extraction and gained nothing else.
+
+### Walking out
+
+Closing the tab is the commonest way to quit anything, so a forfeit is handled on `disconnecting` as
+well as on an explicit leave — the same lesson the call code learned. Without it the other person
+sits watching a clock that never moves. There is an E2E test that closes a browser mid-duel and
+asserts the survivor is told.
+
+### Verified
+
+```
+tests/duelMatch.test.ts       24/24  (new — the refereeing, and what it refuses)
+npm test                    295/295
+e2e (call + duel)            10/10 over two full repeats
+tsc, eslint, build            clean
+```
+
+The live test is two real browsers on the real server: one creates a duel, the other accepts, they
+play all seven rounds, and both are asserted to agree on the winner **and** the exact health on both
+sides. The harness picks its answers by a prefix in the option text, never by asking which is correct
+— because the server never says. If that ever changed, this test would keep passing while the game
+became cheatable, which is why `duelMatch.test.ts` guards the secrecy separately.
+
+### Where it lives
+Inside a study room, on the room's own quiz — a duel needs a room, a deck and somebody to duel, and
+the Arcade has none of those. "Duel someone" sits beside "Play together"; the offer goes to the whole
+room rather than to one person, so anyone studying with you can take it.
+
+### Files
+`src/lib/duelMatch.ts` (new), `src/lib/liveDuel.ts` (new), `src/components/DuelStage.tsx` (new),
+`src/components/LiveDuelPanel.tsx` (new), `server.ts`, `src/components/DuelMode.tsx`,
+`src/components/CollaborativeRoom.tsx`, `tests/duelMatch.test.ts` (new), `e2e/duel.spec.ts` (new),
+`e2e/fixtures/duel-harness.{html,ts}` (new).
