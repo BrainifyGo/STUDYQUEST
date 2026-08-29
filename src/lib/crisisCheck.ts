@@ -32,8 +32,15 @@
  * ────────────────────────────────────────────────────────────────────────────
  * Same lesson as the username filter, which was a client-side check until a
  * plain REST call walked straight past it. A safety check in the browser is a
- * suggestion. This one runs in `/api/generate`, the single call that reaches a
- * model, so it cannot be skipped by anyone who can open devtools.
+ * suggestion, so this one runs on the server.
+ *
+ * ON ALL THREE ROUTES THAT REACH A MODEL, not one. The first version guarded
+ * `/api/generate` only, and this comment claimed that was "the single call that
+ * reaches a model". It was not: `/api/expand-chat` and `/api/analyze-image` are
+ * two more, and expand-chat — the "Go Deeper" conversation — is the surface
+ * where somebody is MOST likely to say something about themselves rather than
+ * about a syllabus. A safety check with a hole in it is worse than none,
+ * because it is believed.
  */
 
 export type CrisisLevel = 'none' | 'support' | 'crisis';

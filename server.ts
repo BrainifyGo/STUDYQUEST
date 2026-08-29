@@ -1459,6 +1459,23 @@ async function startServer() {
       const { uid, isPro } = await verifyUserAndBudget(req.headers.authorization);
 
       /*
+        The third route that reaches a model, and the weakest of the three for
+        this — the risk here is in the PHOTO, which nothing on this server can
+        read. What can be checked is the caption typed alongside it, so that is
+        what is checked.
+
+        Recorded plainly rather than left implied: a picture of something
+        worrying will pass straight through. Closing that needs the vision model
+        itself to flag it, which is a different and much larger piece of work.
+      */
+      const shotRisk = assessCrisis(prompt);
+      if (shotRisk.level === 'crisis') {
+        console.warn(`[crisis] refused analyze-image (${shotRisk.matched})`);
+        return res.json({ result: CRISIS_MESSAGE, model: 'safety', crisis: true });
+      }
+
+
+      /*
         TRANSCRIBE, DO NOT SUMMARISE.
 
         This used to ask for "a comprehensive and structured summary of
@@ -1509,6 +1526,33 @@ RULES:
     if (!studyKitContext || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: 'Missing study kit context or messages' });
     }
+
+    /*
+      THE SAME CRISIS CHECK AS /api/generate, AND THIS ROUTE NEEDS IT MORE.
+
+      "Go Deeper" is a conversation, not a topic box. A topic box gets a subject
+      typed into it; a chat gets whatever is actually on someone's mind, and it
+      is the surface where a person is most likely to say something about
+      themselves rather than about a syllabus.
+
+      Adding the check to /api/generate alone was an incomplete fix, and the
+      comment in crisisCheck.ts calling that "the single call that reaches a
+      model" was simply wrong — there are three.
+
+      Only the newest USER message is assessed. The whole history would re-fire
+      on every subsequent turn once the topic had come up, and the assistant's
+      own words are not somebody asking for help.
+    */
+    const lastUser = [...messages].reverse()
+      .find((m: { role?: string }) => (m?.role ?? 'user') === 'user');
+    const chatRisk = assessCrisis(
+      typeof lastUser?.content === 'string' ? lastUser.content : lastUser?.text
+    );
+    if (chatRisk.level === 'crisis') {
+      console.warn(`[crisis] refused expand-chat (${chatRisk.matched})`);
+      return res.json({ result: CRISIS_MESSAGE, model: 'safety', crisis: true });
+    }
+
 
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith('Bearer ')) {
