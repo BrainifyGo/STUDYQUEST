@@ -98,7 +98,7 @@ const PHASE_COLOUR: Record<number, [number, number, number]> = {
 /** An icosahedron, subdivided once. Enough facets to catch the light. */
 function icosphere(): { positions: Float32Array; normals: Float32Array } {
   const t = (1 + Math.sqrt(5)) / 2;
-  let verts: number[][] = [
+  const verts: number[][] = [
     [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
     [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
     [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1],

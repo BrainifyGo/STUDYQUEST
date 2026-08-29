@@ -3639,3 +3639,179 @@ And against the running server, with the real sentence:
 `src/lib/crisisCheck.ts` (new), `src/lib/studySession.ts` (new), `tests/crisisCheck.test.ts` (new),
 `server.ts`, `src/App.tsx`, `src/components/GameMode.tsx`, `src/components/DuelMode.tsx`,
 `src/components/StudyPlanner.tsx`.
+
+---
+
+## [2026-08-29] — Debug sweep: the uncaught error every new account produced
+
+**Editor:** Claude Code (Opus 5)
+
+RED asked for a debug test on StudyQuest. Local checks were clean — `tsc` clean, 373/373 tests,
+`eslint` clean, production endpoints all returning what they should. So the sweep moved into a real
+browser, signed in, and watched for console errors, uncaught exceptions, failed requests, 4xx/5xx
+responses and horizontal overflow on every screen.
+
+It found one thing, and it was on every single new account.
+
+### What it found
+
+Creating an account threw an uncaught **"Missing or insufficient permissions"**. Nothing visible
+broke — the toast still said "Account created. Welcome to StudyQuest.", the dashboard still loaded,
+the account still worked — so it had never been noticed. It was a silent error on the most important
+path in the product.
+
+### Chasing it
+
+It resisted the obvious approaches, and each dead end is worth recording because each one ruled
+something out:
+
+- **The rules were fine.** Every collection the client actually queries was tested against a real
+  new account: `users`, `exams`, `study_tasks`, `study_sessions`, `study_history`, `study_mistakes`,
+  `friendships`, `friend_requests`, `challenges`, `public_profiles`, `user_stats`. All allowed. (Two
+  looked denied at first — `study_history` and `study_mistakes` — but that was the test using
+  `userId` where the app and the rules both use `user_id`. Not a bug.)
+- **The error had no stack.** Not minification: it had no stack on the local dev build either. It
+  reached the page as an *unhandled promise rejection*, which carries only a message.
+- **Chrome's async stack, over CDP, was entirely inside the Firestore SDK** — `h.send`, `h.Ma`,
+  `h.Pa`, all WebChannel transport, no application frames at all. That is the signature of a promise
+  that no application code is awaiting.
+- **It was not `testConnection()`**, the module-load read of `test/connection` in `src/lib/firebase.ts`
+  — a collection with no rule, so it is denied on every page load for every user. Disabling it
+  changed nothing. (It is caught, so it is only a wasted round trip. Left alone, but noted.)
+
+So: a Firestore write that no code awaits and no code catches. Searching for exactly that — calls to
+`setDoc`/`updateDoc`/`addDoc` with no `await`, no assignment and no `.catch` — found it in four
+lines.
+
+### The cause
+
+`src/App.tsx` had a **fourth** copy of the new-user document, inside the `users/{uid}` snapshot
+listener's else-branch, and it passed the display name straight through:
+
+```js
+const newUserData = { uid, email, displayName: firebaseUser.displayName, ... };
+setDoc(userRef, newUserData);          // not awaited, not caught
+```
+
+`firestore.rules` says:
+
+```
+(!('displayName' in data) || data.displayName is string && data.displayName.size() < 100)
+```
+
+A fresh email/password account has `displayName === null` on the Firebase Auth user. The key is
+present and `null` is not a string, so `isValidUser()` is false and the create is **refused** — every
+time, for every email signup. Nothing awaited that write, so the refusal had nowhere to go.
+
+Reproduced directly against the live rules to be sure: the exact payload the app wrote was
+`permission-denied`; the same payload with `displayName` coerced to a string was accepted; with the
+key removed entirely, also accepted.
+
+### The real problem underneath
+
+Fixing that one line moved the failure rather than removing it — the *sign-up handler's* write then
+started failing instead, and that one is caught and shows the user
+*"Your account was created but your profile couldn't be saved."* Worse than silent.
+
+The actual problem was that **four different places created the same document**, and on a signup two
+of them run at once: `signUpWithEmail()` fires `onAuthStateChanged` while the sign-up handler is
+still running. Whichever write lands second is no longer a create but an **update**, and the update
+rule requires `budgetUnchanged()`. The handler payloads carry no `tokenResetDate`; the listener's
+does. So the loser changed a budget field and was refused. A race that could only ever be lost by
+somebody.
+
+Reproduced that too, in isolation: create the document handler-style, then write the listener-style
+payload over it → `permission-denied`; the same write minus the four budget fields → allowed.
+
+### The fix
+
+One owner. The `users/{uid}` snapshot listener creates the document, because it fires on every auth
+path there is — email, Google, GitHub, phone — whenever the document is missing. The three
+near-identical copies in the sign-up handlers are gone.
+
+The payload moved to `src/lib/newUserProfile.ts`, so the rule constraint is stated once, in one
+place, with the reason next to it. `tests/newUserProfile.test.ts` pins it: **displayName is always a
+non-empty string**, for a null name, a null email, an empty string, whitespace, and an email that is
+nothing but a domain. The rule's 100-character limit is pinned too.
+
+New accounts are also better off than before. They now get the token budget fields
+(`tokenResetDate`, `tokenDailyResetDate`, `tokensUsedToday`, `tokensUsedThisMonth`) that the
+handler payloads never wrote, plus `isPro: false` and `photoURL`. `plan: 'free'` is kept because
+`Header.tsx` reads it as a fallback for `isPro` — dropping it would not have failed a test, it would
+just have quietly stopped being written.
+
+The one remaining floating write, the daily-generation rollover in the same listener, now has a
+`.catch` that logs through `handleFirestoreError` instead of vanishing.
+
+### Verified
+
+- Signing up on the fixed build: **no uncaught exception, no error log**, and the document is
+  created correctly — `displayName` a string, budget fields present.
+- Every signed-in screen — Home, Library, Stats, Focus, Settings — walked in a real browser at phone
+  width: **0 uncaught exceptions, 0 console errors, 0 failed requests, 0 4xx/5xx, no horizontal
+  overflow.**
+- 385/385 unit tests (was 373), `tsc` clean, `eslint` clean.
+- All 27 throwaway accounts the sweep created were deleted afterwards. Every remaining real account
+  has its `users/{uid}` document.
+
+### The other three things the sweep found
+
+RED said to do what needed doing, so all three were dealt with in the same pass.
+
+**Half a megabyte off first load.** `jsPDF` (335 KB) and `html2canvas` (194 KB) were imported at the
+top of `src/App.tsx`, so every visitor downloaded the whole PDF-export toolchain on first paint
+whether or not they ever pressed Download. They are used in exactly one function, which was already
+`async`, so they are now a dynamic `import()` inside it.
+
+`src/lib/export.ts` went with them: a second, entirely unreferenced copy of PDF and Markdown export
+that nothing in the app, the server or the tests imported — and the other half of why `jspdf` was in
+the entry chunk.
+
+```
+main bundle   2,206 KB  ->  1,619 KB     (-587 KB, -27%)
+jspdf           381 KB  now a lazy chunk, fetched only when someone exports
+html2canvas     197 KB  same
+```
+
+Checked rather than assumed, because a dynamic import with the wrong export shape still "loads" and
+only fails at the moment somebody presses Download: `jsPDF` is a real named export of
+`jspdf.es.min.js` (alongside the default), `html2canvas` is a default export, `tsc` accepts both
+shapes, and Rollup resolved and emitted them as the two separate chunks above. What is *not* covered
+is a click-through of the button itself, which needs a generated study kit; the code inside the
+handler is otherwise unchanged.
+
+**`AuthWrapper.tsx` deleted.** Nothing imported or rendered it. It held its own copy of the null
+`displayName` bug, a `users/{uid}` listener with no error callback, and a listener leak worth
+recording because it is an easy one to write again: its cleanup was
+
+```js
+const unsubDoc = onSnapshot(userRef, ...);
+return () => unsubDoc();          // inside the onAuthStateChanged callback
+```
+
+`onAuthStateChanged` ignores what its observer returns — and the callback was `async`, so that
+return value was a Promise regardless. The listener was never detached, including on sign-out, where
+it would carry on watching a document it no longer had permission to read. Fixing a file nobody
+mounts is not worth the confusion of keeping it, and git has it if it is ever wanted back.
+
+**`testConnection()` removed** from `src/lib/firebase.ts`. It ran on import and did
+`getDocFromServer(doc(db, 'test', 'connection'))`. No rule covers a `test` collection, so that read
+was denied every time, for every visitor, on every page load. It could only ever have reported
+success by failing differently — the catch looked for "the client is offline" and ignored everything
+else, which is exactly the permission-denied it always got. Firestore reports connection trouble
+through the calls the app actually makes.
+
+Also cleared the one standing `eslint` **error** in the repo — a `let` that is never reassigned in
+`BossArena3D.tsx`. Unrelated to all of the above, but the sweep is why it was noticed, and a lint
+error nobody intends to fix is a lint run nobody reads.
+
+### Not fixed
+
+- **Desktop navigation** could not be driven by the sweep: the signed-in nav is a five-item mobile
+  bar that is not visible at 1280px, and the header's menu button did not reveal it. Phone width —
+  which is where RED tests — is fully covered and clean. Worth a look on its own.
+
+### Files
+`src/lib/newUserProfile.ts` (new), `tests/newUserProfile.test.ts` (new), `src/App.tsx`,
+`src/lib/firebase.ts`, `src/components/BossArena3D.tsx`,
+`src/components/AuthWrapper.tsx` (deleted), `src/lib/export.ts` (deleted).

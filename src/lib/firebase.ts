@@ -320,17 +320,20 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   // Log instead of throwing to prevent crashes while Firebase rules are being fixed
 }
 
-// Connection test
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if(error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration. ");
-    }
-  }
-}
-testConnection();
+/*
+  There was a testConnection() here that ran on import and did:
+
+      await getDocFromServer(doc(db, 'test', 'connection'));
+
+  No rule covers a `test` collection, so that read was denied every time, for
+  every visitor, on every page load — a guaranteed failing server round trip
+  before anything useful happened. It could only ever report success by failing
+  differently: the catch looked for "the client is offline" and ignored
+  everything else, which is exactly the permission-denied it always got.
+
+  Firestore reports connection problems through the calls the app actually
+  makes, so there is nothing to replace it with.
+*/
 
 // Guest data transfer function
 export const transferGuestDataToUser = async (userId: string): Promise<boolean> => {

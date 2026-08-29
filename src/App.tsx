@@ -55,8 +55,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
 import * as pdfjsLib from 'pdfjs-dist';
 import { cn } from './lib/utils';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import { newUserProfile } from './lib/newUserProfile';
 import { useUserStore } from './store/useUserStore';
 import { createGuestSession, incrementGuestGeneration } from './lib/guestSession';
 import { 
@@ -605,24 +604,39 @@ export default function App() {
             const today = localDateStr();
             if (data.lastGenerationDate !== today) {
               resetGenerationCount();
-              updateDoc(userRef, { dailyGenerations: 0, lastGenerationDate: today });
+              // Also unhandled if the rules refuse it. A failed daily rollover
+              // is not worth interrupting anyone over, but it must be logged
+              // rather than thrown into the void.
+              updateDoc(userRef, { dailyGenerations: 0, lastGenerationDate: today })
+                .catch((err) => {
+                  handleFirestoreError(err, OperationType.UPDATE, `users/${firebaseUser.uid}`);
+                });
             }
           } else {
-            const newUserData = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email,
-              displayName: firebaseUser.displayName,
-              photoURL: firebaseUser.photoURL,
-              isPro: false,
-              dailyGenerations: 0,
-              lastGenerationDate: localDateStr(),
-              xp: 0,
-              level: 1,
-              streak: 0,
-              studyDays: [],
-              badges: []
-            };
-            setDoc(userRef, newUserData);
+            /*
+              THE UNCAUGHT ERROR ON EVERY NEW ACCOUNT LIVED HERE.
+
+              This was a fourth hand-written copy of the new-user document, and
+              it passed `displayName: firebaseUser.displayName` straight through.
+              That is null for a fresh email/password account, and the rule is:
+
+                (!('displayName' in data) || data.displayName is string && ...)
+
+              The key is present and null is not a string, so isValidUser() is
+              false and the create is refused. Nothing awaited this write and
+              nothing caught it, so the refusal surfaced as an unhandled
+              rejection — "Missing or insufficient permissions", with no stack
+              and no log, on every single signup.
+
+              newUserProfile() guarantees a string. The catch covers the other
+              way this fails: losing the race with the sign-up handler, which is
+              harmless because the winner wrote the document and this very
+              listener delivers it.
+            */
+            const newUserData = newUserProfile(firebaseUser);
+            setDoc(userRef, newUserData).catch((err) => {
+              handleFirestoreError(err, OperationType.CREATE, `users/${firebaseUser.uid}`);
+            });
             setUserData(newUserData);
           }
         }, (err) => {
@@ -869,30 +883,18 @@ export default function App() {
         toast.success('Welcome back to StudyQuest.');
       }
       
-      // Create user document if first time
-      if (auth.currentUser) {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (!userDoc.exists()) {
-          const userData = {
-            // REQUIRED by isValidUser() in firestore.rules, which checks
-            // hasAll(['uid', 'email']). Without it the account is created in
-            // Firebase Auth and then this write is refused, so signing up
-            // appears to fail while leaving a half-made account behind.
-            uid: auth.currentUser.uid,
-            email: auth.currentUser.email,
-            displayName: auth.currentUser.displayName || email.split('@')[0],
-            plan: 'free',
-            xp: 0,
-            level: 1,
-            streak: 0,
-            studyDays: [],
-            badges: [],
-            createdAt: new Date(),
-            notifications: true
-          };
-          await setDoc(doc(db, 'users', auth.currentUser.uid), userData);
-        }
-      }
+      /*
+        The new-account document is created in ONE place: the users/{uid}
+        snapshot listener above, whose else-branch fires whenever the document
+        is missing, on every auth path there is.
+
+        Three near-identical copies used to sit here, in the email, Google and
+        phone handlers. They raced that listener on every signup, and whichever
+        write arrived second was no longer a create but an update — where the
+        rules require budgetUnchanged(). These payloads carry no tokenResetDate
+        and the listener's does, so the loser changed a budget field and was
+        refused. One owner, no race.
+      */
     } catch (error: any) {
       console.error('Auth error:', error);
 
@@ -951,28 +953,18 @@ export default function App() {
       await signInWithGitHub();
       toast.success('Welcome back to StudyQuest.');
       
-      // Create user document if first time
-      if (auth.currentUser) {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (!userDoc.exists()) {
-          const userData = {
-            // Required by isValidUser() in firestore.rules — see the note on the
-            // email sign-up path above. Missing it means the write is refused.
-            uid: auth.currentUser.uid,
-            email: auth.currentUser.email,
-            displayName: auth.currentUser.displayName || auth.currentUser.email?.split('@')[0],
-            plan: 'free',
-            xp: 0,
-            level: 1,
-            streak: 0,
-            studyDays: [],
-            badges: [],
-            createdAt: new Date(),
-            notifications: true
-          };
-          await setDoc(doc(db, 'users', auth.currentUser.uid), userData);
-        }
-      }
+      /*
+        The new-account document is created in ONE place: the users/{uid}
+        snapshot listener above, whose else-branch fires whenever the document
+        is missing, on every auth path there is.
+
+        Three near-identical copies used to sit here, in the email, Google and
+        phone handlers. They raced that listener on every signup, and whichever
+        write arrived second was no longer a create but an update — where the
+        rules require budgetUnchanged(). These payloads carry no tokenResetDate
+        and the listener's does, so the loser changed a budget field and was
+        refused. One owner, no race.
+      */
     } catch (error: any) {
       if (error.code === 'auth/account-exists-with-different-credential') {
         toast.error('An account exists with this email. Try signing in with Google.');
@@ -1014,28 +1006,18 @@ export default function App() {
       await confirmationResult.confirm(phoneCode);
       toast.success('Phone verified. Welcome to StudyQuest.');
       
-      // Create user document if first time
-      if (auth.currentUser) {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (!userDoc.exists()) {
-          const userData = {
-            // Required by isValidUser() in firestore.rules — see the note on the
-            // email sign-up path above. Missing it means the write is refused.
-            uid: auth.currentUser.uid,
-            email: auth.currentUser.email,
-            displayName: auth.currentUser.displayName || 'User',
-            plan: 'free',
-            xp: 0,
-            level: 1,
-            streak: 0,
-            studyDays: [],
-            badges: [],
-            createdAt: new Date(),
-            notifications: true
-          };
-          await setDoc(doc(db, 'users', auth.currentUser.uid), userData);
-        }
-      }
+      /*
+        The new-account document is created in ONE place: the users/{uid}
+        snapshot listener above, whose else-branch fires whenever the document
+        is missing, on every auth path there is.
+
+        Three near-identical copies used to sit here, in the email, Google and
+        phone handlers. They raced that listener on every signup, and whichever
+        write arrived second was no longer a create but an update — where the
+        rules require budgetUnchanged(). These payloads carry no tokenResetDate
+        and the listener's does, so the loser changed a budget field and was
+        refused. One owner, no race.
+      */
     } catch (error: any) {
       if (error.code === 'auth/code-expired') {
         toast.error('Code expired. Please request a new one.');
@@ -1570,6 +1552,17 @@ export default function App() {
     if (!element) return;
 
     try {
+      /*
+        jsPDF (335 KB) and html2canvas (194 KB) used to be imported at the top of
+        this file, so every visitor downloaded half a megabyte of PDF machinery
+        on first paint whether or not they ever pressed Download. They are only
+        needed here, and this function was already async, so they load on demand.
+      */
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import('html2canvas'),
+        import('jspdf'),
+      ]);
+
       const canvas = await html2canvas(element, {
         scale: 2,
         backgroundColor: '#0f0f1a', // Match app background
