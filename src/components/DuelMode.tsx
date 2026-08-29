@@ -7,6 +7,7 @@ import {
 } from '../lib/duel';
 import type { QuizQuestion } from '../App';
 import { playSfx } from '../lib/arcadeSound';
+import { hoursFrom, logStudySession } from '../lib/studySession';
 import DuelStage from './DuelStage';
 import type { DuelArenaEvent } from './DuelArena3D';
 
@@ -61,6 +62,8 @@ export const DuelMode: React.FC<DuelModeProps> = ({
 
   /** When the current round's question appeared. The clock is measured, not counted. */
   const roundStart = useRef(0);
+  /** When the duel began, so its logged duration is measured not guessed. */
+  const duelStartedAt = useRef(Date.now());
   const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTick = useRef(0);
 
@@ -80,6 +83,7 @@ export const DuelMode: React.FC<DuelModeProps> = ({
     setEvent({ id: 0, winner: null, traded: false });
     setSecondsLeft(DUEL_ROUND_SECONDS);
     roundStart.current = performance.now();
+    duelStartedAt.current = Date.now();
   }, [questions, youName]);
 
   /* ── The round clock ──────────────────────────────────────────────────── */
@@ -157,6 +161,20 @@ export const DuelMode: React.FC<DuelModeProps> = ({
     if (!duel?.over || awarded) return;
     setAwarded(true);
     onAwardXP(duel.xp);
+
+    /*
+      A duel is seven real questions, so it counts as studying. Accuracy is the
+      share actually answered correctly across the rounds played — not the
+      health left, which is a game score and would flatter a fast player.
+    */
+    const rounds = duel.history.length;
+    const right = duel.history.filter((h) => h.yours.correct).length;
+    void logStudySession({
+      duration: hoursFrom(duelStartedAt.current),
+      score: rounds ? Math.round((right / rounds) * 100) : null,
+      subject: subject || 'General',
+      source: 'duel',
+    });
     if (sfxOn) playSfx(duel.winner === 'you' ? 'victory' : 'defeat');
   }, [duel?.over, duel, awarded, onAwardXP, sfxOn]);
 

@@ -13,6 +13,7 @@ import { getMonthlyLimit, getDailyLimit, estimateTokens, getExpandMessageCost, T
 import { can, planOf, type Feature } from "./src/lib/entitlements";
 import { eraseAccount } from "./src/lib/accountData.server";
 import { checkUsernameSafety, checkDisplayNameSafety, safetyMessage, usernameShapeProblem } from "./src/lib/usernameSafety";
+import { assessCrisis, CRISIS_MESSAGE, SUPPORT_BANNER } from "./src/lib/crisisCheck";
 import { sendEmail, resetCodeEmail, emailConfigured } from "./src/lib/email.server";
 import { DuelMatch, type MatchPlayer } from "./src/lib/duelMatch";
 import { composeReminder, dayKey, hourIn, shouldSend, EXAM_HORIZON_DAYS } from "./src/lib/reminders";
@@ -1397,12 +1398,48 @@ async function startServer() {
         return res.status(402).json({ error: 'PRO_REQUIRED', feature });
       }
 
+      /*
+        CRISIS CHECK, BEFORE ANY MODEL IS CALLED.
+
+        A mobile test typed "why do people kill themself and why do they think
+        about that" and StudyQuest produced a study kit titled "Suicide", with
+        Quick Facts and Exam Tips on "answering questions about suicidal
+        thoughts and behaviors", and no helpline anywhere. That is the wrong
+        answer to the one message where being wrong matters most.
+
+        HERE, not in the browser, and for the same reason the username filter
+        moved: a check in the client is a suggestion, and this is the single
+        call that reaches a model.
+
+        Only the USER's prompt is assessed, never `systemPrompt` — the app's own
+        instructions are not somebody asking for help, and letting them count
+        would fire the check on a template.
+      */
+      const risk = assessCrisis(prompt);
+      if (risk.level === 'crisis') {
+        // Logged WITHOUT the text. Knowing it fired is operationally useful;
+        // keeping what a distressed teenager typed in a server log is not.
+        console.warn(`[crisis] refused generation (${risk.matched})`);
+        // 200, not an error: the client renders this as the result. A failure
+        // status would show a red "something went wrong", which is the last
+        // thing this person should be looking at.
+        return res.json({ result: CRISIS_MESSAGE, model: 'safety', crisis: true });
+      }
+
       const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
       const { text, model } = await generateWithAI(fullPrompt, isPro ? 'pro' : 'free');
 
       await recordTokenUsage(uid, estimateTokens(fullPrompt) + estimateTokens(text));
 
-      res.json({ result: text, model });
+      /*
+        The topic came up with no sign that it is about them — Durkheim, Health
+        and Social Care, a psychology essay. They still get the kit, because
+        refusing the syllabus just sends a student somewhere with no safeguards
+        at all. Help goes above it, where it is read first.
+      */
+      const result = risk.level === 'support' ? SUPPORT_BANNER + text : text;
+
+      res.json({ result, model, ...(risk.level === 'support' ? { support: true } : {}) });
     } catch (error: any) {
       if (error instanceof HttpError) {
         return res.status(error.status).json({ error: error.message });

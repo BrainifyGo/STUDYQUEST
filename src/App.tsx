@@ -1396,13 +1396,25 @@ export default function App() {
           });
           setCurrentHistoryId(docRef.id);
 
-          // Also track as a study session for analytics
-          await addDoc(collection(db, 'study_sessions'), {
-            userId: user.uid,
-            date: new Date().toISOString(),
-            duration: 0.5, // Default estimate per generation
-            score: 80, // Default starting score
-            subject: title
+          /*
+            Track it as a study session — but NOT with a made-up score.
+
+            This used to write `score: 80` on every generation, commented
+            "Default starting score". Mastery on the dashboard was therefore a
+            constant: it read 80% for someone who had never answered a single
+            question. Advanced analytics is a paid feature, so that number was
+            being sold.
+
+            A generation has no score, so none is written. `summarise()` skips
+            sessions without one, which means generating a kit now counts
+            toward study TIME and leaves mastery to be earned by answering
+            things. The half hour is still an estimate, and says so.
+          */
+          await logStudySession({
+            duration: 0.5,       // estimated reading time for a generated kit
+            score: null,         // generating is not answering; nothing to score
+            subject: title,
+            source: 'kit',
           });
 
           await updateStudyStreak(user.uid);
@@ -3787,3 +3799,4 @@ function QuizComponent({ question, index, subject = '', onAnswered }: {
     </div>
   );
 }
+import { logStudySession } from './lib/studySession';

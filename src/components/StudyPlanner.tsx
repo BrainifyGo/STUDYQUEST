@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Calendar as CalendarIcon, 
@@ -60,6 +60,21 @@ export default function StudyPlanner() {
     date: '',
     importance: 'medium' as 'low' | 'medium' | 'high'
   });
+
+  /*
+    The window the exam-date picker will accept. Computed once per mount rather
+    than inline, so the two dates cannot drift apart, and built from local time
+    — toISOString() is UTC and would offer yesterday to anyone west of Greenwich
+    for part of the day.
+  */
+  const examDateBounds = useMemo(() => {
+    const iso = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const today = new Date();
+    const twoYears = new Date(today);
+    twoYears.setFullYear(today.getFullYear() + 2);
+    return { min: iso(today), max: iso(twoYears) };
+  }, []);
 
   useEffect(() => {
     fetchData();
@@ -595,9 +610,27 @@ export default function StudyPlanner() {
 
                 <div className="space-y-2">
                   <label className="text-[10px] font-black uppercase tracking-widest text-text-dim ml-1">Exam Date</label>
+                  {/*
+                    min/max, because without them the field is unbounded and the
+                    picker opens wherever the OS feels like — on a Samsung it
+                    landed on 31 December, months away, so every user had to
+                    navigate backwards to reach a real exam date.
+
+                    `min` is today: an exam in the past cannot be revised for,
+                    and a plan generated against one produces tasks with
+                    deadlines that have already gone. `max` is two years out,
+                    which is longer than any exam anyone is planning for and
+                    short enough to catch a mistyped year.
+
+                    The value stays EMPTY on purpose. Pre-filling today would
+                    let someone tap straight past it and save an exam for this
+                    afternoon without ever choosing a date.
+                  */}
                   <input 
                     type="date" 
                     value={newExam.date}
+                    min={examDateBounds.min}
+                    max={examDateBounds.max}
                     onChange={(e) => setNewExam({ ...newExam, date: e.target.value })}
                     className="w-full bg-glass-bg border border-border-main rounded-2xl px-5 py-4 text-text-main focus:outline-none focus:border-brand-purple transition-all"
                   />

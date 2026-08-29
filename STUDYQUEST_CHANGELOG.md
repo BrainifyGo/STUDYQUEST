@@ -3523,3 +3523,119 @@ sends nothing — deliberately, rather than pretending to work.
 
 ### Files
 `src/lib/reminders.ts` (new), `tests/reminders.test.ts` (new), `server.ts`.
+
+---
+
+## [2026-08-29] — Three things a mobile test found, one of which mattered a great deal
+
+**Editor:** Claude Code (Opus 5)
+
+RED recorded twelve minutes on his Samsung and asked me to watch it. Most of it was good news —
+the duel running on a real phone with a *"You win, 4-1, 82 HP, 380 XP"* result screen, study kits
+generating again, photo-to-kit working, password reset by code. Three things were not.
+
+### 1. The app answered a suicide question with exam tips
+
+At 15:09 he typed *"Why do people kill themself and why do they think about that"*.
+
+StudyQuest produced a **Study Kit titled "Suicide"** containing a **Quick Facts** section and
+**Exam Tips** on *"answering questions about suicidal thoughts and behaviors"*. No helpline. No
+pause. Revision material.
+
+He was testing. The problem is everybody else. This app is for teenagers, and a fourteen-year-old
+typing that sentence at 3am is not reliably doing coursework. Flashcards are the wrong answer to the
+one message where the wrong answer costs the most.
+
+**Two levels, because one would break the product.** The lazy fix blocks every mention of suicide,
+and that fails real students — Durkheim is on the A-level Sociology syllabus, self-harm is in Health
+and Social Care. A student who hits a wall does not give up; they ask ChatGPT instead, where nobody
+is watching at all. So:
+
+| Level | Trigger | What happens |
+|---|---|---|
+| `crisis` | intent or method — *"I want to…"*, *"how to…"* | **Nothing is generated.** Samaritans, Shout, Childline, 999 |
+| `support` | the topic, with no sign of intent | The kit is still made, with help above it |
+| `none` | everything else | Untouched |
+
+RED's exact sentence lands on `support`: nobody said it was about them and nobody asked how, so the
+psychology student is not blocked — but it can no longer produce a bare kit with exam tips.
+*"why do i think about killing myself"* is `crisis`.
+
+**On the server, in `/api/generate`.** Same lesson as the username filter, which was a client-side
+check until a plain REST call walked past it. That route is the single call that reaches a model.
+
+The refusal returns **HTTP 200**, deliberately. An error status renders as a red "something went
+wrong", which is the last thing that person should be looking at. And the log records that it fired
+and which rule — never the text. Knowing it happened is operationally useful; keeping what a
+distressed teenager typed in a server log is not.
+
+Childline is named because the users are teenagers and a 14-year-old will not think of it
+themselves. The message says *"you are not in trouble"*, because believing otherwise is the thing
+most likely to stop someone reaching out.
+
+**55 tests, and both halves are safety-critical.** Miss a real one and someone in trouble gets
+flashcards; over-fire and a Sociology student cannot revise. So *"suicide squad"*, *"kill a
+process"*, *"this homework is killing me"*, *"dying to know"* and *"deadline"* are all asserted to
+pass through untouched — and *"suicide squad was good but i want to kill myself"* is still caught,
+because the false-friend strip removes the phrase rather than the sentence.
+
+Two real misses the tests found: **"ending it all"** matched nothing (no possessive, names nothing),
+and `my\s?self` missed *"kill my  self"* with a double space — which is exactly how somebody types
+when they are not being careful.
+
+### 2. Analytics was showing a number that was never measured
+
+Weekly said **0 hours** on a phone that had just done twenty questions and won a duel. The obvious
+theory was the week window. The window was fine — rolling seven days, correct.
+
+The actual causes were worse:
+
+- **A session was written in exactly one place**: after generating a study kit. Playing the Arcade,
+  finishing a duel, beating a boss — none of it recorded. Hence 0 hours after studying.
+- **The numbers were invented.** Every generation wrote `duration: 0.5` and `score: 80`, commented
+  *"Default estimate per generation"* and *"Default starting score"*. So **"80% mastery" was a
+  constant** — it would read 80% for a user who had never answered a question correctly.
+
+That second one is not cosmetic: advanced analytics is a **Pro feature**. A hardcoded number was
+being sold.
+
+Now one function writes sessions and only writes what happened: real elapsed time, real accuracy
+from the round. A generation records **no score at all** rather than a flattering guess —
+`summarise()` already skips non-numeric scores, so it counts toward time and leaves mastery to be
+earned by answering things. `null` is kept distinct from `0` because "no score" and "scored zero"
+mean opposite things to an average.
+
+### 3. The exam date picker opened on 31 December
+
+No `min` or `max` on the input, so the picker opened wherever the OS chose — months away, and every
+user had to navigate backwards to reach a real date. Bounded to today through two years out: an exam
+in the past cannot be revised for, and a plan generated against one produces tasks whose deadlines
+have already gone.
+
+The value stays **empty**. Pre-filling today would let someone tap straight past and save an exam
+for this afternoon without ever choosing.
+
+Built from local time rather than `toISOString()`, which is UTC and would offer yesterday to anyone
+west of Greenwich for part of the day.
+
+### Verified
+
+```
+tests/crisisCheck.test.ts   55/55  (new)
+npm test                  373/373
+playwright e2e                5/5
+tsc, eslint, build          clean
+```
+
+And against the running server, with the real sentence:
+
+```
+"i want to kill myself"                → [CRISIS]  helpline, no model call
+"Why do people kill themself and…"     → [SUPPORT] banner + kit
+"photosynthesis explained simply"      → [normal]  untouched
+```
+
+### Files
+`src/lib/crisisCheck.ts` (new), `src/lib/studySession.ts` (new), `tests/crisisCheck.test.ts` (new),
+`server.ts`, `src/App.tsx`, `src/components/GameMode.tsx`, `src/components/DuelMode.tsx`,
+`src/components/StudyPlanner.tsx`.

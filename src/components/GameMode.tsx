@@ -17,6 +17,7 @@ import { playSfx, loadSfxPreference, setSfxEnabled, sfxEnabled } from '../lib/ar
 import BossArena2D, { type ArenaEvent } from './BossArena2D';
 import { can, planOf } from '../lib/entitlements';
 import { useUserStore } from '../store/useUserStore';
+import { hoursFrom, logStudySession } from '../lib/studySession';
 
 /*
   The 3D arena is Pro, and it is lazy so free players never download it.
@@ -85,6 +86,8 @@ const shuffle = <T,>(a: T[]): T[] => {
 export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP, questions, subject, onFinished }) => {
   const [mistakes, setMistakes] = useState<Mistake[] | null>(null);
   const [state, setState] = useState<ModeState | null>(null);
+  /** When this round began, so the logged duration is measured rather than guessed. */
+  const roundStartedAt = useRef(Date.now());
   const [picked, setPicked] = useState<string | null>(null);
   const [awarded, setAwarded] = useState(false);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -150,6 +153,18 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP, questions
     onAwardXP(state.xp + completionBonus(state));
     // Behind the same guard as the XP, so a re-render after the round cannot
     // announce the score to the room twice.
+    /*
+      A finished round is a study session, with the numbers that actually
+      happened. Before this, playing the Arcade recorded nothing at all and
+      Analytics showed 0 hours after twenty questions.
+    */
+    void logStudySession({
+      duration: hoursFrom(roundStartedAt.current),
+      score: accuracy(state),
+      subject: (injected ? subject : dominantSubject) || 'General',
+      source: 'arcade',
+    });
+
     onFinished?.({
       modeName: state.mode.name,
       score: state.score,
@@ -186,6 +201,7 @@ export const GameMode: React.FC<GameModeProps> = ({ onBack, onAwardXP, questions
     );
     setAwarded(false);
     setPicked(null);
+    roundStartedAt.current = Date.now();
     setState(startState(MODES[id], filled, subject));
   }, []);
 
