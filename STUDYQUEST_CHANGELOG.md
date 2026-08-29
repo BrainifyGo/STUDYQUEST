@@ -3807,9 +3807,25 @@ error nobody intends to fix is a lint run nobody reads.
 
 ### Not fixed
 
-- **Desktop navigation** could not be driven by the sweep: the signed-in nav is a five-item mobile
-  bar that is not visible at 1280px, and the header's menu button did not reveal it. Phone width —
-  which is where RED tests — is fully covered and clean. Worth a look on its own.
+- Nothing outstanding. The sweep's one loose end — desktop navigation, which it could not drive at
+  1280px — was chased down and is **not a bug**, which is worth writing down because the evidence
+  pointed the wrong way twice.
+
+  The sweep reported zero reachable screens at desktop width. Reading the code seemed to confirm
+  something serious: `Navigation.tsx` is the only component rendering nav items, it is marked
+  `lg:hidden`, and nothing in `Header.tsx` replaces it — so on a laptop a signed-in user appeared to
+  have no way to reach Library, Stats or Focus. That reading was wrong, and adding a desktop nav on
+  the strength of it would have been a UI change solving a problem that does not exist.
+
+  What is actually there: `App.tsx` renders a separate desktop rail, and `railCollapsed` collapses it
+  to an 80px icon strip whose labels are deliberately hidden (`{!railCollapsed && ...}`). The sweep
+  matched nav items by their **text**, so a collapsed rail looks identical to no rail. It also
+  searched at desktop width for the mobile bar's labels — Home, Stats, Focus — while the rail uses
+  Dashboard, Analytics, Focus Timer. And on top of both, a "Welcome to StudyQuest" onboarding modal
+  covers the screen for a new account, so every click in that half of the run hit the overlay.
+
+  A screenshot settled in one look what three rounds of grep had got wrong: the rail is on the left,
+  populated, exactly as designed. Phone width was clean on its own merits.
 
 ### Files
 `src/lib/newUserProfile.ts` (new), `tests/newUserProfile.test.ts` (new), `src/App.tsx`,
