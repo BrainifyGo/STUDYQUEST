@@ -72,6 +72,50 @@ export function normaliseLevel(input: Partial<StudyLevel> | null | undefined): S
   return { year, sets };
 }
 
+/**
+ * Match a loosely-worded subject against the ones the student has actually set.
+ *
+ * The subject reaching this is whatever the app worked out from the content — an
+ * AI guess like "GCSE Maths Higher", or, for an uploaded file, the filename. A
+ * strict lookup would miss all of those and the sets would silently never apply,
+ * leaving a feature that appears to save and then does nothing.
+ *
+ * Exact key first, then longest containment either way, then a small alias map
+ * for the names people really type. Returns the raw key when nothing matches,
+ * which reads as "not setted" and pitches on year alone — the right fallback.
+ */
+const ALIASES: Record<string, string[]> = {
+  maths: ['math', 'mathematics', 'further maths', 'further mathematics'],
+  english: ['english language', 'english literature', 'eng lang', 'eng lit'],
+  science: ['combined science', 'triple science', 'trilogy'],
+  'computer science': ['computing', 'comp sci', 'cs'],
+};
+
+export function resolveSubject(level: StudyLevel, detected: string | null | undefined): string {
+  const raw = subjectKey(detected);
+  if (!raw) return '';
+  if (level.sets[raw]) return raw;
+
+  const keys = Object.keys(level.sets);
+
+  // Longest match wins, so "english literature" beats "english".
+  const contained = keys
+    .filter((k) => raw.includes(k) || k.includes(raw))
+    .sort((a, b) => b.length - a.length);
+  if (contained.length) return contained[0];
+
+  for (const key of keys) {
+    const names = [key, ...(ALIASES[key] ?? [])];
+    if (names.some((n) => raw.includes(n))) return key;
+    // And the other way: the student set "maths", the content said "mathematics".
+    for (const [canonical, alts] of Object.entries(ALIASES)) {
+      if (key === canonical && alts.some((a) => raw.includes(a))) return key;
+    }
+  }
+
+  return raw;
+}
+
 /** The student's set in one subject, or null when that subject is not setted. */
 export function setFor(level: StudyLevel, subject: string): SubjectSet | null {
   return level.sets[subjectKey(subject)] ?? null;

@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 import {
   MAX_SETS, MAX_YEAR, MIN_YEAR,
   describeLevel, difficultyFor, normaliseLevel, promptFor, setFor,
-  setStanding, subjectKey, targetGradeBand, tierFor,
+  resolveSubject, setStanding, subjectKey, targetGradeBand, tierFor,
   type StudyLevel,
 } from '../src/lib/studyLevel';
 
@@ -65,6 +65,47 @@ describe('a set belongs to a subject, not to a student', () => {
     expect(setFor(student, 'MATHS')).toEqual({ set: 1, of: 4 });
     expect(setFor(student, '  Maths  ')).toEqual({ set: 1, of: 4 });
     expect(subjectKey(' Biology ')).toBe('biology');
+  });
+});
+
+describe('matching a loosely-worded subject to a set', () => {
+  /*
+    The subject reaching the prompt is whatever the app worked out from the
+    content — an AI guess, or for an upload the filename. A strict lookup misses
+    all of those, and the sets would appear to save and then silently never
+    apply, which is worse than not having the feature.
+  */
+  const student = at(10, { maths: [1, 4], 'english literature': [2, 4], science: [3, 4] });
+
+  it('matches an exact name', () => {
+    expect(resolveSubject(student, 'Maths')).toBe('maths');
+  });
+
+  it('finds the subject inside a longer AI guess', () => {
+    expect(resolveSubject(student, 'GCSE Maths Higher Tier')).toBe('maths');
+    expect(resolveSubject(student, 'AQA Combined Science Trilogy')).toBe('science');
+  });
+
+  it('prefers the longer match, so Literature beats English', () => {
+    expect(resolveSubject(student, 'english literature paper 2')).toBe('english literature');
+  });
+
+  it('copes with the names people actually type', () => {
+    expect(resolveSubject(student, 'Mathematics')).toBe('maths');
+    expect(resolveSubject(student, 'math homework')).toBe('maths');
+  });
+
+  it('returns the raw name when nothing matches, which reads as unsetted', () => {
+    // The right fallback: pitch on year alone rather than on a wrong set.
+    const resolved = resolveSubject(student, 'mock paper 3 final FINAL(2)');
+    expect(setFor(student, resolved)).toBeNull();
+    expect(setStanding(student, resolved)).toBe(0.5);
+  });
+
+  it('handles empty and junk input', () => {
+    expect(resolveSubject(student, '')).toBe('');
+    expect(resolveSubject(student, null)).toBe('');
+    expect(resolveSubject(student, undefined)).toBe('');
   });
 });
 

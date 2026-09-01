@@ -57,7 +57,7 @@ import Markdown from 'react-markdown';
 import * as pdfjsLib from 'pdfjs-dist';
 import { cn } from './lib/utils';
 import { looksLikeExamPaper, parseExamPaper, type ExamPaper } from './lib/examPaper';
-import { normaliseLevel, promptFor } from './lib/studyLevel';
+import { normaliseLevel, promptFor, resolveSubject } from './lib/studyLevel';
 import { applyDailyTheme } from './lib/dailyTheme';
 import { newUserProfile } from './lib/newUserProfile';
 import { useUserStore } from './store/useUserStore';
@@ -1086,7 +1086,15 @@ export default function App() {
       level is simply omitted and the model pitches it generically.
     */
     const level = userData?.studyLevel
-      ? promptFor(normaliseLevel(userData.studyLevel), detectedSubject || 'this subject')
+      ? (() => {
+          const lvl = normaliseLevel(userData.studyLevel);
+          /*
+            detectedSubject is an AI guess like "GCSE Maths Higher", or for an
+            upload the filename. Looking that up strictly would miss every one of
+            them, so the sets would appear to save and then never apply.
+          */
+          return promptFor(lvl, resolveSubject(lvl, detectedSubject) || 'this subject');
+        })()
       : undefined;
 
     const prompt = buildStudyPrompt({
