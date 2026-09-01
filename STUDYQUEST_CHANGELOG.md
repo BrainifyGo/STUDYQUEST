@@ -3831,3 +3831,156 @@ error nobody intends to fix is a lint run nobody reads.
 `src/lib/newUserProfile.ts` (new), `tests/newUserProfile.test.ts` (new), `src/App.tsx`,
 `src/lib/firebase.ts`, `src/components/BossArena3D.tsx`,
 `src/components/AuthWrapper.tsx` (deleted), `src/lib/export.ts` (deleted).
+
+---
+
+## [2026-08-31] — Past papers you already own, and work pitched at your actual class
+
+**Editor:** Claude Code (Opus 5)
+
+Four things, from two videos RED recorded and a correction he made about how sets
+actually work.
+
+### 1. A past paper the student already has
+
+RED wanted a library of every GCSE past paper, downloaded and served from
+StudyQuest. That specific plan is not available to us: past papers and mark
+schemes are the copyright of AQA, Pearson, OCR and WJEC, they are free to *access*
+on the boards' own sites but not to redistribute, and hosting them inside a paid
+app is the one thing most likely to take StudyQuest down after everything else is
+built. `gcsemathsquestions.co.uk` being up does not change that — that teacher's
+Drive is redistributing board content too, and someone else's risk is not our
+permission.
+
+The route that *is* available is the one where the student brings their own file.
+StudyQuest already accepted PDFs, so the pipeline existed; what it did with them
+was wrong for a paper. It flattened the file into one blob and wrote a summary —
+correct for notes, useless for a paper, because it threw away where each question
+started and what it was worth.
+
+`src/lib/examPaper.ts` finds the boundaries. **The file is parsed in the browser
+and never stored.**
+
+The hard part is the input. pdf.js returns `items.map(i => i.str).join(' ')` per
+page: one long space-joined line, no newlines anywhere, and page furniture sitting
+in the middle of sentences. A bare digit before a capital letter is the only
+boundary signal that survives, and it is not sufficient on its own — so candidates
+are collected first and then filtered by the fact that real question numbers run
+in order.
+
+Three bugs came out of building it, all now covered:
+
+- **Sub-part marks were the parent's.** `(Total for Question 4 is 3 marks)` prints
+  *after* 4(b), so it lands inside 4(b)'s slice and 4(b) read 3 instead of its own
+  2. Sub-parts now ignore the total line.
+- **Multi-part stems were being discarded.** On AQA papers `1 Figure 1 shows a
+  plant cell` is the stem every sub-part depends on, and it was being dropped as a
+  duplicate of `1 (a)`.
+- **`Paper 1 (Non-Calculator)` became question 1.** This one passed every unit
+  fixture and failed on the first realistic page — the cover swallowed the genuine
+  question 1. Every board prints an instruction block immediately before question
+  1, so `bodyOf()` starts there.
+
+That last one is the lesson worth keeping: the fixtures were too tidy. Testing
+against text shaped like real pdf.js output is what found it.
+
+```
+board=Edexcel  subject=Mathematics  total=14  questions=7
+  Q1      2 marks  Write 0.037 as a fraction in its simplest form.
+  Q3(a)   1 mark   Simplify m^5 × m^3
+  Q3(b)   2 marks  Simplify (2p^4)^3
+  Q6      3 marks  ABC is a right-angled triangle…
+```
+
+Revision notes still go down the summary path; the practice offer only appears
+when the file really is a paper.
+
+### 2. Work pitched at the actual student — and sets are PER SUBJECT
+
+StudyQuest generated identical questions for a Year 7 in the bottom set and a Year
+11 in set 1. Useless to both.
+
+The first version of this got sets wrong, and RED corrected it: **a set belongs to
+a subject, not to a student.** Set 1 for Maths and set 4 for French is an ordinary
+timetable. A single school-wide set would have pitched that student's French at
+their Maths level and quietly made the app useless in every subject except their
+best one. A subject can also have no sets at all, which is a real answer rather
+than missing data.
+
+The second thing a set needs is how many sets that subject runs. **Set 3 of 4 is
+near the bottom; set 3 of 7 is above the middle.** Storing `set: 3` alone throws
+that away, which is why supporting up to set 7 means asking "of how many" rather
+than just widening a dropdown.
+
+`src/lib/studyLevel.ts`, and it reaches the model — a stored year and set that
+never enter the prompt are decoration.
+
+```
+Year 10, Maths  set 1 of 4   difficulty 7.3/10 · Higher tier     · grade 6–8
+Year 10, French set 4 of 4   difficulty 4.3/10 · Foundation tier · grade 3–5
+```
+
+Three deliberate calls:
+
+- **Year outranks set.** A top-set Year 7 has not been *taught* Year 11 content;
+  being quick is not a substitute. Letting set outrank year hands them work they
+  cannot start.
+- **Foundation caps at grade 5**, so a Foundation student is never shown a target
+  above it. That would be a lie June exposes.
+- **No 9–1 grade after Year 11.** Printing the table caught this — Year 13 was
+  being told it was heading for "grade 9–9" on a scale it no longer sits.
+  A-levels are A*–E.
+
+### 3. A different colour each day
+
+RED's idea, and the reason it works is that it is *not* the obvious version.
+Random hues per day land on colours that vanish against the page and on ones no
+white text is readable against, and an app whose appearance is unpredictable reads
+as broken rather than fresh.
+
+So `src/lib/dailyTheme.ts` ships ten curated palettes, each contrast-checked in
+the tests against the page it will actually sit on, and **only the accent moves** —
+backgrounds, text and borders are never written, so no palette can make the app
+unreadable. It is deterministic per day, so it is stable from morning to night;
+salted by uid, so two friends usually see different colours; and off unless
+switched on, because plenty of people want the app to look the same every time.
+
+The contrast test was proven by planting a navy that disappears into both pages:
+it failed at 1.05 against the 3.0 floor and named the offending palette.
+
+### 4. A rule file that survives compaction
+
+RED asked how to give Claude Code a rule that outlives a context compaction.
+`CLAUDE.md` at the repo root is loaded at the start of every session and
+re-injected after compaction, so it is the right place. It now carries the secret
+scanning rule, the changelog rule, the "do not host exam board content" rule, and
+the facts about this codebase that are easy to get wrong — including per-subject
+sets and the Foundation grade cap.
+
+### Verified
+
+- **457 tests** (was 413), `tsc` clean, `eslint` 0 errors.
+- The `studyLevel` write was tested against the **live Firestore rules** before
+  the UI was built, because a write the rules reject would leave a Settings form
+  that saves nothing while looking like it worked. It round-tripped exactly.
+- Driven in a real browser: sign up, set Year 10 with Maths at set 1 and French at
+  set 4, toggle the colour, save, reload. Year and both sets survived, the accent
+  moved `#7c7cff → #22d3ee`, **0 console errors**.
+- Both re-plantings that mattered were confirmed to fail their tests before being
+  restored. The first attempt at one of them was a `sed` that silently matched
+  nothing and proved nothing; it was redone properly.
+- The 30 throwaway accounts created across this work were deleted.
+
+### Also
+
+A dashboard prompt now points at the level setting. Without it the feature would
+have been unset for every existing account with nothing in the app mentioning it —
+a setting nobody finds changes nothing.
+
+### Files
+`src/lib/examPaper.ts` (new), `src/lib/studyLevel.ts` (new),
+`src/lib/dailyTheme.ts` (new), `src/components/StudyLevelPicker.tsx` (new),
+`tests/examPaper.test.ts` (new), `tests/studyLevel.test.ts` (new),
+`tests/dailyTheme.test.ts` (new), `CLAUDE.md` (new),
+`src/App.tsx`, `src/components/Settings.tsx`, `src/lib/studyPrompts.ts`,
+`src/store/useUserStore.ts`.

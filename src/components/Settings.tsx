@@ -18,6 +18,9 @@ import {
 } from 'lucide-react';
 import { useUserStore } from '../store/useUserStore';
 import { auth, db, doc, updateDoc, deleteDoc, resetPassword, deleteMyAccount } from '../lib/firebase';
+import { normaliseLevel, type StudyLevel } from '../lib/studyLevel';
+import { paletteForDay } from '../lib/dailyTheme';
+import { StudyLevelPicker } from './StudyLevelPicker';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { TokenUsageBar } from './TokenUsageBar';
@@ -38,6 +41,10 @@ export const Settings: React.FC = () => {
   const [displayName, setDisplayName] = useState(userData?.displayName || '');
   const [notifications, setNotifications] = useState(userData?.notifications ?? true);
   const [studyReminders, setStudyReminders] = useState(userData?.studyReminders ?? true);
+  const [studyLevel, setStudyLevel] = useState<StudyLevel>(
+    normaliseLevel(userData?.studyLevel),
+  );
+  const [dailyColour, setDailyColour] = useState(userData?.dailyColour ?? false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<SettingsTab>('notifications');
   const [resetEmailSent, setResetEmailSent] = useState(false);
@@ -62,7 +69,9 @@ export const Settings: React.FC = () => {
       await updateDoc(userRef, {
         displayName,
         notifications,
-        studyReminders
+        studyReminders,
+        studyLevel,
+        dailyColour,
       });
 
       if (userData) {
@@ -70,7 +79,9 @@ export const Settings: React.FC = () => {
           ...userData,
           displayName,
           notifications,
-          studyReminders
+          studyReminders,
+          studyLevel,
+          dailyColour,
         });
       }
 
@@ -216,6 +227,51 @@ export const Settings: React.FC = () => {
           <span>Log Out</span>
         </button>
       </div>
+
+      {/*
+        Year and set. Above the tabs because it changes every question the app
+        generates, which makes it more consequential than a notification toggle.
+      */}
+      <section className="glass p-6 rounded-2xl border border-border-main space-y-4">
+        <div>
+          <h3 className="text-lg font-black tracking-tight">Your level</h3>
+          <p className="text-[13px] text-text-dim">
+            Questions are pitched at this. Get it right and the work matches your class.
+          </p>
+        </div>
+        <StudyLevelPicker value={studyLevel} onChange={setStudyLevel} />
+      </section>
+
+      {/*
+        Opt-in, and off by default. Naming today's colour and showing it makes
+        the setting concrete — "a new colour every day" is a promise, and this is
+        the evidence for it.
+      */}
+      <section className="glass p-6 rounded-2xl border border-border-main">
+        <label className="flex cursor-pointer items-start gap-4">
+          <input
+            type="checkbox"
+            checked={dailyColour}
+            onChange={(e) => setDailyColour(e.target.checked)}
+            className="mt-1 h-5 w-5 shrink-0 accent-brand-purple"
+          />
+          <span>
+            <span className="block font-black tracking-tight">A new colour every day</span>
+            <span className="mt-1 block text-[13px] text-text-dim">
+              StudyQuest picks a different accent colour each morning, so it doesn&rsquo;t
+              feel like the same screen every time. Nothing else changes.
+            </span>
+            <span className="mt-2 flex items-center gap-2 text-[12.5px] text-text-dim">
+              <span
+                aria-hidden
+                className="inline-block h-4 w-4 rounded-full border border-white/20"
+                style={{ background: paletteForDay(new Date(), user?.uid || '').dark.main }}
+              />
+              Today would be <strong>{paletteForDay(new Date(), user?.uid || '').name}</strong>
+            </span>
+          </span>
+        </label>
+      </section>
 
       {/* Profile Section — always visible above the tabs */}
       <section className="glass p-6 rounded-2xl border border-border-main space-y-6">

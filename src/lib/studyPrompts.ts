@@ -239,8 +239,14 @@ export function buildStudyPrompt(args: {
   /** Where the content came from, if it matters to how it reads. */
   source?: 'text' | 'youtube' | 'article' | 'pdf' | 'snap';
   seed?: number;
+  /**
+   * Year group and set, from studyLevel.promptFor(). Optional, because guests
+   * and anyone who has not filled it in still get a working kit — just a
+   * generically pitched one.
+   */
+  level?: string;
 }): string {
-  const { mode, content, options, isPro, source, seed } = args;
+  const { mode, content, options, isPro, source, seed, level } = args;
 
   const provenance =
     source === 'youtube'
@@ -249,8 +255,18 @@ export function buildStudyPrompt(args: {
       ? '\nThe content below was read off a photo of handwritten or printed notes, so it may contain OCR errors.'
       : '';
 
+  /*
+    The level goes FIRST, before the mode rules, because it changes what a
+    correct answer looks like rather than merely decorating one. A model that
+    reads "difficulty 2 out of 10, Year 7" only after being told to write ten
+    exam-style questions has already decided how hard they are.
+  */
+  const pitch = level ? `
+${level}
+` : '';
+
   return `You are StudyQuest, a study assistant for GCSE students.
-${modeSpec(mode, isPro)}
+${pitch}${modeSpec(mode, isPro)}
 ${optionRules(options, mode)}${seedLine(mode, seed)}${provenance}
 
 CONTENT:

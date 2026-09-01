@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { User } from 'firebase/auth';
 import { getDailyLimit, getMonthlyLimit } from '../lib/tokenService';
 
+import type { StudyLevel } from '../lib/studyLevel';
+
 export interface UserData {
   uid: string;
   email: string | null;
@@ -23,6 +25,18 @@ export interface UserData {
   tokensUsedToday?: number;
   tokenResetDate?: string;
   tokenDailyResetDate?: string;
+  /**
+   * Year group, and set per subject. Optional: existing accounts have no level
+   * until they fill one in, and everything degrades to a generic pitch.
+   * See src/lib/studyLevel.ts — sets are per SUBJECT, not per student.
+   */
+  studyLevel?: StudyLevel;
+  /**
+   * A different accent colour each day. Opt-in, and off unless explicitly
+   * turned on — plenty of people want the app to look the same every time and
+   * would read a changing one as instability. See src/lib/dailyTheme.ts.
+   */
+  dailyColour?: boolean;
 }
 
 // Helper function to get pro status with test override

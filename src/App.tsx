@@ -33,6 +33,7 @@ import {
   Plus,
   Star,
   ArrowRight,
+  GraduationCap,
   Mic,
   MoreHorizontal,
   Bot,
@@ -55,6 +56,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
 import * as pdfjsLib from 'pdfjs-dist';
 import { cn } from './lib/utils';
+import { looksLikeExamPaper, parseExamPaper, type ExamPaper } from './lib/examPaper';
+import { normaliseLevel, promptFor } from './lib/studyLevel';
+import { applyDailyTheme } from './lib/dailyTheme';
 import { newUserProfile } from './lib/newUserProfile';
 import { useUserStore } from './store/useUserStore';
 import { createGuestSession, incrementGuestGeneration } from './lib/guestSession';
@@ -255,6 +259,12 @@ export default function App() {
   const [isConfigMissing, setIsConfigMissing] = useState(false);
   const [charCount, setCharCount] = useState(0);
   const [isExtractingPDF, setIsExtractingPDF] = useState(false);
+  /*
+    Set when an uploaded PDF reads as a past paper rather than notes. The file
+    itself is never stored anywhere — this is the student's own paper, parsed in
+    their browser, and StudyQuest keeps none of it.
+  */
+  const [detectedPaper, setDetectedPaper] = useState<ExamPaper | null>(null);
   const [joinRoomId, setJoinRoomId] = useState('');
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showUpgradeSuccess, setShowUpgradeSuccess] = useState(false);
@@ -469,6 +479,26 @@ export default function App() {
     }
     localStorage.setItem('brainify_theme', theme);
   }, [theme]);
+
+  /*
+    Today's accent, for anyone who opted in.
+
+    Re-run when the mode flips, because each palette carries a separate accent
+    for the dark and the light page — applying the dark one over light mode
+    would leave a colour chosen for a near-black background sitting on a
+    near-white one.
+
+    The salt is the uid, so two friends on the same day usually see different
+    colours. It falls back to '' for guests, who all share a colour and will
+    never notice.
+  */
+  useEffect(() => {
+    applyDailyTheme({
+      enabled: userData?.dailyColour === true,
+      mode: theme,
+      salt: user?.uid || '',
+    });
+  }, [userData?.dailyColour, theme, user?.uid]);
 
   // --- Update Checker Effect ---
   useEffect(() => {
@@ -1047,12 +1077,25 @@ export default function App() {
     // One prompt per mode, and options that are instructions rather than a line
     // of trivia the model was free to ignore. See src/lib/studyPrompts.ts for
     // what the old single prompt actually did to flashcards.
+    /*
+      Pitch the kit at this student. Without this every year group and every set
+      got identical work, which is useless at both ends: too hard to start, or
+      too easy to learn anything from.
+
+      Guests and anyone who has not filled in their year still get a kit — the
+      level is simply omitted and the model pitches it generically.
+    */
+    const level = userData?.studyLevel
+      ? promptFor(normaliseLevel(userData.studyLevel), detectedSubject || 'this subject')
+      : undefined;
+
     const prompt = buildStudyPrompt({
       mode: studyMode,
       content: inputText,
       options,
       isPro: userPlan === 'pro',
       source: inputMethod,
+      level,
     });
 
     const response = await fetch('/api/generate', {
@@ -1140,7 +1183,18 @@ export default function App() {
       
       setInputText(fullText);
       setCharCount(fullText.length);
-      setDetectedSubject(file.name.replace('.pdf', ''));
+
+      /*
+        A past paper and a page of notes want completely different things doing
+        to them. Notes want a summary; a paper wants to be practised one question
+        at a time, with its marks intact. Everything up to here is the same, so
+        this only decides which offer to make.
+      */
+      const paper = looksLikeExamPaper(fullText) ? parseExamPaper(fullText) : null;
+      setDetectedPaper(paper && paper.questions.length > 1 ? paper : null);
+
+      // The paper says what it is; the filename is whatever it was saved as.
+      setDetectedSubject(paper?.subject || file.name.replace('.pdf', ''));
     } catch (err) {
       console.error('Error extracting PDF:', err);
       // alert('Failed to extract text from PDF. Please try a different file.');
@@ -2690,6 +2744,33 @@ export default function App() {
                 </div>
               </section>
 
+              {/*
+                Without this the level setting is a feature nobody finds. It is
+                unset for every existing account and nothing else in the app
+                mentions it, so it would sit in Settings changing nothing.
+
+                Shown only to signed-in students who have not set one, and it
+                disappears for good the moment they do.
+              */}
+              {!isGuest && user && !userData?.studyLevel && (
+                <button
+                  onClick={() => setActiveView('settings')}
+                  className="mb-8 flex w-full items-center gap-3 rounded-2xl border border-brand-purple/30 bg-brand-purple/[0.07] px-5 py-4 text-left transition-all hover:bg-brand-purple/[0.12]"
+                >
+                  <GraduationCap size={20} className="shrink-0 text-brand-purple" />
+                  <span className="flex-1">
+                    <span className="block text-sm font-black tracking-tight">
+                      Tell us your year and set
+                    </span>
+                    <span className="mt-0.5 block text-[12.5px] text-text-dim">
+                      Questions get pitched at your class instead of the middle of the school.
+                      Set 1 Maths and set 4 French are asked separately.
+                    </span>
+                  </span>
+                  <ArrowRight size={18} className="shrink-0 text-brand-purple" />
+                </button>
+              )}
+
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
                 {/* Input Section */}
                 <section ref={inputSectionRef} className="animate-fade-up" style={{ animationDelay: '0.1s' }}>
@@ -2784,6 +2865,30 @@ export default function App() {
                         <div className="absolute top-4 right-4 text-[10px] font-mono text-white/20">
                           {charCount} chars
                         </div>
+
+                        {/*
+                          Only shown when an uploaded PDF actually reads as a past
+                          paper. Notes fall straight through to the normal study-kit
+                          flow, which is the right thing for them.
+                        */}
+                        {detectedPaper && (
+                          <div className="mt-3 rounded-xl border border-emerald-400/30 bg-emerald-400/[0.06] px-4 py-3">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                              <span className="text-[11px] font-black uppercase tracking-widest text-emerald-300">
+                                Past paper detected
+                              </span>
+                              <span className="text-[12px] text-white/50">
+                                {detectedPaper.questions.length} questions
+                                {detectedPaper.totalMarks !== null && ` · ${detectedPaper.totalMarks} marks`}
+                                {detectedPaper.board && ` · ${detectedPaper.board}`}
+                                {detectedPaper.subject && ` · ${detectedPaper.subject}`}
+                              </span>
+                            </div>
+                            <p className="mt-1.5 text-[12px] leading-relaxed text-white/40">
+                              Your file stays on your device — StudyQuest reads it here and keeps no copy.
+                            </p>
+                          </div>
+                        )}
                         {inputMethod === 'pdf' && (
                           <input 
                             id="pdf-upload"

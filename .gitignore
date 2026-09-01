@@ -24,3 +24,7 @@ commitmsg.txt
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Screen recordings RED drops in the repo root — 34 MB and not source.
+*.mp4
+*.mov
