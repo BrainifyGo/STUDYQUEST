@@ -3931,6 +3931,17 @@ Three deliberate calls:
   being told it was heading for "grade 9–9" on a scale it no longer sits.
   A-levels are A*–E.
 
+One more thing was needed to stop that being decoration. The subject reaching
+`promptFor()` is whatever the app worked out from the content — an AI guess like
+"GCSE Maths Higher Tier", or for an upload the filename. A strict lookup against
+the saved sets would have missed all of those, so the per-subject sets would have
+appeared to save and then silently never applied, with nothing about it looking
+broken. `resolveSubject()` tries the exact key, then the longest containment
+either way so "english literature" beats "english", then a small alias map
+(mathematics, math, combined science, computing). No match returns the raw name,
+which reads as unsetted and pitches on year alone — a wrong set being worse than
+no set.
+
 ### 3. A different colour each day
 
 RED's idea, and the reason it works is that it is *not* the obvious version.
