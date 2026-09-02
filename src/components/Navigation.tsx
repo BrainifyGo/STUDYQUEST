@@ -1,16 +1,26 @@
 import React from 'react';
-import { Layout, FolderOpen, BarChart3, Clock, Settings } from 'lucide-react';
+import { Layout, FolderOpen, BarChart3, FileText, Settings } from 'lucide-react';
 import { useUserStore } from '../store/useUserStore';
 import { cn } from '../lib/utils';
 
 export const Navigation: React.FC = () => {
   const { activeView, setActiveView } = useUserStore();
 
+  /*
+    Five slots, and everything not in them lives behind the hamburger — where,
+    on a phone, most people never look. So what earns a slot is what the app is
+    for, not what is pleasant to have.
+
+    Past Papers took Focus's place. Practising real questions and being told why
+    the marks went is the reason to open StudyQuest; a pomodoro timer is a nice
+    extra that every phone already has built in. Focus is still one tap away in
+    the menu.
+  */
   const navItems = [
     { id: 'dashboard', label: 'Home', icon: Layout },
     { id: 'library', label: 'Library', icon: FolderOpen },
+    { id: 'paper', label: 'Papers', icon: FileText },
     { id: 'analytics', label: 'Stats', icon: BarChart3 },
-    { id: 'focus', label: 'Focus', icon: Clock },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 

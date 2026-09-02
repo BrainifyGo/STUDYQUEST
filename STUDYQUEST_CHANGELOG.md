@@ -4548,15 +4548,24 @@ examiner.
   id, a non-list `questions` field and a 200-question payload are all refused.
 - Generated, answered and marked in a browser end to end.
 
-### Worth raising
+### Papers took a slot on the phone bar
 
-**Past Papers is not on the phone's bottom bar.** That bar is Home, Library,
-Stats, Focus, Settings; everything else — Past Papers, Arcade, Friends, My
-Mistakes, Study Planner, Leaderboard, Study Rooms — lives behind the hamburger.
-On a phone, a feature behind a menu is a feature most people never find. That is
-a product decision rather than a bug, so nothing was changed, but if past papers
-are meant to be central then Focus is the weakest of the five and the obvious
-swap.
+Raised as a product decision rather than a bug, and RED made the call: swap it in.
+
+The bottom bar has five slots and everything outside them lives behind the
+hamburger, where on a phone most people never look. So what earns a slot is what
+the app is *for*, not what is pleasant to have. **Past Papers replaced Focus**,
+and sits third — the middle position, which is where a thumb naturally lands.
+
+```
+before   HOME · LIBRARY · STATS  · FOCUS    · SETTINGS
+after    HOME · LIBRARY · PAPERS · STATS    · SETTINGS
+```
+
+Focus is demoted, not deleted: still one tap away in the drawer, and verified
+still working from there. Practising real questions and being told where the
+marks went is the reason to open StudyQuest; a pomodoro timer is something every
+phone already has built in.
 
 ### Files
 `src/lib/generatePaper.ts` (new), `src/components/GeneratePaper.tsx` (new),
