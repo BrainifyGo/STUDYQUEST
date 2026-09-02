@@ -58,6 +58,9 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { cn } from './lib/utils';
 import { looksLikeExamPaper, parseExamPaper, type ExamPaper } from './lib/examPaper';
 import { normaliseLevel, promptFor, resolveSubject } from './lib/studyLevel';
+import { boxFor, BOX_BLURBS, BOX_LABELS, type Confidence } from './lib/confidence';
+import { recordAttempt } from './lib/confidenceStore';
+import { commandHint } from './lib/commandWords';
 import { applyDailyTheme } from './lib/dailyTheme';
 import { newUserProfile } from './lib/newUserProfile';
 import { useUserStore } from './store/useUserStore';
@@ -1774,7 +1777,12 @@ export default function App() {
       return (
         <div id="study-output-content" className="space-y-6 animate-fade-up p-4 bg-glass-bg rounded-2xl">
           {(content as QuizQuestion[]).map((q, i) => (
-            <QuizComponent key={i} question={q} index={i} />
+            /*
+              The subject matters here, not just for the mistake record. Without
+              it every confidence attempt is filed under "General", and the
+              "you thought you knew these" list collapses to one useless row.
+            */
+            <QuizComponent key={i} question={q} index={i} subject={detectedSubject} />
           ))}
         </div>
       );
@@ -3836,17 +3844,32 @@ function QuizComponent({ question, index, subject = '', onAnswered }: {
   onAnswered?: (correct: boolean) => void, key?: any
 }) {
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
+  const [confidence, setConfidence] = useState<Confidence | null>(null);
   const isCorrect = selectedOption === question.correctAnswer;
+
+  /*
+    Asked BEFORE the options are answerable, and it cannot be skipped.
+
+    Asking afterwards would collect nothing worth having: once you have seen
+    whether you were right, you cannot honestly report how sure you felt
+    beforehand. The whole value is in the answer given while it still costs
+    something to say "sure".
+  */
+  const box = selectedOption !== null && confidence
+    ? boxFor(confidence, isCorrect)
+    : null;
 
   // Wrong answers are saved so they can be practised again; right ones retire the
   // saved copy. Fire-and-forget on purpose — bookkeeping must never make the
   // student wait, and never break the quiz they are in the middle of.
   const handleSelect = (opt: string) => {
-    if (selectedOption !== null) return;
+    if (selectedOption !== null || !confidence) return;
     setSelectedOption(opt);
     const correct = opt === question.correctAnswer;
     (correct ? retireMistake(question) : recordMistake(question, opt, subject))
       .catch(() => { /* already logged in mistakes.ts */ });
+    recordAttempt({ topic: subject || 'General', confidence, correct })
+      .catch(() => { /* never interrupt a quiz for bookkeeping */ });
     onAnswered?.(correct);
   };
 
@@ -3858,7 +3881,44 @@ function QuizComponent({ question, index, subject = '', onAnswered }: {
         </span>
         <h3 className="font-medium text-text-main">{question.question}</h3>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-9">
+
+      {/* What the command word actually wants. Silent when there isn't one. */}
+      {commandHint(question.question) && (
+        <p className="pl-9 text-[12.5px] leading-relaxed text-text-dim">
+          {commandHint(question.question)}
+        </p>
+      )}
+
+      {/* The gate. Options stay locked until they commit to an answer. */}
+      {selectedOption === null && (
+        <div className="pl-9">
+          <p className="mb-2 text-[11px] font-black uppercase tracking-widest text-text-dim">
+            Before you answer — do you know this one?
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {(['sure', 'unsure'] as const).map((c) => (
+              <button
+                key={c}
+                onClick={() => setConfidence(c)}
+                aria-pressed={confidence === c}
+                className={`min-h-11 rounded-xl border px-4 text-sm font-bold transition-all ${
+                  confidence === c
+                    ? 'border-brand-purple bg-brand-purple/20 text-brand-purple'
+                    : 'border-border-main bg-glass-bg text-text-dim hover:text-text-main'
+                }`}
+              >
+                {c === 'sure' ? "I'm sure" : 'Not sure'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div
+        className={`grid grid-cols-1 sm:grid-cols-2 gap-3 pl-9 transition-opacity ${
+          !confidence && selectedOption === null ? 'pointer-events-none opacity-40' : ''
+        }`}
+      >
         {question.options.map((opt, i) => (
           <button
             key={i}
@@ -3898,6 +3958,16 @@ function QuizComponent({ question, index, subject = '', onAnswered }: {
             <div className={`p-4 rounded-xl text-sm ${isCorrect ? 'bg-green-500/10 text-green-400/80' : 'bg-red-500/10 text-red-400/80'}`}>
               <div className="font-bold mb-1">{isCorrect ? 'Correct!' : 'Incorrect'}</div>
               {question.explanation}
+              {/*
+                Naming the box is what turns this from a quiz into feedback.
+                "Incorrect" tells the student nothing they did not already know;
+                "you were sure about this one" tells them where to start.
+              */}
+              {box && (
+                <div className="mt-3 border-t border-current/15 pt-2 text-[12.5px] opacity-90">
+                  <strong>{BOX_LABELS[box]}.</strong> {BOX_BLURBS[box]}
+                </div>
+              )}
             </div>
           </motion.div>
         )}

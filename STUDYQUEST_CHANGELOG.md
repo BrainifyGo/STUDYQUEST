@@ -3995,3 +3995,129 @@ a setting nobody finds changes nothing.
 `tests/dailyTheme.test.ts` (new), `CLAUDE.md` (new),
 `src/App.tsx`, `src/components/Settings.tsx`, `src/lib/studyPrompts.ts`,
 `src/store/useUserStore.ts`.
+
+---
+
+## [2026-09-02] — Asking how sure you are, and what the question actually wants
+
+**Editor:** Claude Code (Opus 5)
+
+RED said to build everything from a long list of ideas. That list is months of
+work, so this is the two things on it worth the most per day spent, built
+properly rather than fifteen built badly. What was *not* built is listed at the
+bottom, because a changelog that only records the wins is a changelog nobody can
+plan from.
+
+### Confidence: the four boxes
+
+Every study app records correct and incorrect. That misses the thing that
+actually costs grades, which is not forgetting — it is **believing you know
+something you don't**. A student who revises by re-reading feels fluent,
+recognises everything, and walks into the exam confident about the four topics
+they cannot do. Nothing tells them, because nothing asked.
+
+So the quiz now asks before revealing:
+
+```
+              │ said they were sure │ said they were unsure │
+   ───────────┼─────────────────────┼───────────────────────┤
+   got it     │ SOLID               │ LUCKY                 │
+   missed it  │ BLIND SPOT          │ KNOWN GAP             │
+```
+
+The diagonal is where the value is, and the two ends are opposites. **Blind
+spot** is sure and wrong — the student is not going to revise these, because they
+do not believe there is anything to revise. **Lucky** is unsure and right —
+fragile, and indistinguishable from mastery in every other app.
+
+Three decisions that make it work rather than merely exist:
+
+- **The question is asked before the options are answerable, and cannot be
+  skipped.** Asking afterwards collects nothing worth having: once you have seen
+  whether you were right, you cannot honestly report how sure you felt. The whole
+  value is in an answer given while it still costs something to say "sure".
+- **`riskiestTopics()` ranks by confidently wrong, not by wrong.** The student
+  already knows which topics they find hard — those are the ones they are
+  revising. The list they do not have is the other one.
+- **`verdict()` returns null under twelve answers.** Refusing to speak matters as
+  much as the sentences do; a confident verdict drawn from four answers is how you
+  teach someone to ignore a feature.
+
+`confidence_attempts` is a new collection, and its rule has **no update clause on
+purpose** — an attempt is a record of a moment, and the only reason to edit one
+would be to make past performance look better, which is the one thing the data
+exists to prevent. The rules were deployed and then tested against live: a valid
+write is accepted, and someone else's `user_id`, a confidence outside the two
+values, a non-boolean `correct`, an empty topic, a missing field, and an edit to
+a stored attempt are all refused.
+
+The query deliberately does no `orderBy`, and sorts client-side, because
+`where` plus `orderBy` on another field needs a composite index and
+`firestore.indexes.json` is empty by design. An index that was never deployed is
+a feature that silently returns nothing.
+
+### Command words: what the question is actually asking
+
+"Describe the trend" and "Explain the trend" are different questions about the
+same graph, and a student who describes when asked to explain can know the
+material completely and score nothing. That failure is invisible to an app that
+only records right or wrong — the student concludes they do not know the topic,
+revises it again, and loses the marks the same way.
+
+`src/lib/commandWords.ts` encodes seventeen of them with what each demands and
+the trap it invites, so a hint can sit above a question before it is answered.
+
+The restraint is the important part. `missedCommand()` only reports the one
+failure it can actually see — a question that demanded reasons, answered with no
+causal language anywhere — and returns null for everything else. A wrong flag
+here would tell a student their correct answer was badly written, which is worse
+than never speaking. Most of that file's tests are about it keeping quiet.
+
+**Honest limitation:** on AI-generated multiple choice the hint rarely fires,
+because generated questions are phrased "What happens when…" rather than "Explain
+why…". Verified in the browser and it showed no hint on a real generated quiz.
+It earns its place on real exam papers, which is what `examPaper.ts` parses.
+
+### Verified
+
+- **500 tests** (was 463), `tsc` clean, `eslint` 0 errors.
+- Rules deployed, then probed live: every one of six invalid writes refused,
+  including editing a stored attempt.
+- Driven in a browser on a genuinely generated quiz: the gate appears, all five
+  questions start locked, choosing a confidence unlocks **exactly one**, the
+  answer comes back named by box, and zero console errors.
+- The attempt was then read back out of Firestore to confirm it had really been
+  stored, which is how the next bug was found.
+
+### A bug that only a real run would have shown
+
+The stored attempts all came back with `topic: "General"`. The main quiz path
+rendered `<QuizComponent question index />` with no `subject` — the mistakes
+practice path passed one, the primary path never had. Every attempt was therefore
+filed under one heading, and "start here — you thought you knew these" would have
+collapsed to a single useless row while looking entirely healthy. Fixed, re-run,
+and the attempt now files under "Chemical reaction rates".
+
+Unit tests could not have caught that. Reading the row back out of the database
+is what caught it.
+
+### Not built
+
+From RED's list, and deliberately left: examiner report mining, the forgetting
+map, Study DNA, emergency mode, cross-subject skill detection, the personal
+knowledge graph, walking mode, study energy, the "teach me" test, and contextual
+memory anchors. Also still open: the full practice flow on an uploaded paper —
+answer, mark, save, resume — which `examPaper.ts` now makes possible but does not
+yet do.
+
+The next one worth doing is the **marks post-mortem** — classifying *why* a mark
+was lost rather than only that it was. `commandWords.ts` is the first category of
+that taxonomy; the rest need marking against a real scheme, which is a much
+larger and riskier piece of work and should be narrowed to one subject and one
+board before it is attempted.
+
+### Files
+`src/lib/confidence.ts` (new), `src/lib/confidenceStore.ts` (new),
+`src/lib/commandWords.ts` (new), `src/components/ConfidencePanel.tsx` (new),
+`tests/confidence.test.ts` (new), `tests/commandWords.test.ts` (new),
+`src/App.tsx`, `src/components/Analytics.tsx`, `firestore.rules`.

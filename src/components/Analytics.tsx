@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
+import { ConfidencePanel } from './ConfidencePanel';
 import { motion } from 'motion/react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -208,6 +209,13 @@ export default function Analytics() {
         </div>
         </ProGate>
       </div>
+
+      {/*
+        Placed high, above the charts. Streaks and hours studied are pleasant;
+        this is the only panel that tells the student something they did not
+        already know about themselves.
+      */}
+      <ConfidencePanel />
 
       {!hasData && (
         <div className="glass p-6 rounded-3xl border border-border-main border-dashed flex items-center gap-4">
