@@ -3,6 +3,7 @@ import { ArrowLeft, FileText, Trash2 } from 'lucide-react';
 import { progress, type PaperSession } from '../lib/paperSession';
 import { deleteSession, listSessions } from '../lib/paperStore';
 import { resumeAt } from './PaperPractice';
+import { OpenPaperLink } from './OpenPaperLink';
 import { GeneratePaper } from './GeneratePaper';
 import { ExamResources } from './ExamResources';
 
@@ -53,6 +54,8 @@ export const PaperLibrary: React.FC<Props> = ({ onOpen, onBack }) => {
           Upload one you already have from the dashboard, or have one written for you.
         </p>
       </div>
+
+      <OpenPaperLink onOpen={onOpen} />
 
       <GeneratePaper onReady={(s) => onOpen(s)} />
 

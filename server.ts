@@ -9,6 +9,9 @@ import crypto from "crypto";
 import dotenv from "dotenv";
 import admin from "firebase-admin";
 import { generateWithAI, analyzeImage } from "./src/lib/aiProviders.server";
+import {
+  FETCH_TIMEOUT_MS, MAX_PDF_BYTES, MAX_REDIRECTS, REFUSAL_MESSAGES, checkPaperUrl,
+} from "./src/lib/paperSource";
 import { getMonthlyLimit, getDailyLimit, estimateTokens, getExpandMessageCost, TOKEN_LIMIT_EXCEEDED, TOKEN_MONTHLY_LIMIT_EXCEEDED, currentMonthKey, currentDayKey } from "./src/lib/tokenService";
 import { can, planOf, type Feature } from "./src/lib/entitlements";
 import { eraseAccount } from "./src/lib/accountData.server";
@@ -1409,6 +1412,137 @@ async function startServer() {
     } catch (error: any) {
       console.error('Account erasure failed:', error);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  /* ── opening a past paper from an exam board's own site ───────────────────
+     A browser cannot fetch a PDF from aqa.org.uk: the board sends no CORS
+     header, so the request never leaves. That is why pasting a board link
+     failed — a rule of the web, not a bug in the parsing. So the server fetches
+     it and hands the bytes back for pdf.js to read in the browser.
+
+     NOTHING IS STORED. The bytes are streamed through and forgotten. GCSE papers
+     belong to the boards; StudyQuest reads one for the student who asked, the
+     same as one they uploaded. No cache, no bucket, no copy on disk — adding one
+     would be a copyright problem, not a performance win.
+
+     A "fetch this URL" route is an SSRF hole unless it is pinned down: it would
+     otherwise let a stranger make this server read its own metadata endpoint or
+     anything else on its network. See src/lib/paperSource.ts for the rules; the
+     one that matters is an EXACT hostname allowlist, re-checked on every
+     redirect hop, because a board redirecting off-site would walk around it.
+  */
+  app.post('/api/fetch-paper', async (req, res) => {
+    try {
+      // Signed in only, so this is never an open proxy for the internet.
+      const authHeader = req.headers.authorization;
+      if (!authHeader?.startsWith('Bearer ')) {
+        throw new HttpError(401, 'Sign in to open a paper from a link.');
+      }
+      try {
+        await admin.auth().verifyIdToken(authHeader.slice(7));
+      } catch {
+        throw new HttpError(401, 'Invalid or expired session.');
+      }
+
+      const first = checkPaperUrl(String(req.body?.url ?? ''));
+      if (!first.ok || !first.url) {
+        throw new HttpError(400, REFUSAL_MESSAGES[first.reason ?? 'not-a-url']);
+      }
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+      try {
+        let target = first.url;
+        let response: Response | null = null;
+
+        // Redirects by hand: every hop is checked against the allowlist again.
+        for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+          response = await fetch(target, {
+            redirect: 'manual',
+            signal: controller.signal,
+            headers: {
+              // Some boards refuse a request with no User-Agent outright.
+              'User-Agent': 'StudyQuest/1.0 (+https://studyquest-ruuq.onrender.com)',
+              Accept: 'application/pdf,*/*',
+            },
+          });
+
+          if (![301, 302, 303, 307, 308].includes(response.status)) break;
+
+          const next = response.headers.get('location');
+          if (!next) throw new HttpError(502, 'The exam board sent a broken redirect.');
+
+          // Relative redirects are normal and fine; resolve against the current
+          // URL and then re-check the result like any other link.
+          const resolved = new URL(next, target).toString();
+          const again = checkPaperUrl(resolved);
+          if (!again.ok || !again.url) {
+            throw new HttpError(502,
+              'That link redirects off the exam board’s site, so it was not followed.');
+          }
+          target = again.url;
+          if (hop === MAX_REDIRECTS) {
+            throw new HttpError(502, 'That link redirects too many times.');
+          }
+        }
+
+        if (!response || !response.ok) {
+          throw new HttpError(response?.status === 404 ? 404 : 502,
+            response?.status === 404
+              ? 'The exam board does not have a file at that link any more.'
+              : 'The exam board would not give us that file.');
+        }
+
+        const type = (response.headers.get('content-type') ?? '').toLowerCase();
+        if (!type.includes('pdf') && !type.includes('octet-stream')) {
+          // A board page rather than a paper: parsing HTML as a PDF fails in a
+          // way that reads as "the app is broken" rather than "wrong link".
+          throw new HttpError(415,
+            'That link is a web page, not a PDF. Open the paper itself and copy that link.');
+        }
+
+        const declared = Number(response.headers.get('content-length') ?? 0);
+        if (declared && declared > MAX_PDF_BYTES) {
+          throw new HttpError(413, 'That file is too big to open here.');
+        }
+
+        // Read with a running total: content-length can lie, or be absent.
+        const chunks: Buffer[] = [];
+        let total = 0;
+        const body = response.body;
+        if (!body) throw new HttpError(502, 'The exam board sent an empty file.');
+
+        for await (const chunk of body as unknown as AsyncIterable<Uint8Array>) {
+          total += chunk.length;
+          if (total > MAX_PDF_BYTES) {
+            controller.abort();
+            throw new HttpError(413, 'That file is too big to open here.');
+          }
+          chunks.push(Buffer.from(chunk));
+        }
+
+        const pdf = Buffer.concat(chunks);
+        // "%PDF-" — if it does not start with this, it is not a PDF whatever the
+        // header said, and pdf.js would fail with something unreadable.
+        if (pdf.length < 5 || pdf.subarray(0, 5).toString('latin1') !== '%PDF-') {
+          throw new HttpError(415, 'That file did not turn out to be a PDF.');
+        }
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Cache-Control', 'no-store');   // we do not keep board content
+        res.send(pdf);
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch (err: any) {
+      const status = err instanceof HttpError ? err.status : 502;
+      const message = err?.name === 'AbortError'
+        ? 'The exam board took too long to answer.'
+        : (err?.message ?? 'Could not open that link.');
+      if (status >= 500 && err?.name !== 'AbortError') console.error('[fetch-paper]', err);
+      res.status(status === 502 && err?.name === 'AbortError' ? 504 : status).json({ error: message });
     }
   });
 

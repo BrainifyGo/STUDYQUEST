@@ -44,8 +44,14 @@ const BOILERPLATE: RegExp[] = [
   /\bDO NOT WRITE IN THIS AREA\b/gi,
   /\bTurn over\s*►?/gi,
   /\bBLANK PAGE\b/gi,
-  /\bAnswer ALL questions\b/gi,
-  /\bAnswer all questions\b/gi,
+  /*
+    The optional tail is not decoration. Without it the shorter pattern matched
+    first and left "in the spaces provided." stranded at the front of question 1
+    on a real AQA paper. One pattern that swallows the whole sentence cannot
+    half-match it.
+  */
+  /\bAnswer\s+ALL\s+questions(\s+in the spaces? provided)?\.?/gi,
+  /\bAnswer\s+all\s+questions(\s+in the spaces? provided)?\.?/gi,
   /\bWrite your answers? in the spaces? provided\b/gi,
   /\bYou must write down all the stages in your working\b/gi,
   /\bDiagram NOT accurately drawn\b/gi,
@@ -53,6 +59,35 @@ const BOILERPLATE: RegExp[] = [
   /\bIB\/[A-Z]\/[A-Za-z0-9/]+\b/g,      // AQA's item bank reference
   /\bPage \d+ of \d+\b/gi,
   /©\s*\d{4}\s*[A-Za-z ]*\b/g,     // © 2023 Pearson Education Ltd
+
+  /*
+    AQA's own furniture, found by opening a real 2022 Biology paper through the
+    new board-link route. Question 1 arrived reading:
+
+      "1 H H 2 * 02 * Do not write outside the box There are no questions on
+       this page DO NOT WRITE ON THIS PAGE ANSWER IN THE SPACES PROVIDED 3
+       * 03 * Do not write outside the box Answer all questions in the spaces
+       provided. 0 1 This question is about cells and transport."
+
+    Every word before "0 1" is printed down the margin and across the blank
+    pages, and pdf.js joins it all into the first question. None of the existing
+    patterns matched it, because they were written against Edexcel papers.
+  */
+  /*
+    The page number goes WITH the marker, and that matters more than it looks.
+
+    Each page begins "2  * 02 *  IB/M/Jun22/8461/1H  Do not write outside the
+    box". Removing only the words left the bare page numbers behind, and a
+    stray "2" reads exactly like the start of question 2 — the first attempt at
+    this turned a 9-question paper into 39 questions, one of which was titled
+    "2 Do not write outside the box". So the page number is swallowed with it.
+  */
+  /\b\d{1,3}\s*\*\s*\d{2}\s*\*/g,   // "2 * 02 *" — page number and AQA page marker
+  /\b(Higher|Foundation)\s+Tier\b/gi,   // printed down the cover; leaks into Q1
+  /\bDo not write\s+outside the box\b/gi,
+  /\bThere are no questions on this page\b/gi,
+  /\bDO NOT WRITE ON THIS PAGE\b/gi,
+  /\bANSWER IN THE SPACES PROVIDED\b/gi,
 ];
 
 const BOARD_PATTERNS: [Board, RegExp][] = [
@@ -68,10 +103,21 @@ export function normalise(raw: string): string {
   return raw.replace(/\s+/g, ' ').trim();
 }
 
-/** Clean the furniture out and normalise whitespace to single spaces. */
+/**
+ * Clean the furniture out and normalise whitespace to single spaces.
+ *
+ * WHITESPACE IS COLLAPSED FIRST, and that order is the fix for a real bug. A PDF
+ * lays text out by position, so pdf.js hands back what LOOKS like one phrase but
+ * is actually "Do not write" and "outside the box" with a line break between
+ * them. Every pattern below was written with single spaces, so on a real AQA
+ * paper none of them matched and the margin text sailed through into question 1.
+ *
+ * Collapsing first also rescues the patterns that were already here: AQA prints
+ * "Answer   all   questions", which "Answer all questions" never matched either.
+ */
 export function tidy(raw: string): string {
   if (typeof raw !== 'string') return '';
-  let s = raw;
+  let s = raw.replace(/\s+/g, ' ');
   for (const re of BOILERPLATE) s = s.replace(re, ' ');
   return s.replace(/\s+/g, ' ').trim();
 }

@@ -5522,3 +5522,96 @@ in the same window — which is what real reports look like.
 `src/components/IssueTriage.tsx` (new), `src/lib/issueReview.ts`,
 `src/lib/issueStore.ts`, `src/components/AdminDashboard.tsx`,
 `tests/issueReport.test.ts`.
+
+---
+
+## [2026-09-03] — Opening a past paper straight from the exam board's link
+
+**Editor:** Claude Code (Opus 5)
+
+RED reported this months ago: paste an `aqa.org.uk` PDF link and nothing
+happens. It has been deferred twice.
+
+**The cause was never the parsing.** A browser cannot fetch a PDF from
+aqa.org.uk at all — the board sends no CORS header, so the request is blocked
+before it leaves. A rule of the web, not a bug. So the server fetches it and
+hands the bytes back for pdf.js to read in the browser, and from there it is the
+same path as a file the student chose themselves.
+
+**Nothing is stored.** The bytes are streamed through and forgotten, and the
+response carries `Cache-Control: no-store`. GCSE papers belong to the boards;
+StudyQuest reads one for the student who asked, exactly as it reads one they
+uploaded. No cache, no bucket, no copy on disk — that would be a copyright
+problem, not a performance win.
+
+### A route that fetches a URL is an SSRF hole unless it is pinned down
+
+Left open, "fetch this URL" is a way to make StudyQuest's own server read its
+cloud metadata endpoint, its database, or anything else on its network, and hand
+the result to a stranger. The controls, in order of how much they matter:
+
+1. An **exact** hostname allowlist — six board hosts, compared with `===`.
+   A suffix check reads as obviously correct and accepts
+   `www.aqa.org.uk.attacker.com`, which anyone can register.
+2. https only, no embedded credentials, no odd ports.
+3. **Redirects followed by hand**, every hop re-checked. A board redirecting
+   off-site would otherwise walk straight around rule 1.
+4. The body must begin `%PDF-`, and it is capped at 15 MB while streaming —
+   `content-length` can lie or be absent.
+
+Signed-in only, so it is never an open proxy. Verified against the running
+server: loopback, cloud metadata (169.254.169.254), private ranges, a lookalike
+domain, plain http, `file://`, credential smuggling and an unrelated site are
+all refused; an anonymous request is refused; and a real 2.5 MB AQA paper comes
+back as a PDF.
+
+### Then the paper opened, and looked wrong
+
+It fetched, and question 1 read:
+
+> 1 H H 2 \* 02 \* Do not write outside the box There are no questions on this
+> page DO NOT WRITE ON THIS PAGE ANSWER IN THE SPACES PROVIDED 3 \* 03 \* …
+
+Three real defects, none of which any fixture had ever shown, because every
+fixture was written against Edexcel:
+
+**`tidy()` matched furniture before collapsing whitespace.** A PDF places text
+by position, so pdf.js returns "Do not write" and "outside the box" with a line
+break between them. Every pattern in the file was written with single spaces, so
+on a real AQA paper **not one of them matched** — including ones that had been
+there for months, like "Answer all questions", which AQA prints as
+"Answer   all   questions". Collapsing first fixed several patterns at once.
+
+**Removing the words left the page numbers.** Each page starts
+"2 \* 02 \* … Do not write outside the box". Stripping only the phrase left a
+bare "2", which reads exactly like the start of question 2 — the first attempt
+turned a 9-question paper into **39**, one of them titled *"2 Do not write
+outside the box"*. The page number is now swallowed with its marker.
+
+**"Answer all questions" half-matched.** The short pattern won and stranded
+"in the spaces provided." at the front of question 1. One pattern that takes the
+whole sentence cannot half-match it.
+
+Measured against the real file at each step: 9 questions → 39 → 9, furniture
+present → none.
+
+### Still imperfect, and said plainly
+
+Question 1 begins "1 H H" — the tail of "Higher Tier Paper 1 H" from the cover.
+That is the cover-page boundary in `bodyOf()`, not the furniture list, and
+tuning cover detection to one paper would trade a cosmetic flaw for a real one.
+AQA's "0 1 . 2" sub-part notation also reads as separate questions, which is
+pre-existing behaviour rather than something this changed.
+
+### Verified
+
+- **821 tests** (was 818), `tsc` clean, `eslint` 0 errors.
+- Nine refusal cases and one real fetch against the running server.
+- In a browser: the link box is on Past Papers, a non-board link is refused with
+  a message a student can act on, and a real AQA 2022 Biology paper opens with
+  9 questions ready to answer.
+
+### Files
+`src/lib/paperSource.ts` (new), `src/components/OpenPaperLink.tsx` (new),
+`tests/paperSource.test.ts` (new), `server.ts`, `src/lib/examPaper.ts`,
+`src/components/PaperLibrary.tsx`, `tests/examPaper.test.ts`.

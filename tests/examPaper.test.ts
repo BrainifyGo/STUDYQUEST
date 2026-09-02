@@ -265,3 +265,79 @@ describe('what paper is this', () => {
     expect(detectSubject('A page of numbers and nothing else')).toBeNull();
   });
 });
+
+describe('AQA page furniture, from a real paper opened by link', () => {
+  /*
+    FOUND BY OPENING A REAL PAPER, NOT BY IMAGINING ONE.
+
+    AQA GCSE Biology 8461/1H June 2022, fetched through the board-link route.
+    Question 1 arrived with everything printed down the margins and across the
+    blank pages glued to the front of it, because pdf.js joins a page into one
+    line and none of the existing patterns were written against AQA.
+
+    Transcribed exactly as it extracted, spacing damage included.
+  */
+  const REAL_Q1 = '1 H H 2 * 02 * Do not write outside the box There are no '
+    + 'questions on this page DO NOT WRITE ON THIS PAGE ANSWER IN THE SPACES '
+    + 'PROVIDED 3 * 03 * Do not write outside the box Answer all questions in '
+    + 'the spaces provided. 0 1 This question is about cells and transport.';
+
+  it('strips it back to the actual question', () => {
+    const cleaned = tidy(REAL_Q1);
+    expect(cleaned).toContain('This question is about cells and transport');
+    for (const junk of [
+      'Do not write outside the box',
+      'There are no questions on this page',
+      'DO NOT WRITE ON THIS PAGE',
+      'ANSWER IN THE SPACES PROVIDED',
+      'Answer all questions in the spaces provided',
+      '* 02 *',
+      '* 03 *',
+    ]) {
+      expect(cleaned, junk).not.toContain(junk);
+    }
+  });
+
+  it('does not eat the question itself', () => {
+    // A furniture rule that also removed content would be worse than the junk.
+    expect(tidy('0 2 . 1 Explain why the box is heavier. [3 marks]'))
+      .toContain('Explain why the box is heavier');
+    expect(tidy('Answer all questions in the spaces provided. 0 1 Describe osmosis.'))
+      .toContain('Describe osmosis');
+  });
+});
+
+describe('the fixes that came out of a real AQA paper', () => {
+  it('collapses whitespace BEFORE matching furniture', () => {
+    /*
+      THE BUG THAT MADE EVERY OTHER PATTERN USELESS ON AQA.
+
+      A PDF places text by position, so pdf.js returns what looks like one
+      phrase but is "Do not write" and "outside the box" with a line break
+      between them. Every pattern here was written with single spaces, so on a
+      real AQA paper not one of them matched and the margin text sailed into
+      question 1.
+    */
+    expect(tidy('Do not write\noutside the box Explain osmosis.'))
+      .toBe('Explain osmosis.');
+    expect(tidy('Answer   all   questions in the spaces provided. Describe it.'))
+      .toBe('Describe it.');
+  });
+
+  it('takes the page number away with the page marker', () => {
+    /*
+      Removing only the words left the bare page numbers behind, and a stray "2"
+      reads exactly like the start of question 2. That turned a 9-question paper
+      into 39, one of them titled "2 Do not write outside the box".
+    */
+    const cleaned = tidy('2 * 02 * Do not write outside the box 0 1 About cells.');
+    expect(cleaned).not.toMatch(/^\s*2\b/);
+    expect(cleaned).toContain('About cells');
+  });
+
+  it('does not half-match "answer all questions"', () => {
+    // The shorter pattern used to win and strand "in the spaces provided."
+    expect(tidy('Answer all questions in the spaces provided. 0 1 About cells.'))
+      .not.toContain('in the spaces provided');
+  });
+});
