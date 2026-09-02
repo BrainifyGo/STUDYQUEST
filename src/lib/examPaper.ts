@@ -186,12 +186,30 @@ export function detectSubject(raw: string): string | null {
  */
 export function bodyOf(raw: string): string {
   if (typeof raw !== 'string') return '';
+  /*
+    Every board words its instruction block differently, and the list below is
+    from real papers rather than from memory. The first version only had
+    Edexcel's phrasing, so on a genuine AQA paper the cut landed halfway through
+    the cover and question 1 came out as "1 Non - Calculator Please write clearly
+    in block capitals…".
+
+    The last match wins, so more phrasings can only ever improve the cut.
+  */
   const MARKERS = [
+    // Edexcel
     /Answer ALL questions\.?/gi,
     /Write your answers? in the spaces? provided\.?/gi,
     /You must write down all the stages in your working\.?/gi,
+    // AQA
+    /You must answer the questions in the spaces provided\.?/gi,
+    /The marks for questions are shown in brackets\.?/gi,
+    /The maximum mark for this paper is\s*\d*\.?/gi,
+    /Please write clearly in block capitals\.?/gi,
+    /Do all rough work in this book[^.]*\.?/gi,
+    // OCR and general
     /Instructions? to candidates/gi,
     /Information for candidates/gi,
+    /Answer all the questions\.?/gi,
   ];
   let cut = 0;
   for (const re of MARKERS) {

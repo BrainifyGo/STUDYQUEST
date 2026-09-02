@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   User,
   Bell,
@@ -50,6 +50,34 @@ export const Settings: React.FC = () => {
   );
 
   /*
+    HYDRATE ONCE, WHEN THE DATA ACTUALLY ARRIVES.
+
+    Every field above initialises from `userData` — and `useState` only reads its
+    argument on the first render. Settings routinely mounts before the Firestore
+    snapshot lands, so `userData` is undefined, and the form fills itself with
+    defaults: Year 7, no sets, an empty name.
+
+    It then never resyncs. So opening Settings, doing nothing, and pressing Save
+    wrote Year 7 over the student's real year — which is what RED saw as "my
+    level changes whenever I leave settings". It was not a display glitch. It was
+    the form overwriting their answers with its own placeholders.
+
+    Guarded by a ref rather than re-running on every `userData` change, because
+    that would throw away whatever the student is halfway through typing each
+    time the snapshot updates.
+  */
+  const hydrated = useRef(false);
+  useEffect(() => {
+    if (hydrated.current || !userData) return;
+    hydrated.current = true;
+    setDisplayName(userData.displayName || '');
+    setNotifications(userData.notifications ?? true);
+    setStudyReminders(userData.studyReminders ?? true);
+    setStudyLevel(normaliseLevel(userData.studyLevel));
+    setThemeChoice(userData.themeChoice ?? { kind: 'fixed', id: DEFAULT_THEME_ID });
+  }, [userData]);
+
+  /*
     Paint the theme the moment it is picked.
 
     Without this the swatches only changed a variable in this component and the
@@ -68,6 +96,17 @@ export const Settings: React.FC = () => {
 
   const handleSaveProfile = async () => {
     if (!user || isGuest) return;
+
+    /*
+      Refuse to save a form that has not been filled from the real data yet.
+      Without this, saving in the moment between mount and the snapshot arriving
+      writes the placeholders — which is the bug the hydration effect above
+      exists to stop, reached by a different route.
+    */
+    if (!hydrated.current) {
+      toast.error('Still loading your settings — try again in a second.');
+      return;
+    }
 
     // Checked here as well as in publishProfile: this is where someone types it,
     // so this is where they should be told, rather than having it silently

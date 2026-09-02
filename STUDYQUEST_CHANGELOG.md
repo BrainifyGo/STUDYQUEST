@@ -4222,3 +4222,110 @@ Two of the tests written for this were wrong before the code was:
 `tests/themes.test.ts` (new), `src/lib/dailyTheme.ts` (deleted),
 `tests/dailyTheme.test.ts` (deleted), `src/App.tsx`,
 `src/components/Settings.tsx`, `src/store/useUserStore.ts`.
+
+---
+
+## [2026-09-02] — Four bugs RED found, two of them live
+
+**Editor:** Claude Code (Opus 5)
+
+### 1. Every PDF upload was broken
+
+The console RED pasted said it plainly:
+
+```
+Setting up fake worker failed: "Failed to fetch dynamically imported module:
+https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.js"
+```
+
+Two places built that URL by hand from `pdfjsLib.version`. **pdf.js 4.x ships the
+worker as an ES module — `pdf.worker.min.mjs`.** The `.js` file does not exist.
+Confirmed against the CDN: `.js` → 404, `.mjs` → 200. pdf.js falls back to a
+"fake worker" that cannot parse a real document, so uploading a paper did
+nothing and explained nothing.
+
+Fixing the extension would have stopped the error. The worker is now **bundled**
+instead, which is better for these users specifically:
+
+- The version can never drift from the installed package again. The old code
+  interpolated the real version, so it looked correct while being wrong.
+- StudyQuest is used on school wifi, where CDNs are routinely blocked. A core
+  feature should not depend on a third-party host being reachable.
+- It works with no network at all once the app has loaded.
+
+### 2. Settings was overwriting the student's own answers
+
+RED: *"whenever you leave settings your level changes."*
+
+Not a display glitch — data loss. Every field in Settings initialises from
+`userData`, and `useState` reads its argument only on the first render. Settings
+routinely mounts before the Firestore snapshot lands, so `userData` is undefined
+and the form fills with defaults: **Year 7**, no sets, an empty name. It then
+never resyncs. Opening Settings, doing nothing, and pressing Save wrote Year 7
+over the student's real year.
+
+Hydration now happens once, when the data actually arrives, guarded by a ref so
+it cannot throw away edits in progress. Save refuses outright until the form has
+been filled from real data, closing the same hole by its other route.
+
+### 3. The subject list was a wall
+
+Eleven subjects × two dropdowns, and most students set two or three. Answered
+subjects stay visible; the rest fold behind one line. Collapsed, the section is a
+year row and a single button.
+
+### 4. AQA's cover page ate question 1
+
+Testing on the actual paper RED linked — AQA 8300/1H, June 2023 — the parser
+returned question 1 as *"1 Non - Calculator Please write clearly in block
+capitals…"*.
+
+`bodyOf()` knew only Edexcel's phrasing. AQA writes "You must answer the
+questions in the spaces provided" and "The marks for questions are shown in
+brackets", neither of which matched, so the cut landed halfway through the cover.
+The marker list is now taken from real papers of all three boards.
+
+```
+board=AQA  subject=Mathematics  total=16  questions=9
+  Q1(a)  1  Work out 0.7 × 0.5 [1 mark]
+  Q1(b)  1  Work out 27 ÷ 0.6 [1 mark]
+  Q4     3  ABC, BD and BE are straight lines…
+```
+
+### The one I had caused myself
+
+Once the worker was fixed, the paper extracted correctly and **the banner still
+did not appear**.
+
+Exam paper detection had been wired into `extractTextFromPDF` — which reads
+correctly and is called by nothing. The upload input goes through the
+`usePdfUpload` hook. So the feature was written, tested and dead: a real AQA
+paper uploaded fine and nothing showed, because the code that would have shown it
+sat on a road with no traffic.
+
+It now lives on the path the UI actually uses. The lesson is the same one this
+changelog keeps recording: a unit test proves the logic, and only driving the
+real screen proves it is reachable.
+
+### Verified
+
+- **558 tests**, `tsc` clean, `eslint` 0 errors.
+- The real 28-page AQA PDF, through the browser: zero "fake worker" errors, zero
+  console errors, banner reads *"9 questions · 16 marks · AQA · Mathematics"*.
+- Year set to 11, saved, navigated away, returned, then fully reloaded — still 11
+  both times. Before the fix this became 7.
+
+### Still open from RED's list
+
+- Pasting an exam-board PDF **link** still fails. The Article path fetches HTML
+  through a third-party proxy, which cannot return a PDF and CORS would block
+  fetching one directly anyway. It needs a server route, which brings SSRF
+  concerns worth doing carefully rather than quickly.
+- Answering questions in a study kit is still thin, and past-paper practice —
+  answer, mark, save, resume — is not built.
+- Gating past-paper generation behind Pro, and a second billing provider.
+
+### Files
+`src/lib/pdfConfig.ts` (new), `src/App.tsx`, `src/lib/pdfWorker.ts`,
+`src/lib/examPaper.ts`, `src/components/Settings.tsx`,
+`src/components/StudyLevelPicker.tsx`, `tests/examPaper.test.ts`.

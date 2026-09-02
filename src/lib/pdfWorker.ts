@@ -1,7 +1,7 @@
-import * as pdfjsLib from 'pdfjs-dist';
-
-// Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// Worker source is configured once, from the bundled asset, in pdfConfig.
+// The hand-built CDN URL that used to live here asked for pdf.worker.min.js,
+// which pdf.js 4.x does not ship — see the note in pdfConfig.ts.
+import { pdfjsLib } from './pdfConfig';
 
 self.onmessage = async (e: MessageEvent) => {
   const { arrayBuffer, fileName } = e.data;

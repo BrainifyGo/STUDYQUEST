@@ -207,6 +207,34 @@ describe('the cover page', () => {
     expect(paper.subject).toBe('Mathematics');
   });
 
+  it('handles the AQA cover, worded nothing like the Edexcel one', () => {
+    /*
+      Transcribed from a real AQA GCSE Maths paper (8300/1H, June 2023) — the one
+      RED linked. The first version of this only knew Edexcel's phrasing, so the
+      cut landed halfway through the cover and question 1 came out as
+      "1 Non - Calculator Please write clearly in block capitals…".
+    */
+    const aqa =
+      '* jun2383001H01 * IB/M/Jun23/E8 8300/1H GCSE MATHEMATICS Higher Tier Paper 1 ' +
+      'Please write clearly in block capitals. Centre number Candidate number ' +
+      'AQA Realising potential For Examiner’s Use Pages Mark 2–3 4–5 TOTAL ' +
+      'Friday 19 May 2023 Morning Time allowed: 1 hour 30 minutes Materials For this paper you ' +
+      'must have: mathematical instruments. You must not use a calculator. ' +
+      'Instructions Use black ink or black ball-point pen. Fill in the boxes at the top of this page. ' +
+      'Answer all questions. You must answer the questions in the spaces provided. ' +
+      'Do all rough work in this book. Cross through any work you do not want to be marked. ' +
+      'Information The marks for questions are shown in brackets. The maximum mark for this paper is 80. ' +
+      '1 (a) Work out 0.7 × 0.5 [1 mark] Answer ' +
+      '1 (b) Work out 27 ÷ 0.6 [1 mark] Answer ' +
+      '2 Solve 2x < 26 [1 mark] Answer';
+
+    const paper = parseExamPaper(aqa);
+    expect(paper.board).toBe('AQA');
+    expect(paper.questions[0].text).toContain('Work out 0.7');
+    expect(paper.questions[0].text).not.toMatch(/block capitals|Examiner|Time allowed/i);
+    expect(paper.questions.map((q) => q.number)).toEqual(['1(a)', '1(b)', '2']);
+  });
+
   it('keeps the whole paper when there is no instruction block', () => {
     const noCover = '1 Work out 12 × 8 (2 marks) 2 Work out 45 ÷ 9 (2 marks)';
     expect(bodyOf(noCover)).toBe(noCover);

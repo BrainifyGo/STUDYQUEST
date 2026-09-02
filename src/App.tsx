@@ -54,7 +54,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
-import * as pdfjsLib from 'pdfjs-dist';
+import { pdfjsLib } from './lib/pdfConfig';
 import { cn } from './lib/utils';
 import { looksLikeExamPaper, parseExamPaper, type ExamPaper } from './lib/examPaper';
 import { normaliseLevel, promptFor, resolveSubject } from './lib/studyLevel';
@@ -144,7 +144,7 @@ import { describeAuthError } from './lib/authErrors';
 import { recordMistake, retireMistake, listMistakes, asQuiz, type Mistake } from './lib/mistakes';
 
 // Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// Worker source comes from pdfConfig, bundled rather than fetched from a CDN.
 
 // Helper for local date string (YYYY-MM-DD) to avoid timezone issues
 const localDateStr = () => {
@@ -2933,7 +2933,28 @@ export default function App() {
                                 }
                                 setInputText(text);
                                 setCharCount(text.length);
-                                toast.success(`Read ${text.length.toLocaleString()} characters from ${file.name}`);
+
+                                /*
+                                  Exam paper detection lives HERE, on the path the
+                                  UI actually uses.
+
+                                  It was originally added to extractTextFromPDF,
+                                  which reads correctly and is called by nothing —
+                                  the input goes through the usePdfUpload hook. So
+                                  the feature was written, tested and dead: a real
+                                  AQA paper uploaded fine and the banner never
+                                  appeared, because the code that would have shown
+                                  it was on a road with no traffic.
+                                */
+                                const paper = looksLikeExamPaper(text) ? parseExamPaper(text) : null;
+                                setDetectedPaper(paper && paper.questions.length > 1 ? paper : null);
+                                if (paper?.subject) setDetectedSubject(paper.subject);
+
+                                toast.success(
+                                  paper && paper.questions.length > 1
+                                    ? `Past paper: ${paper.questions.length} questions found`
+                                    : `Read ${text.length.toLocaleString()} characters from ${file.name}`,
+                                );
                               } catch (err: any) {
                                 console.error('[pdf]', err);
                                 toast.error(err?.message || 'Could not read that PDF.');

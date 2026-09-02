@@ -36,6 +36,11 @@ interface Props {
 
 export const StudyLevelPicker: React.FC<Props> = ({ value, onChange, subjects }) => {
   const rows = subjects?.length ? subjects : COMMON_SUBJECTS;
+  const [open, setOpen] = React.useState(false);
+
+  // Subjects the student has already answered stay visible; the rest fold away.
+  const answered = rows.filter((s) => setFor(value, s));
+  const unanswered = rows.filter((s) => !setFor(value, s));
 
   const setYear = (year: number) => onChange({ ...value, year });
 
@@ -77,18 +82,23 @@ export const StudyLevelPicker: React.FC<Props> = ({ value, onChange, subjects })
         </p>
       </div>
 
-      {/* ── Set per subject ──────────────────────────────────── */}
+      {/* ── Set per subject ──────────────────────────────────────
+        Eleven rows of two dropdowns is a wall, and most students set two or
+        three subjects and never touch the rest. So the ones they have answered
+        are shown, and the rest stay behind a single line they can open.
+        Collapsed, this section is one summary line instead of eleven rows.
+      */}
       <div>
         <label className="block text-[11px] font-black uppercase tracking-widest text-text-dim mb-1">
           What set are you in?
         </label>
         <p className="mb-3 text-[12px] text-text-dim">
-          Set 1 is the top set. Leave a subject on <strong>No sets</strong> if it isn&rsquo;t setted —
-          that&rsquo;s a real answer, not a blank.
+          Set 1 is the top set. Only fill in the subjects that are setted — the rest can stay
+          as they are.
         </p>
 
         <div className="space-y-2">
-          {rows.map((subject) => (
+          {answered.map((subject) => (
             <SubjectRow
               key={subject}
               subject={subject}
@@ -97,6 +107,33 @@ export const StudyLevelPicker: React.FC<Props> = ({ value, onChange, subjects })
             />
           ))}
         </div>
+
+        {unanswered.length > 0 && (
+          <>
+            {open && (
+              <div className="mt-2 space-y-2">
+                {unanswered.map((subject) => (
+                  <SubjectRow
+                    key={subject}
+                    subject={subject}
+                    value={setFor(value, subject)}
+                    onChange={(next) => setSubject(subject, next)}
+                  />
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setOpen((o) => !o)}
+              aria-expanded={open}
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-border-main bg-glass-bg px-4 py-2.5 text-[12.5px] font-bold text-text-dim transition-all hover:text-text-main"
+            >
+              {open
+                ? 'Hide the rest'
+                : `Add another subject (${unanswered.length} more)`}
+            </button>
+          </>
+        )}
       </div>
 
       <LevelPreview level={value} subjects={rows} />
