@@ -4121,3 +4121,104 @@ board before it is attempted.
 `src/lib/commandWords.ts` (new), `src/components/ConfidencePanel.tsx` (new),
 `tests/confidence.test.ts` (new), `tests/commandWords.test.ts` (new),
 `src/App.tsx`, `src/components/Analytics.tsx`, `firestore.rules`.
+
+---
+
+## [2026-09-02] — The whole app changes colour, and you choose which
+
+**Editor:** Claude Code (Opus 5)
+
+RED asked for two things: the colour change should move the **whole interface**,
+not a highlight, and students should be able to **pick how the app looks**. Both,
+because they turn out to be the same feature — a theme is only worth choosing if
+choosing it visibly changes something.
+
+### Why the first version only moved the accent
+
+It moved `--brand-purple` and nothing else, and that was a defensible cowardice:
+backgrounds and text moving together is exactly how an app becomes unreadable,
+and the accent-only version could not do damage.
+
+But RED is right that it does not feel like a different app. So this moves all
+ten variables `index.css` defines — page, cards, panels, borders, all three text
+weights, and both accent stops — and earns the right to by refusing to ship a
+theme that cannot be read.
+
+### The scar that shaped the design
+
+`index.css` already carries a comment recording that the light theme was built by
+copying the dark theme's alpha values across, and that half the secondary text
+therefore sat at **2.47:1** — effectively invisible — until somebody measured it.
+
+That is the exact failure eight themes would multiply. So **no theme here
+hard-codes a translucent value.** A theme declares five real colours; the dim and
+muted text alphas are *solved*:
+
+```ts
+alphaForContrast(textMain, bgMain, target)   // lowest opacity clearing the target
+```
+
+Add a theme with an unusual background and its secondary text gets more opaque
+automatically, rather than quietly disappearing.
+
+### The same bug, from the other side
+
+The first cut used one global contrast floor of 3.5:1, taken from the dark theme.
+Measured, that made every **light** theme fainter than the light mode already
+live: 3.56:1 against the 5.71:1 that ships. Dark ink on a pale ground washes out
+faster than pale ink on a dark one — which is the same lesson the CSS comment
+records, approached from the opposite direction.
+
+Targets are per-mode now, and they **are** the shipped values rather than round
+numbers near them. That distinction mattered: with targets of 6.5 and 8.6, Ember
+and Graphite landed marginally under the references at 6.50 and 8.63, because the
+solver returns the first alpha to *clear* its target.
+
+The result is a good sign the solver is right — given the real targets it
+independently reproduces the hand-tuned values someone measured by hand:
+
+```
+             solved        shipped
+Midnight     3.62 / 6.51   3.52 / 6.51
+Daylight     5.71 / 8.94   5.71 / 8.67
+```
+
+### Eight themes
+
+Midnight, Daylight, Abyss, Canopy, Ember, Orchid, Parchment, Graphite — two of
+them the app's own, so nobody is stranded on a look they did not want. Presented
+as swatches painted in their own colours, because "Orchid" means nothing until
+you see it. "Surprise me" sits among them as a choice of equal standing rather
+than a toggle underneath, and shows the next four days as dots.
+
+### A gap found only by driving it
+
+Picking a swatch changed a variable in the Settings component and nothing
+repainted until Save — so choosing a colour appeared to do nothing, which is the
+opposite of what a grid of swatches promises. The theme now paints the moment it
+is picked, and still persists with the rest of the form.
+
+Two of the tests written for this were wrong before the code was:
+
+- The first browser run reported "swatch not found" for all eight and **passed**,
+  because the loop skipped what it could not find. A test that skips is a test
+  that checks nothing; it now fails instead. The real cause was the desktop rail
+  being collapsed to icons, so the nav labels it searched for did not exist.
+- The first contrast comparison asserted against more decimal places than the
+  reference values were measured to, and failed on 3.5185 versus 3.52 — the same
+  colour.
+
+### Verified
+
+- **557 tests** (was 540), `tsc` clean, `eslint` 0 errors.
+- Planting a grey-on-grey theme fails five checks, each naming it.
+- `themeChoice` round-tripped through the live Firestore rules before the UI was
+  trusted, in both its shapes.
+- All eight applied to the running app in a browser: every variable reaches the
+  page, the body is really painted with it, the mode class follows, zero errors.
+
+### Files
+`src/lib/themes.ts` (new), `src/components/ThemePicker.tsx` (new),
+`tests/themes.test.ts` (new), `src/lib/dailyTheme.ts` (deleted),
+`tests/dailyTheme.test.ts` (deleted), `src/App.tsx`,
+`src/components/Settings.tsx`, `src/store/useUserStore.ts`.

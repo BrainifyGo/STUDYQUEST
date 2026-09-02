@@ -61,7 +61,7 @@ import { normaliseLevel, promptFor, resolveSubject } from './lib/studyLevel';
 import { boxFor, BOX_BLURBS, BOX_LABELS, type Confidence } from './lib/confidence';
 import { recordAttempt } from './lib/confidenceStore';
 import { commandHint } from './lib/commandWords';
-import { applyDailyTheme } from './lib/dailyTheme';
+import { applyTheme, resolveChoice } from './lib/themes';
 import { newUserProfile } from './lib/newUserProfile';
 import { useUserStore } from './store/useUserStore';
 import { createGuestSession, incrementGuestGeneration } from './lib/guestSession';
@@ -484,24 +484,23 @@ export default function App() {
   }, [theme]);
 
   /*
-    Today's accent, for anyone who opted in.
+    Paint the chosen theme.
 
-    Re-run when the mode flips, because each palette carries a separate accent
-    for the dark and the light page — applying the dark one over light mode
-    would leave a colour chosen for a near-black background sitting on a
-    near-white one.
+    This used to move only the accent, which was safe but did not feel like a
+    different app. It now writes every variable index.css defines — page, cards,
+    borders, all three text weights and the accent — and the theme's own light or
+    dark class along with them.
 
-    The salt is the uid, so two friends on the same day usually see different
-    colours. It falls back to '' for guests, who all share a colour and will
-    never notice.
+    Safe because no theme hard-codes a translucent value: the dim and muted text
+    alphas are solved per theme to clear the contrast the shipped design
+    achieves. See src/lib/themes.ts, and the scar in index.css that explains why.
+
+    Falls back to the default when nothing is chosen, so existing accounts and
+    guests see exactly what they saw yesterday.
   */
   useEffect(() => {
-    applyDailyTheme({
-      enabled: userData?.dailyColour === true,
-      mode: theme,
-      salt: user?.uid || '',
-    });
-  }, [userData?.dailyColour, theme, user?.uid]);
+    applyTheme(resolveChoice(userData?.themeChoice, { salt: user?.uid || '' }));
+  }, [userData?.themeChoice, user?.uid]);
 
   // --- Update Checker Effect ---
   useEffect(() => {

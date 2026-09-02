@@ -3,6 +3,7 @@ import { User } from 'firebase/auth';
 import { getDailyLimit, getMonthlyLimit } from '../lib/tokenService';
 
 import type { StudyLevel } from '../lib/studyLevel';
+import type { ThemeChoice } from '../lib/themes';
 
 export interface UserData {
   uid: string;
@@ -32,11 +33,11 @@ export interface UserData {
    */
   studyLevel?: StudyLevel;
   /**
-   * A different accent colour each day. Opt-in, and off unless explicitly
-   * turned on — plenty of people want the app to look the same every time and
-   * would read a changing one as instability. See src/lib/dailyTheme.ts.
+   * How the app looks: a chosen theme, or a new one each day. Absent means the
+   * default, so existing accounts see exactly what they saw before.
+   * See src/lib/themes.ts.
    */
-  dailyColour?: boolean;
+  themeChoice?: ThemeChoice;
 }
 
 // Helper function to get pro status with test override

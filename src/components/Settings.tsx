@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   User,
   Bell,
@@ -19,7 +19,8 @@ import {
 import { useUserStore } from '../store/useUserStore';
 import { auth, db, doc, updateDoc, deleteDoc, resetPassword, deleteMyAccount } from '../lib/firebase';
 import { normaliseLevel, type StudyLevel } from '../lib/studyLevel';
-import { paletteForDay } from '../lib/dailyTheme';
+import { DEFAULT_THEME_ID, applyTheme, resolveChoice, type ThemeChoice } from '../lib/themes';
+import { ThemePicker } from './ThemePicker';
 import { StudyLevelPicker } from './StudyLevelPicker';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -44,7 +45,22 @@ export const Settings: React.FC = () => {
   const [studyLevel, setStudyLevel] = useState<StudyLevel>(
     normaliseLevel(userData?.studyLevel),
   );
-  const [dailyColour, setDailyColour] = useState(userData?.dailyColour ?? false);
+  const [themeChoice, setThemeChoice] = useState<ThemeChoice>(
+    userData?.themeChoice ?? { kind: 'fixed', id: DEFAULT_THEME_ID },
+  );
+
+  /*
+    Paint the theme the moment it is picked.
+
+    Without this the swatches only changed a variable in this component and the
+    app repainted on Save, so choosing a colour appeared to do nothing — which
+    is the opposite of what a picker made of swatches promises. It still
+    persists with the rest of the form; this is the preview, and it is what
+    makes the choice possible to make at all.
+  */
+  useEffect(() => {
+    applyTheme(resolveChoice(themeChoice, { salt: user?.uid || '' }));
+  }, [themeChoice, user?.uid]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<SettingsTab>('notifications');
   const [resetEmailSent, setResetEmailSent] = useState(false);
@@ -71,7 +87,7 @@ export const Settings: React.FC = () => {
         notifications,
         studyReminders,
         studyLevel,
-        dailyColour,
+        themeChoice,
       });
 
       if (userData) {
@@ -81,7 +97,7 @@ export const Settings: React.FC = () => {
           notifications,
           studyReminders,
           studyLevel,
-          dailyColour,
+          themeChoice,
         });
       }
 
@@ -243,34 +259,19 @@ export const Settings: React.FC = () => {
       </section>
 
       {/*
-        Opt-in, and off by default. Naming today's colour and showing it makes
-        the setting concrete — "a new colour every day" is a promise, and this is
-        the evidence for it.
+        How the app looks. Swatches rather than names, because "Orchid" means
+        nothing until you see it — and "a new one each day" sits among them as a
+        choice of equal standing rather than a toggle bolted underneath.
       */}
-      <section className="glass p-6 rounded-2xl border border-border-main">
-        <label className="flex cursor-pointer items-start gap-4">
-          <input
-            type="checkbox"
-            checked={dailyColour}
-            onChange={(e) => setDailyColour(e.target.checked)}
-            className="mt-1 h-5 w-5 shrink-0 accent-brand-purple"
-          />
-          <span>
-            <span className="block font-black tracking-tight">A new colour every day</span>
-            <span className="mt-1 block text-[13px] text-text-dim">
-              StudyQuest picks a different accent colour each morning, so it doesn&rsquo;t
-              feel like the same screen every time. Nothing else changes.
-            </span>
-            <span className="mt-2 flex items-center gap-2 text-[12.5px] text-text-dim">
-              <span
-                aria-hidden
-                className="inline-block h-4 w-4 rounded-full border border-white/20"
-                style={{ background: paletteForDay(new Date(), user?.uid || '').dark.main }}
-              />
-              Today would be <strong>{paletteForDay(new Date(), user?.uid || '').name}</strong>
-            </span>
-          </span>
-        </label>
+      <section className="glass space-y-4 rounded-2xl border border-border-main p-6">
+        <div>
+          <h3 className="text-lg font-black tracking-tight">How it looks</h3>
+          <p className="text-[13px] text-text-dim">
+            Changes the whole app, not just the highlights. Every one is checked for
+            readability before it ships.
+          </p>
+        </div>
+        <ThemePicker value={themeChoice} onChange={setThemeChoice} salt={user?.uid || ''} />
       </section>
 
       {/* Profile Section — always visible above the tabs */}
