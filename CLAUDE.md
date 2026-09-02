@@ -71,6 +71,28 @@ Firebase + Socket.IO. Live at https://studyquest-ruuq.onrender.com, remote
   what a fresh email/password account has. `src/lib/newUserProfile.ts`.
 - The crisis check runs on **all three** AI routes, not just `/api/generate`.
 
+## How StudyQuest teaches (from a real teacher, via RED)
+
+This is a product requirement, not a preference. RED relayed it from a
+practising teacher as the fastest way students actually learn.
+
+- **You do not drop the subject on the whole. You drop it bit by bit.** A lesson
+  is small steps shown one at a time. Handing over everything at once is the old
+  study-kit behaviour, and it is what this replaces.
+- **About five lines, then questions on exactly that.** Never more than six. A
+  step that teaches and never checks is a paragraph, not a step.
+- **Explain like a teacher explaining to a baby.** The simplest possible words.
+- **The next bit waits for the last one.** If a student can scroll ahead, it is a
+  document again. The gate IS the method.
+- **A game must come out of the lesson.** XP, bosses, duels and the Arcade are
+  points bolted onto anything — that is NOT what the teacher meant. A game here
+  must be impossible to play without having read the step above it.
+- **Name the number you want, not the ceiling.** Asking a model for "at most 6
+  lines" reliably produced exactly 6; asking for "about 4-5, never more than 6"
+  produced 4. Measured against a real model, twice.
+
+See `src/lib/lesson.ts` and `src/components/LessonPlayer.tsx`.
+
 ## Open items
 
 - Study reminders work but Resend can only email RED until a domain is bought.

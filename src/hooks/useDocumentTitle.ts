@@ -25,6 +25,7 @@ export const VIEW_TITLES: Record<string, string> = {
   library:     'My Library',
   mistakes:    'My Mistakes',
   paper:       'Past Papers',
+  learn:       'Learn Step by Step',
   insights:    'What Examiners Say',
   arcade:      'Arcade',
   friends:     'Friends',

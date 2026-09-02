@@ -63,6 +63,7 @@ import { PaperPractice } from './components/PaperPractice';
 import { PaperLibrary } from './components/PaperLibrary';
 import { ReportIssue } from './components/ReportIssue';
 import { ExaminerInsights } from './components/ExaminerInsights';
+import { LessonPlayer } from './components/LessonPlayer';
 import { AdminDashboard } from './components/AdminDashboard';
 import { isAdminUser } from './lib/isAdmin';
 import {
@@ -2239,6 +2240,15 @@ export default function App() {
                 onClick={() => navigate('dashboard')}
                 collapsed={railCollapsed}
               />
+              <GuestGuard featureName="Learn">
+                <SidebarItem
+                  icon={<GraduationCap size={18} />}
+                  label="Learn"
+                  active={activeView === 'learn'}
+                  onClick={() => navigate('learn')}
+                  collapsed={railCollapsed}
+                />
+              </GuestGuard>
               <GuestGuard featureName="Library">
                 <SidebarItem
                   icon={<FolderOpen size={18} />}
@@ -2810,6 +2820,8 @@ export default function App() {
                 onBack={() => setActiveView('dashboard')}
               />
             )
+          ) : activeView === 'learn' ? (
+            <LessonPlayer onBack={() => setActiveView('dashboard')} />
           ) : activeView === 'insights' ? (
             <ExaminerInsights onBack={() => setActiveView('dashboard')} />
           ) : activeView === 'admin' ? (

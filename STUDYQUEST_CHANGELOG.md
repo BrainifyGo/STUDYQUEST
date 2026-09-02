@@ -5177,3 +5177,86 @@ the same reason it is not in `.env.example` either.
 `src/lib/secretEntry.ts` (new), `tests/secretEntry.test.ts` (new), `server.ts`,
 `src/App.tsx`, `src/components/AdminDashboard.tsx`,
 `src/hooks/useDocumentTitle.ts`, `.env.example`.
+
+---
+
+## [2026-09-02] — Learn: teaching bit by bit, the way a teacher said to
+
+**Editor:** Claude Code (Opus 5)
+
+RED relayed a method from a practising teacher: fun and games make students
+remember, the game has to be about the lesson, you teach in stages and **do not
+drop the subject on the whole — you drop it bit by bit**, about five lines then
+a few questions on exactly that, explained as simply as you would to a baby.
+
+That is a different product from a study kit. A kit generates a document and
+hands it over; this teaches, checks, and only then continues.
+
+### The rules are enforced, not requested
+
+A model asked politely for short steps returns an essay. So `parseLesson` throws
+away any step that breaks the method and says why:
+
+- longer than six lines — *"too long to be one step"*
+- teaches but never checks — *"taught but never checked"*
+- a heading pretending to be teaching — *"nothing taught"*
+
+If nothing survives, it refuses outright rather than showing a wall of text:
+*"That lesson came back as one block rather than steps."*
+
+**The gate is the method.** `canAdvance` will not let a student move on until
+every question on the current step is answered. Without it the lesson is a
+scrollable document again, which is exactly what teaching in stages exists to
+stop.
+
+### Name the number you want, not the ceiling
+
+First run against a real model, on *Differentiation from first principles* and
+*Using semicolons*, gave **six lines in every single step** — because the prompt
+said "AT MOST 6" and a limit reads as a target.
+
+Changed to "ABOUT 4-5 short lines, never more than 6", keeping six as the
+parser's backstop. Re-measured: **four lines in every step, nothing dropped**.
+Same topics, same model. Worth remembering next time a prompt needs a length.
+
+### The games come out of the lesson
+
+StudyQuest already has XP, bosses, duels and an Arcade. Those are points bolted
+onto anything, and they are **not** what the teacher meant. The four games here
+are built from the step's own content:
+
+- **order** — put the lines of the method back in order
+- **spot** — find the one wrong line in a worked solution
+- **match** — pair each term with its meaning
+- **fill** — complete the missing piece of a formula or sentence
+
+A game must be impossible to play without having read the step. The parser drops
+any that is not: a `spot` that never says which line is wrong is unanswerable and
+would mark a correct student wrong; a `match` whose items are not `term ::
+meaning` pairs has nothing to pair.
+
+The real model produced `order` and `match` games unprompted on both topics.
+
+### Marking a young student fairly
+
+`isCorrect` forgives spacing, capitals, punctuation and a right answer inside a
+fuller sentence — `X=5` for `x = 5`, `24cm` for `24 cm`, "because it doubles"
+for "it doubles". Being fussy here teaches nothing except that the app is fussy.
+
+Answers count toward the step whether right or wrong. The point of the method is
+to try, then be shown — not to score.
+
+### Verified
+
+- **775 tests** (was 754), `tsc` clean, `eslint` 0 errors.
+- Against a real model, twice, on A-Level maths and English Language: steps
+  within the limit, 2 checks each, games generated, one over-long step correctly
+  rejected on the first run.
+- In a browser: Learn is in the sidebar, a lesson arrives as steps, **Next is
+  genuinely disabled** until the questions are answered, answering unlocks it,
+  the answer is shown after the attempt, and it moves on.
+
+### Files
+`src/lib/lesson.ts` (new), `src/components/LessonPlayer.tsx` (new),
+`tests/lesson.test.ts` (new), `src/App.tsx`, `src/hooks/useDocumentTitle.ts`,
+`CLAUDE.md`.
