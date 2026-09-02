@@ -4723,3 +4723,84 @@ has not yet said what is driving it.
 `scripts/check-links.mjs` (new), `tests/examBoards.test.ts` (new),
 `tests/issueReport.test.ts` (new), `firestore.rules`, `src/App.tsx`,
 `src/components/Settings.tsx`, `src/components/PaperLibrary.tsx`, `package.json`.
+
+---
+
+## [2026-09-02] — Mining examiner reports, without inventing or copying
+
+**Editor:** Claude Code (Opus 5)
+
+Priority 2 of the plan, and the one RED picked out as the differentiator. This
+commit is the engine; the screens that show it follow.
+
+### What examiner reports are, and why nobody reads them
+
+Every summer the boards publish a report on each paper saying, in plain terms,
+where candidates lost marks. From the real AQA GCSE Biology report used to build
+this (8461/1H, June 2023):
+
+> Candidates frequently confused osmosis with diffusion… many described the trend
+> rather than explaining it… it was noticeable when a student had not been given
+> the opportunity to carry out required practical activities.
+
+It is the most honest teaching material in the entire system, and almost nobody
+reads it, because it is eleven pages of PDF written for teachers.
+
+**They are public.** Checked with a logged-out browser: AQA lists 25 examiner
+reports for GCSE Biology alone, downloadable without an account. So this is
+material StudyQuest is allowed to work from.
+
+### Two absolute rules
+
+**The report text is not ours.** Every one carries "AQA retains the copyright on
+all its publications". So StudyQuest stores the *finding*, in its own words, plus
+a citation and a link to the original. `Insight` has **no field for a quote** —
+there is nowhere to put copied text even by accident, and a test asserts it.
+
+**No insight without a source.** An examiner insight is worth something only
+because a real examiner wrote it about a real cohort; an invented one is a
+confident, unfalsifiable claim about the exam. `parseInsights` throws if handed
+no provenance, attaches the source itself rather than trusting the model, and
+ignores any source the model tries to supply.
+
+### What the real report taught the parser
+
+The metadata reads cleanly off it:
+
+```
+board AQA · qualification GCSE · subject Biology
+paper 8461/1H · session June 2023
+```
+
+That last field took a second attempt. pdf.js extracts the title line as
+
+```
+REPORT ON THE EXAMINATION – GCSE BIOLOGY – 8461/1H – J UNE 202 3
+```
+
+— spaces injected mid-word — so "June 2023" was unmatchable and came back null.
+It now matches against a de-spaced copy of the header. No fixture would have
+shown that; only the real file did.
+
+### The part that stops it being a database
+
+`insightsForTopics` and `topInsight` connect insights to the student's own weak
+topics, so the app can say *"the thing you keep doing is the thing examiners
+write about every year"* at the moment it happens.
+
+Matching is loose in one direction only: an insight on "Osmosis and diffusion"
+matches a student weak on "Osmosis", but "Biology" matches nothing — a broad
+topic must not drag in every insight ever written. And `topInsight` ranks by kind
+rather than recency, because a command-word trap is more use the week before an
+exam than a general note on what good answers look like.
+
+### Verified
+
+- **700 tests** (was 674), `tsc` clean, `eslint` 0 errors.
+- The metadata parser run against the genuine AQA PDF, all five fields correct.
+- Every guard tested: no source refuses, a forged source is ignored, vague
+  findings and unknown kinds are dropped, and an empty result throws rather than
+  showing a blank insights page.
+
+### Files
+`src/lib/examinerReport.ts` (new), `tests/examinerReport.test.ts` (new).
