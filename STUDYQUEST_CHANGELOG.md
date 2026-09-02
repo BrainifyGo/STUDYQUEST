@@ -5260,3 +5260,110 @@ to try, then be shown — not to score.
 `src/lib/lesson.ts` (new), `src/components/LessonPlayer.tsx` (new),
 `tests/lesson.test.ts` (new), `src/App.tsx`, `src/hooks/useDocumentTitle.ts`,
 `CLAUDE.md`.
+
+---
+
+## [2026-09-02] — A friendly teacher: simplest first, questions welcome, and never a word that makes a child feel small
+
+**Editor:** Claude Code (Opus 5)
+
+RED extended the teacher's method: the teaching should be interesting, simplest
+to hardest, the teacher friendly, the student free to ask and welcomed, and
+students understood as individuals — some learn under pressure, some when
+rewarded. And the warning that outranks all of it: **a method that is too
+aggressive can condemn the child, make them sad, and make them not want to
+study.**
+
+The users are schoolchildren, so that last one is safeguarding rather than
+style, and it is enforced and tested like any other rule.
+
+### Two repositories, and what was worth taking
+
+Both were cloned as siblings of the project rather than into it, so neither
+pollutes the StudyQuest repo. **Neither carries a licence file, which means all
+rights reserved** — so nothing was copied from `c0de2zer0/studyquest`; only ideas
+were considered, and game mechanics are not copyrightable in any case.
+
+- **`c0de2zer0/studyquest`** — a Turkish gamified study app (Next.js). Its games
+  are **Tetris** and **AIMatch**; its roadmap is LoL-style ranks, pixel-art
+  avatars, a market, a Discord-like community and voice rooms. **Deliberately not
+  copied.** That is fun sitting *next to* studying, which is precisely what
+  RED's teacher warned against — StudyQuest already has XP, bosses, duels and an
+  Arcade doing that job. The teacher asked for games made *of* the subject.
+- **`LegendaryRed318/nepa-spark-exam`** — RED's own Lovable project. The idea
+  worth keeping is its **school shape**: teacher accounts with a question bank,
+  live monitoring and results, over an admin layer of classes and subjects. Not
+  built now, but it is the natural way real teachers could one day contribute
+  lessons. Noted rather than started.
+
+### Simplest first, and interesting
+
+The prompt now demands step 1 be something almost anyone could follow, each step
+lean on the one before, and the last step be the real thing they came for —
+*"never put a hard idea before the easy one it depends on"*. It also asks for a
+picture in words or an everyday comparison, because correct and dull is still a
+reason to stop.
+
+Measured on *Adding fractions*: step 1 came back as *"Imagine a chocolate bar
+broken into 4 equal pieces."* On *Integration by parts*: step 1 derives the
+formula from the product rule, the last step is a full worked ∫ln(x) dx.
+
+### The words that are now banned
+
+Two layers, both tested.
+
+`encourage()` supplies the wording when an answer is wrong, and **none of its
+phrasings contains "wrong", "incorrect" or "failed"** — a test asserts that
+across every seed. It never pretends a wrong answer was right; the truth arrives
+wrapped kindly: *"Not quite, and that is fine. It is …"*.
+
+The prompt bans **"obviously", "simply", "just", "clearly", "easy", "of
+course"**. This came from reading what a real model actually wrote: *"the swap
+just follows from the product rule"* is friendly-sounding and still tells a
+stuck child that the thing defeating them is trivial.
+
+### The bug that mattered most
+
+A child typed: *"i dont get it at all, im really bad at maths, why do we even
+swap them round?"*
+
+The reply was four clean lines of integration by parts and **no acknowledgement
+at all**. The tone rules already said not to let self-criticism stand — but the
+ask prompt then said to answer *"about what they asked and nothing else"*, and
+the model obeyed the narrower instruction. Two instructions contradicting each
+other, and the kinder one lost.
+
+Now the first line answers the child before any of the subject. Re-measured:
+*"It's normal for this topic to feel tough, and asking about it is the right
+thing to do."* Then it teaches.
+
+### Putting your hand up
+
+Every step has an ask box — *"Stuck on something? Just ask"* — with the line
+*"Asking is the right thing to do — it never counts against you."* A lesson
+where the only permitted questions are the app's own is a worksheet, and a child
+who cannot ask is a child quietly getting lost.
+
+### Understanding this student
+
+`learningStyle` — **Take it steady**, **Push me**, **Cheer me on** — is the
+student's OWN choice, saved to their account, changeable at any time, and shown
+to nobody. Never inferred from their scores: guessing would mean deciding a
+child needs pushing on the evidence of one bad morning.
+
+"Push me" licenses a harder question. It does not license being hard on them,
+and the prompt says so in as many words: **push the WORK, never the person**.
+
+### Verified
+
+- **792 tests** (was 775), `tsc` clean, `eslint` **0 errors** (238 pre-existing
+  `any` warnings).
+- Against a real model on A-Level Further Maths: 5-line steps, no minimisers, no
+  put-downs, easiest step first, and the self-doubt answered before the maths.
+- In a browser: all three styles offered and the choice saved to Firestore, the
+  ask box on every step, the question echoed back with its answer, and nothing
+  harsh anywhere on screen.
+
+### Files
+`src/lib/lesson.ts`, `src/components/LessonPlayer.tsx`, `src/store/useUserStore.ts`,
+`tests/lesson.test.ts`, `CLAUDE.md`.

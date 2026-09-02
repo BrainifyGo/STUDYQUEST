@@ -91,6 +91,29 @@ practising teacher as the fastest way students actually learn.
   lines" reliably produced exactly 6; asking for "about 4-5, never more than 6"
   produced 4. Measured against a real model, twice.
 
+- **Simplest first, hardest last.** Step 1 is something almost anyone could
+  follow; the final step is the real thing they came to learn.
+- **The student can ask, and is welcomed.** A lesson where the only permitted
+  questions are the app's own is a worksheet.
+- **Students are not interchangeable.** `learningStyle` is the student's OWN
+  choice — gentle, challenge or rewards — never inferred from their scores.
+
+### Tone is safeguarding, not style
+
+The users are schoolchildren, and RED's teacher warned that a method which is
+too harsh can condemn a child, make them sad, and make them stop wanting to
+study. So:
+
+- Never imply a student is slow, stupid, careless or lazy. Never be sarcastic.
+  Never compare them to another student.
+- **Never say "wrong".** `encourage()` has no wording that does.
+- Never use **"obviously", "simply", "just", "clearly", "easy", "of course"** of
+  the work — to a stuck child every one means "you should already know this".
+- If a student says something unkind about themselves, answer that FIRST, before
+  the subject, and never let it stand. Found by testing: the tone rules said so
+  but the ask prompt said "answer what they asked and nothing else", and the
+  model obeyed the narrower one.
+
 See `src/lib/lesson.ts` and `src/components/LessonPlayer.tsx`.
 
 ## Open items

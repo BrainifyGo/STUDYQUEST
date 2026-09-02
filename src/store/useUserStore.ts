@@ -4,6 +4,7 @@ import { getDailyLimit, getMonthlyLimit } from '../lib/tokenService';
 
 import type { StudyLevel } from '../lib/studyLevel';
 import type { ThemeChoice } from '../lib/themes';
+import type { LearningStyle } from '../lib/lesson';
 
 export interface UserData {
   uid: string;
@@ -45,6 +46,12 @@ export interface UserData {
    * See src/lib/themes.ts.
    */
   themeChoice?: ThemeChoice;
+  /**
+   * How this student likes to be taught. Their own choice, never inferred from
+   * their scores — guessing would mean deciding a child needs pushing on the
+   * evidence of one bad morning. See src/lib/lesson.ts.
+   */
+  learningStyle?: LearningStyle;
 }
 
 // Helper function to get pro status with test override

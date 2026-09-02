@@ -13,9 +13,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  MAX_TEACH_LINES, advance, buildLessonPrompt, canAdvance, isCorrect,
-  lessonProgress, parseLesson, recordCheck, startLesson, stepDone,
-  type Lesson,
+  MAX_TEACH_LINES, STYLE_LABELS, advance, buildAskPrompt, buildLessonPrompt,
+  canAdvance, encourage, isCorrect, lessonProgress, parseLesson, praise,
+  recordCheck, startLesson, stepDone,
+  type Lesson, type LearningStyle,
 } from '../src/lib/lesson';
 
 const check = { question: 'What is 2 + 2?', answer: '4', because: 'Two twos.' };
@@ -62,6 +63,157 @@ describe('what the teacher is asked for', () => {
       level: 'The student is in Year 10 set 1 Mathematics.',
     });
     expect(pitched).toContain('Year 10 set 1');
+  });
+});
+
+describe('never making a child feel small', () => {
+  /*
+    SAFEGUARDING, NOT STYLE.
+
+    RED relayed the teacher's warning directly: if the method is too aggressive
+    it can condemn the child, make them sad, and make them not want to study at
+    all. The users of this app are schoolchildren, so a discouraging sentence is
+    a real harm rather than a matter of taste — which is why it is tested.
+  */
+  const p = buildLessonPrompt({ topic: 'Fractions' });
+
+  it('forbids the model from putting the student down', () => {
+    expect(p).toMatch(/never say or imply that the student is slow, stupid/i);
+    expect(p).toMatch(/never be sarcastic/i);
+    expect(p).toMatch(/never compare them to anyone else/i);
+  });
+
+  it('says why it matters, so the rule is not trimmed later as padding', () => {
+    expect(p).toMatch(/a child who feels judged stops asking/i);
+  });
+
+  it('bans the words that mean "you should already know this"', () => {
+    /*
+      Found by reading what a real model actually wrote. "It just follows from
+      the product rule" is friendly-sounding and still tells a stuck child that
+      the thing defeating them is trivial. Same for obviously, simply, clearly,
+      easy, of course.
+    */
+    expect(p).toMatch(/avoid the words "obviously", "simply", "just"/i);
+    expect(p).toMatch(/you should have understood this already/i);
+  });
+
+  it('does not let a child call themselves stupid', () => {
+    // A child who says "I am bad at maths" and is not contradicted has just had
+    // it confirmed by their teacher.
+    expect(p).toMatch(/do not let it pass and do not agree/i);
+    expect(p).toMatch(/genuinely hard and that being stuck on it is\s+normal/i);
+  });
+
+  it('is warm without being dishonest', () => {
+    // Telling a child a wrong answer was right is its own kind of harm.
+    expect(p).toMatch(/do not tell them a wrong answer was right/i);
+    expect(p).toMatch(/warm, friendly and patient/i);
+  });
+
+  it('never says "wrong" to the student, in any of its wordings', () => {
+    for (let seed = 0; seed < 40; seed++) {
+      const said = encourage(seed).toLowerCase();
+      expect(said).not.toMatch(/wrong|incorrect|fail/);
+      expect(said.length).toBeGreaterThan(5);
+    }
+  });
+
+  it('varies what it says, so it does not sound like a machine', () => {
+    const seen = new Set(Array.from({ length: 10 }, (_, i) => encourage(i)));
+    expect(seen.size).toBeGreaterThan(1);
+    const praised = new Set(Array.from({ length: 10 }, (_, i) => praise(i)));
+    expect(praised.size).toBeGreaterThan(1);
+  });
+});
+
+describe('simplest first, then harder', () => {
+  const p = buildLessonPrompt({ topic: 'Fractions' });
+
+  it('asks for the easiest idea first and the real thing last', () => {
+    expect(p).toMatch(/start at the very simplest idea/i);
+    expect(p).toMatch(/step 1 should be something almost anyone could follow/i);
+    expect(p).toMatch(/never put a hard idea before the easy one it depends on/i);
+  });
+
+  it('asks for it to be interesting, not just correct', () => {
+    expect(p).toMatch(/keep it interesting/i);
+    expect(p).toMatch(/everyday comparison|see in their head/i);
+  });
+});
+
+describe('teaching this student rather than a student', () => {
+  it('has a wording for every learning style', () => {
+    const styles: LearningStyle[] = ['gentle', 'challenge', 'rewards'];
+    for (const style of styles) {
+      expect(STYLE_LABELS[style]).toBeTruthy();
+      expect(buildLessonPrompt({ topic: 'Fractions', style }).length).toBeGreaterThan(100);
+    }
+  });
+
+  it('pushes the work, never the person, even when asked to push', () => {
+    /*
+      The teacher said some students learn under pressure. That licenses a harder
+      question — it does not license being hard ON THEM, and the difference is
+      the whole safeguarding point.
+    */
+    const pushed = buildLessonPrompt({ topic: 'Fractions', style: 'challenge' });
+    expect(pushed).toMatch(/push the WORK, never the person/i);
+    expect(pushed).toMatch(/never say or imply that the student is slow/i);
+  });
+
+  it('cheers on the student who likes being cheered on', () => {
+    expect(buildLessonPrompt({ topic: 'Fractions', style: 'rewards' }))
+      .toMatch(/notice what they got right/i);
+  });
+});
+
+describe('when the student puts their hand up', () => {
+  const ask = buildAskPrompt({
+    topic: 'Fractions',
+    step: 'A fraction is a part of a whole.',
+    question: 'why is the bottom number bigger sometimes?',
+  });
+
+  it('welcomes the question rather than tolerating it', () => {
+    // A lesson where the only allowed questions are the app's own is a worksheet.
+    expect(ask).toMatch(/welcome the question/i);
+    expect(ask).toMatch(/left wanting to ask the next one/i);
+  });
+
+  it('answers what was actually asked, briefly', () => {
+    // Every gap is \s+: the prompt is a template literal and the wrap point
+    // moves whenever the wording above it changes.
+    expect(ask).toMatch(/at\s+most\s+4\s+short\s+sentences,\s+each\s+on\s+its\s+own\s+line/i);
+    expect(ask).toMatch(/stay on what they asked/i);
+    expect(ask).toContain('why is the bottom number bigger sometimes?');
+    expect(ask).toContain('A fraction is a part of a whole.');
+  });
+
+  it('carries the same tone rules as the lesson', () => {
+    expect(ask).toMatch(/never be sarcastic/i);
+    expect(ask).toMatch(/warm, friendly and patient/i);
+  });
+
+  it('answers a child who calls themselves stupid BEFORE the maths', () => {
+    /*
+      A REAL MISS, FOUND BY ASKING A REAL MODEL.
+
+      The tone rules already said not to let self-criticism stand, but the ask
+      prompt then said to answer "about what they asked and nothing else" — and
+      the model obeyed the narrower instruction. A child who wrote "i dont get it
+      at all, im really bad at maths" got back four clean lines of integration by
+      parts and no acknowledgement at all.
+
+      The two instructions contradicted each other, so one had to go.
+    */
+    expect(ask).toMatch(/if they put themselves down/i);
+    expect(ask).toMatch(/your FIRST line answers that, before any of the subject/i);
+    expect(ask).toMatch(/never let it stand unanswered, and never agree with it/i);
+  });
+
+  it('is honest when the answer is ahead of them', () => {
+    expect(ask).toMatch(/have not taught them yet, say so kindly/i);
   });
 });
 

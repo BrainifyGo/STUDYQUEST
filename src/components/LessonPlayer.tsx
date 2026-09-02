@@ -1,12 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { ArrowLeft, ArrowRight, Check, Loader2, Sparkles } from 'lucide-react';
 import {
-  advance, buildLessonPrompt, canAdvance, isCorrect, lessonProgress, parseLesson,
-  recordCheck, startLesson, stepDone,
-  type Game, type Lesson, type LessonProgress,
+  ArrowLeft, ArrowRight, Check, HelpCircle, Loader2, Sparkles,
+} from 'lucide-react';
+import {
+  STYLE_LABELS, advance, buildAskPrompt, buildLessonPrompt, canAdvance,
+  encourage, isCorrect, lessonProgress, parseLesson, praise, recordCheck,
+  startLesson, stepDone,
+  type Game, type LearningStyle, type Lesson, type LessonProgress,
 } from '../lib/lesson';
-import { auth } from '../lib/firebase';
+import { doc, updateDoc } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
 import { useUserStore } from '../store/useUserStore';
 import { normaliseLevel, promptFor, resolveSubject } from '../lib/studyLevel';
 
@@ -202,13 +206,17 @@ const GamePanel: React.FC<{ game: Game; seed: number; onWin: () => void }> = ({
 /* ── the lesson ───────────────────────────────────────────────────────────── */
 
 export const LessonPlayer: React.FC<Props> = ({ onBack }) => {
-  const { userData } = useUserStore();
+  const { userData, setUserData } = useUserStore();
   const [topic, setTopic] = useState('');
   const [busy, setBusy] = useState(false);
   const [lesson, setLesson] = useState<Lesson | null>(null);
   const [progress, setProgress] = useState<LessonProgress>(startLesson());
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [shown, setShown] = useState<Record<string, boolean>>({});
+  const style: LearningStyle = userData?.learningStyle ?? 'gentle';
+  const [asking, setAsking] = useState('');
+  const [askBusy, setAskBusy] = useState(false);
+  const [replies, setReplies] = useState<Record<number, { q: string; a: string }[]>>({});
 
   const teach = async () => {
     if (!topic.trim() || busy) return;
@@ -231,7 +239,7 @@ export const LessonPlayer: React.FC<Props> = ({ onBack }) => {
         },
         body: JSON.stringify({
           feature: 'study-kit',
-          prompt: buildLessonPrompt({ topic: topic.trim(), level }),
+          prompt: buildLessonPrompt({ topic: topic.trim(), level, style }),
         }),
       });
       const { result, error } = await res.json();
@@ -251,6 +259,68 @@ export const LessonPlayer: React.FC<Props> = ({ onBack }) => {
       toast.error(err instanceof Error ? err.message : 'Could not build that lesson.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const setStyle = async (next: LearningStyle) => {
+    if (!userData || !auth.currentUser) return;
+    // Same path Settings uses to save a preference, which is known to pass the
+    // rules; a learning style is the student's own choice about their own account.
+    setUserData({ ...userData, learningStyle: next });
+    try {
+      await updateDoc(doc(db, 'users', auth.currentUser.uid), { learningStyle: next });
+    } catch {
+      toast.error('Could not save that, but it applies to this lesson.');
+    }
+  };
+
+  /*
+    The student's own question, mid-lesson.
+
+    "The student can be released to ask questions, and be welcomed." A lesson
+    where the only permitted questions are the app's own is a worksheet, and a
+    child who cannot ask is a child quietly getting lost.
+  */
+  const askQuestion = async () => {
+    const q = asking.trim();
+    if (!q || askBusy || !lesson) return;
+    setAskBusy(true);
+    try {
+      const level = userData?.studyLevel
+        ? (() => {
+            const lvl = normaliseLevel(userData.studyLevel);
+            return promptFor(lvl, resolveSubject(lvl, lesson.topic) || 'this subject');
+          })()
+        : undefined;
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(auth.currentUser
+            ? { Authorization: `Bearer ${await auth.currentUser.getIdToken()}` }
+            : {}),
+        },
+        body: JSON.stringify({
+          feature: 'study-kit',
+          prompt: buildAskPrompt({
+            topic: lesson.topic,
+            step: lesson.steps[progress.cursor].teach,
+            question: q,
+            level,
+          }),
+        }),
+      });
+      const { result, error } = await res.json();
+      if (!res.ok) throw new Error(error ?? 'Could not answer that just now.');
+      setReplies((prev) => ({
+        ...prev,
+        [progress.cursor]: [...(prev[progress.cursor] ?? []), { q, a: String(result).trim() }],
+      }));
+      setAsking('');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not answer that just now.');
+    } finally {
+      setAskBusy(false);
     }
   };
 
@@ -283,6 +353,30 @@ export const LessonPlayer: React.FC<Props> = ({ onBack }) => {
             {busy ? <><Loader2 size={15} className="animate-spin" /> Planning…</> : 'Start'}
           </button>
         </div>
+        <div>
+          <p className="mb-2 text-[11.5px] font-black uppercase tracking-widest text-text-dim">
+            How do you like to be taught?
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {(Object.keys(STYLE_LABELS) as LearningStyle[]).map((k) => (
+              <button
+                key={k}
+                onClick={() => void setStyle(k)}
+                aria-pressed={style === k}
+                className={`min-h-11 rounded-xl border px-3 text-[13px] font-bold transition-all ${
+                  style === k ? 'border-brand-purple bg-brand-purple/20 text-brand-purple'
+                    : 'border-border-main bg-glass-bg text-text-dim hover:text-text-main'
+                }`}
+              >
+                {STYLE_LABELS[k]}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-[11.5px] leading-relaxed text-text-dim">
+            You can change this whenever you like. Nobody else sees it.
+          </p>
+        </div>
+
         <div className="flex flex-wrap gap-2">
           {['Quadratic equations', 'Osmosis', 'Simultaneous equations', 'Photosynthesis']
             .map((t) => (
@@ -366,7 +460,9 @@ export const LessonPlayer: React.FC<Props> = ({ onBack }) => {
                   right ? 'border-emerald-500/30 bg-emerald-500/[0.06]'
                         : 'border-amber-500/30 bg-amber-500/[0.06]'}`}>
                   <p className="text-[13px] font-bold">
-                    {right ? 'Yes — that is it.' : `The answer is ${c.answer}`}
+                    {/* Never the word "wrong". See encourage() — this is the
+                        moment that decides whether a child carries on. */}
+                    {right ? praise(index + i) : `${encourage(index + i)} ${c.answer}`}
                   </p>
                   {c.because && (
                     <p className="mt-1 text-[13px] leading-relaxed text-text-dim">{c.because}</p>
@@ -376,6 +472,41 @@ export const LessonPlayer: React.FC<Props> = ({ onBack }) => {
             </div>
           );
         })}
+      </div>
+
+      {/* the hand going up */}
+      <div className="rounded-2xl border border-border-main bg-glass-bg p-4">
+        <p className="mb-2 flex items-center gap-2 text-[12px] font-black uppercase tracking-widest text-text-dim">
+          <HelpCircle size={13} /> Stuck on something? Just ask
+        </p>
+        {(replies[index] ?? []).map((r, i) => (
+          <div key={i} className="mb-3">
+            <p className="text-[13px] font-bold">{r.q}</p>
+            <p className="mt-1 whitespace-pre-line text-[13.5px] leading-relaxed text-text-muted">
+              {r.a}
+            </p>
+          </div>
+        ))}
+        <div className="flex flex-wrap gap-2">
+          <input
+            value={asking}
+            onChange={(e) => setAsking(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void askQuestion(); }}
+            disabled={askBusy}
+            placeholder="Why does that work? What if it was negative?"
+            className="min-h-11 flex-1 rounded-xl border border-border-main bg-glass-bg px-3 text-sm"
+          />
+          <button
+            onClick={() => void askQuestion()}
+            disabled={askBusy || !asking.trim()}
+            className="min-h-11 rounded-xl border border-border-main px-3 text-[13px] font-bold disabled:opacity-50"
+          >
+            {askBusy ? <Loader2 size={15} className="animate-spin" /> : 'Ask'}
+          </button>
+        </div>
+        <p className="mt-2 text-[11.5px] text-text-dim">
+          Asking is the right thing to do &mdash; it never counts against you.
+        </p>
       </div>
 
       {step.game && (

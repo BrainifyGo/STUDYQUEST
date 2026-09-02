@@ -96,24 +96,94 @@ export function teachLines(teach: string): string[] {
 
 /* ── asking for a lesson ──────────────────────────────────────────────────── */
 
+/**
+ * How this student likes to be taught.
+ *
+ * RED's teacher was explicit that students are not interchangeable: some rise to
+ * pressure, some to rewards, and some shut down under either. So this is the
+ * student's own choice, not something inferred from their scores — guessing
+ * would mean deciding a child needs pushing on the evidence of a bad morning.
+ */
+export type LearningStyle = 'gentle' | 'challenge' | 'rewards';
+
+export const STYLE_LABELS: Record<LearningStyle, string> = {
+  gentle: 'Take it steady',
+  challenge: 'Push me',
+  rewards: 'Cheer me on',
+};
+
+const STYLE_NOTES: Record<LearningStyle, string> = {
+  gentle: 'This student likes a calm pace. Go gently, reassure often, and never '
+        + 'rush them.',
+  challenge: 'This student likes being pushed. Set a slightly harder question at '
+        + 'the end of a step and say plainly when they have done something hard. '
+        + 'Push the WORK, never the person.',
+  rewards: 'This student likes being cheered on. Notice what they got right and '
+         + 'say so warmly before moving on.',
+};
+
+/**
+ * THE TONE RULES. These are safeguarding, not style.
+ *
+ * RED's teacher put it plainly: if the method is too aggressive it can condemn
+ * the child, make them sad, and make them not want to study at all. The users of
+ * this app are schoolchildren, so a discouraging sentence is a real harm and not
+ * a matter of taste. These rules go into every prompt this file builds, and the
+ * tests assert they are there.
+ */
+const TONE = `You are warm, friendly and patient, like the teacher a child is not
+afraid to put their hand up in front of.
+
+NEVER say or imply that the student is slow, stupid, careless, lazy or bad at
+this. Never be sarcastic. Never compare them to anyone else. If they are wrong,
+say what the right answer is and why, kindly, and treat the mistake as a normal
+part of learning — because it is. A child who feels judged stops asking, and a
+child who stops asking stops learning.
+
+Be encouraging without being false: do not tell them a wrong answer was right.
+
+Avoid the words "obviously", "simply", "just", "clearly", "easy" and "of course"
+when describing the work. To a student who is stuck, every one of them means
+"you should have understood this already", which is the opposite of what you are
+trying to say.
+
+If the student says something unkind about themselves — that they are bad at
+this, or stupid, or cannot do it — do not let it pass and do not agree. Tell
+them plainly that this topic is genuinely hard and that being stuck on it is
+normal, then carry on teaching. Do not make a speech about it.`;
+
 export function buildLessonPrompt(args: {
   topic: string;
   subject?: string | null;
   /** From studyLevel.promptFor — year group and set, so the pitch is right. */
   level?: string;
+  style?: LearningStyle;
   steps?: number;
 }): string {
-  const { topic, subject, level, steps = 6 } = args;
+  const { topic, subject, level, style = 'gentle', steps = 6 } = args;
 
   return `You are a teacher taking one student through "${topic}"${
     subject ? ` in ${subject}` : ''}.
-${level ? `\n${level}\n` : ''}
+${level ? `
+${level}
+` : ''}
+${TONE}
+
+${STYLE_NOTES[style]}
+
 Teach it in ${steps} SMALL STEPS. This matters more than anything else below:
 you are not writing notes, a summary or an essay. You are teaching bit by bit.
+
+START AT THE VERY SIMPLEST IDEA AND GET HARDER ONE STEP AT A TIME.
+Step 1 should be something almost anyone could follow. Each step after it leans
+on the one before. The last step should be the real thing they came to learn.
+Never put a hard idea before the easy one it depends on.
 
 Every step must:
   - teach ONE small idea in ABOUT 4-5 short lines, never more than ${MAX_TEACH_LINES}
   - use the simplest words possible, as if explaining to a young child
+  - keep it interesting: a picture in words, a everyday comparison, something
+    they can see in their head
   - then ask ${MIN_CHECKS}-${MAX_CHECKS} short questions ON THAT STEP ONLY
 
 Never ask about something you have not taught yet. Never put the whole topic in
@@ -130,11 +200,54 @@ leave the game out — a bad game is worse than none.
 Reply with ONLY a JSON array, no prose and no code fence:
 [
   {
-    "teach": "line one\\nline two",
+    "teach": "line one\nline two",
     "checks": [ { "question": "...", "answer": "...", "because": "..." } ],
     "game": { "kind": "order", "instruction": "...", "items": ["...", "..."] }
   }
 ]`;
+}
+
+/**
+ * A student asking their own question, mid-lesson.
+ *
+ * "The student can be released to ask questions, and be welcomed." A lesson
+ * where the only allowed questions are the app's own is a worksheet. This is the
+ * hand going up, and the reply has to make them glad they raised it.
+ */
+export function buildAskPrompt(args: {
+  topic: string;
+  step: string;
+  question: string;
+  level?: string;
+}): string {
+  const { topic, step, question, level } = args;
+
+  return `A student is part-way through learning "${topic}". You have just taught
+them this:
+
+${step}
+
+They have asked: "${question}"
+
+${TONE}
+
+Welcome the question — a student who asks is doing the right thing, and should
+be left wanting to ask the next one.
+
+IF THEY PUT THEMSELVES DOWN — "I'm bad at this", "I'm stupid", "I never get it"
+— your FIRST line answers that, before any of the subject. One short sentence:
+this topic is genuinely hard, being stuck on it is normal, and asking was the
+right move. Never let it stand unanswered, and never agree with it. Then teach.
+
+Then answer the question itself in AT MOST 4 SHORT SENTENCES, EACH ON ITS OWN
+LINE, in the simplest words. Stay on what they asked — no detours into other
+topics. Short separate lines, not one long paragraph.
+
+If the answer is something you have not taught them yet, say so kindly and give
+them just enough to keep going.
+
+${level ? `${level}
+` : ''}Reply with plain sentences only. No JSON, no headings, no bullet points.`;
 }
 
 /* ── reading it back ──────────────────────────────────────────────────────── */
@@ -285,6 +398,41 @@ export function lessonProgress(lesson: Lesson, p: LessonProgress): {
     percent: total ? Math.round((done / total) * 100) : 0,
     finished: done >= total,
   };
+}
+
+/**
+ * What to say when a child gets it wrong.
+ *
+ * THIS IS THE MOMENT THAT DECIDES WHETHER THEY CARRY ON. RED's teacher was
+ * clear that a method which condemns a child makes them sad and makes them stop
+ * wanting to study — and being told "Incorrect" over and over is exactly that,
+ * delivered politely.
+ *
+ * So nothing here says wrong, incorrect, no, or failed. Every line treats the
+ * attempt as a normal part of learning, because it is. It never pretends a wrong
+ * answer was right either: the truth arrives, wrapped kindly.
+ *
+ * Deterministic on the step and question so a student does not see the same
+ * phrase twice in a row, and so the wording can be tested.
+ */
+const KIND_OPENERS = [
+  'Good try — the answer here is',
+  'Close. It is',
+  'Not quite, and that is fine. It is',
+  'Nearly. The one we want is',
+  'That is a fair guess. The answer is',
+];
+
+export function encourage(seed: number): string {
+  const i = Math.abs(Math.trunc(seed)) % KIND_OPENERS.length;
+  return KIND_OPENERS[i];
+}
+
+/** What to say when they get it right. Warm, and not the same word every time. */
+const PRAISE = ['Yes — that is it.', 'Exactly right.', 'That is the one.', 'Spot on.'];
+
+export function praise(seed: number): string {
+  return PRAISE[Math.abs(Math.trunc(seed)) % PRAISE.length];
 }
 
 /**
