@@ -28,6 +28,7 @@ import {
   Users,
   UserPlus,
   BarChart3,
+  TrendingUp,
   FolderOpen,
   MessageSquareText,
   Plus,
@@ -63,6 +64,8 @@ import { PaperPractice } from './components/PaperPractice';
 import { PaperLibrary } from './components/PaperLibrary';
 import { ReportIssue } from './components/ReportIssue';
 import { ExaminerInsights } from './components/ExaminerInsights';
+import { AdminDashboard } from './components/AdminDashboard';
+import { isAdminUser } from './lib/isAdmin';
 import { normaliseLevel, promptFor, resolveSubject } from './lib/studyLevel';
 import { boxFor, BOX_BLURBS, BOX_LABELS, type Confidence } from './lib/confidence';
 import { recordAttempt } from './lib/confidenceStore';
@@ -2232,6 +2235,19 @@ export default function App() {
                   collapsed={railCollapsed}
                 />
               </GuestGuard>
+              {/* Founders only. The server refuses the data to anyone else, so
+                  this decides visibility, not access. */}
+              {isAdminUser(userData) && (
+                <SidebarItem
+                  icon={<TrendingUp size={18} />}
+                  // Not "Dashboard": that label already belongs to the student
+                  // home above, and two identical entries is a coin toss.
+                  label="Business"
+                  active={activeView === 'admin'}
+                  onClick={() => navigate('admin')}
+                  collapsed={railCollapsed}
+                />
+              )}
               <GuestGuard featureName="Examiner Insights">
                 <SidebarItem
                   icon={<Lightbulb size={18} />}
@@ -2769,6 +2785,11 @@ export default function App() {
             )
           ) : activeView === 'insights' ? (
             <ExaminerInsights onBack={() => setActiveView('dashboard')} />
+          ) : activeView === 'admin' ? (
+            // Cosmetic gate only; /api/admin/* verifies the token server-side.
+            isAdminUser(userData)
+              ? <AdminDashboard onBack={() => setActiveView('dashboard')} />
+              : <div className="p-8 text-center text-text-dim">Not available on this account.</div>
           ) : activeView === 'mistakes' ? (
             <MistakesView
               onBack={() => setActiveView('dashboard')}

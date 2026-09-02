@@ -4949,3 +4949,122 @@ fill only from real reports.
 `src/components/PaperPractice.tsx`, `src/lib/examinerReport.ts`,
 `src/lib/insightStore.ts`, `src/hooks/useDocumentTitle.ts`, `src/App.tsx`,
 `firestore.rules`, `tests/examinerReport.test.ts`, `.gitignore`.
+
+---
+
+## [2026-09-02] — A founders' dashboard, and the numbers it refuses to flatter
+
+**Editor:** Claude Code (Opus 5)
+
+RED asked for a proper business dashboard like the JARVIS one he monitors his
+projects with — revenue, payments, everything needed to understand what is going
+on — and for Daniel to be able to open it without RED's laptop.
+
+It lives in the app at **Business** in the sidebar, admin only, and Daniel gets
+in by having admin on his own account. No shared password, no laptop.
+
+### What the data actually said
+
+Three things came out of looking before building, and all three changed the
+design.
+
+**Nothing has sold.** The Lemon Squeezy store is live, the keys are configured,
+the webhook verifies signatures correctly — and it has taken £0 across 0 orders.
+Every Pro account so far was granted with a key. That is now the loudest thing
+on the page, because it is the loudest thing about the business.
+
+**Fourteen of nineteen accounts were mine.** Debugging created them. A dashboard
+reporting nineteen users would have been wrong by a factor of three about the
+only number that matters this early. They are excluded by pattern —
+`isTestAccount` — and the page says how many it set aside. Excluded rather than
+deleted: removing live accounts is RED's call, not a side effect of building a
+dashboard.
+
+**Firestore never recorded when anyone signed up.** Only 3 of 19 user documents
+had a `createdAt`. Firebase Auth records it for every account, always, so the
+server reads growth from Auth metadata instead — which is why there is a real
+30-day signup chart rather than an apology.
+
+### The number that would have lied
+
+The first working version put **"Free to Pro conversion: 71%"** directly above
+**"Revenue, all time: £0.00"**. Both were computed correctly. Five of seven
+accounts were Pro — all of them comped.
+
+Conversion now counts subscription-sourced Pro only, so giving product away can
+never move it, and granted keys are shown on their own line labelled *not
+revenue*. It reads 0%, which is the truth.
+
+The same instinct runs through the rest:
+
+- **MRR divides an annual plan by twelve.** StudyQuest's plan *is* annual, so
+  booking a year's payment as one month's recurring revenue would have
+  overstated MRR twelvefold on the first sale. A subscription does not carry its
+  own price in Lemon Squeezy — it is on a separate `prices` object reached
+  through `first_subscription_item.price_id` — so the server fetches it.
+- **Average ORDER value, not ARPU.** An order carries no customer id, so two
+  orders from one person are indistinguishable from one each. It is named after
+  what the data can support.
+- **Null is not zero.** Anything the data cannot answer renders as "—". "£0
+  revenue" is a fact about the business; "no signup dates recorded" is a fact
+  about the database, and showing the second as the first would send RED chasing
+  the wrong problem.
+
+### Why the aggregation is server-side
+
+The Lemon Squeezy API key may never reach a browser, and the figures need
+Firebase Auth user metadata, which only the Admin SDK can read. Doing this in
+the client would have meant either shipping the billing key or having no revenue
+numbers at all. `/api/admin/metrics` verifies the ID token, requires
+`role == 'admin'`, and caches for 60 seconds — one page load would otherwise be
+a full Auth listing, a dozen Firestore counts and several Lemon Squeezy calls,
+and refreshing repeatedly is exactly what people do with a dashboard.
+
+### The webhook now keeps a record
+
+It used to flip `isPro` and throw the event away. Two gaps came from that: a
+Lemon Squeezy order carries no StudyQuest user id, so nothing could say which
+account a payment belonged to; and revenue history lived only inside Lemon
+Squeezy. Payment events are now written to `payments` by the Admin SDK, keyed by
+event id so a retried webhook lands once rather than counting the same money
+twice. **No card details** — the record is the amount, the status and the
+account. A failed write never fails the webhook.
+
+`firestore.rules` shuts every other door on that collection: no client may write
+one (that would be forging revenue) and only an admin may read. Verified live —
+a student is refused both.
+
+### Verified
+
+- **746 tests** (was 726), `tsc` clean, `eslint` 0 errors.
+- The API, against the running server, with a throwaway account promoted and
+  then demoted rather than RED's own credentials:
+
+```
+OK  a signed-in NON-admin is refused (403)
+OK  an anonymous request is refused (401)
+OK  a forged token is refused (401)
+OK  an admin gets the metrics
+OK  every user has a createdAt from Auth
+OK  the Lemon Squeezy key is NOT in the response
+OK  no credentials leaked in the payload
+OK  granting access to a non-existent account is refused
+OK  you cannot remove your own access
+OK  the second call is served from cache
+```
+
+- The screen, in a browser: a student does not get the Business entry, an admin
+  does, all five tabs render, and the tab is named.
+
+### Two things for RED
+
+- **17 debug accounts are still in the database.** Deleting live accounts needs
+  RED's say-so, and the sandbox refused the bulk delete. They are excluded from
+  every figure, so the numbers are right either way.
+- **33 orphaned `public_profiles`** — rows left behind by deleted accounts.
+  Shown under App health rather than quietly carried.
+
+### Files
+`src/lib/adminMetrics.ts` (new), `src/components/AdminDashboard.tsx` (new),
+`tests/adminMetrics.test.ts` (new), `server.ts`, `firestore.rules`,
+`src/App.tsx`, `src/hooks/useDocumentTitle.ts`.

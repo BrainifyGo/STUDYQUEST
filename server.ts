@@ -334,6 +334,44 @@ async function startServer() {
 
       const db = admin.firestore();
 
+      /*
+        KEEP A RECORD OF THE EVENT, NOT JUST ITS EFFECT.
+
+        This handler used to flip `isPro` and throw the rest away, which left two
+        gaps. Lemon Squeezy's own order carries no StudyQuest user id, so nothing
+        anywhere could say WHICH account a payment belonged to; and revenue
+        history existed only inside Lemon Squeezy, so the dashboard had nothing
+        to fall back on if that API was slow, rate-limited or changed.
+
+        Written by the Admin SDK, so no client can forge a payment. Stored by
+        event id, so a webhook Lemon Squeezy retries lands once rather than
+        counting the same money twice.
+
+        NO CARD DETAILS. Nothing here comes near a card number — the fields are
+        the amount, the status and which account it was for. That is the whole
+        record.
+      */
+      try {
+        const attrs = req.body.data?.attributes ?? {};
+        const eventId = String(req.body.data?.id ?? Date.now());
+        await db.collection('payments').doc(`${eventName}-${eventId}`).set({
+          userId,
+          event: eventName,
+          status: attrs.status ?? null,
+          productName: attrs.product_name ?? null,
+          variantName: attrs.variant_name ?? null,
+          currency: attrs.currency ?? 'GBP',
+          renewsAt: attrs.renews_at ?? null,
+          endsAt: attrs.ends_at ?? null,
+          occurredAt: attrs.created_at ?? new Date().toISOString(),
+          recordedAt: new Date().toISOString(),
+        }, { merge: true });
+      } catch (err) {
+        // A failed record must never fail the webhook: Lemon Squeezy would retry
+        // it, and the part that actually matters — the user's access — is below.
+        console.warn('[webhook] could not record the payment event:', err);
+      }
+
       if (eventName === 'subscription_created' || eventName === 'subscription_updated') {
         const status = req.body.data.attributes.status;
         const isPro = status === 'active';
@@ -1371,6 +1409,256 @@ async function startServer() {
     } catch (error: any) {
       console.error('Account erasure failed:', error);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  /* ── the founders' dashboard ──────────────────────────────────────────────
+     Everything RED and Daniel need to see how StudyQuest is doing, aggregated
+     ON THE SERVER and behind an admin check.
+
+     Server-side is not a preference here. The Lemon Squeezy API key may never
+     reach a browser, and the figures need Firebase Auth's user metadata, which
+     only the Admin SDK can read. Doing it in the client would mean either
+     shipping the billing key or having no revenue numbers at all.
+
+     Daniel gets in from his own machine because access is a role on his own
+     account, granted through /api/admin/team — not a shared password, and not
+     something that needs RED's laptop.
+  */
+  async function requireAdmin(authHeader: string | undefined): Promise<string> {
+    if (!authHeader?.startsWith('Bearer ')) throw new HttpError(401, 'Sign in first.');
+    let uid: string;
+    try {
+      uid = (await admin.auth().verifyIdToken(authHeader.slice(7))).uid;
+    } catch {
+      throw new HttpError(401, 'Invalid or expired session.');
+    }
+    const snap = await admin.firestore().collection('users').doc(uid).get();
+    if (snap.data()?.role !== 'admin') {
+      // Deliberately the same shape of refusal as a bad token: an ordinary user
+      // probing this route learns only that they cannot have it.
+      throw new HttpError(403, 'Not available on this account.');
+    }
+    return uid;
+  }
+
+  /*
+    Cached, because one page load would otherwise mean a full Auth user listing,
+    a dozen Firestore counts and two Lemon Squeezy calls. Refreshing repeatedly
+    is exactly what someone does with a dashboard.
+  */
+  let metricsCache: { at: number; data: unknown } | null = null;
+  const METRICS_TTL = 60_000;
+
+  async function lemonSqueezy(path: string): Promise<any[]> {
+    if (!LEMONSQUEEZY_API_KEY) return [];
+    const out: any[] = [];
+    let url: string | null =
+      `https://api.lemonsqueezy.com/v1/${path}?filter[store_id]=${LEMONSQUEEZY_STORE_ID}&page[size]=100`;
+    // Paginated: a store with more than 100 orders must not silently report 100.
+    while (url && out.length < 1000) {
+      const r: any = await fetch(url, {
+        headers: {
+          Accept: 'application/vnd.api+json',
+          'Content-Type': 'application/vnd.api+json',
+          Authorization: `Bearer ${LEMONSQUEEZY_API_KEY}`,
+        },
+      });
+      if (!r.ok) break;
+      const j: any = await r.json();
+      out.push(...(j.data ?? []));
+      url = j.links?.next ?? null;
+    }
+    return out;
+  }
+
+  app.get('/api/admin/metrics', async (req, res) => {
+    try {
+      await requireAdmin(req.headers.authorization);
+
+      if (metricsCache && Date.now() - metricsCache.at < METRICS_TTL) {
+        return res.json({ ...(metricsCache.data as object), cached: true });
+      }
+
+      const db = admin.firestore();
+
+      /* Users: Firestore for what they do, Auth for when they arrived. Auth
+         always records creation and last sign-in; the user documents did not. */
+      const [authUsers, userDocs] = await Promise.all([
+        admin.auth().listUsers(1000),
+        db.collection('users').get(),
+      ]);
+      const byUid = new Map(userDocs.docs.map((d) => [d.id, d.data()]));
+      const users = authUsers.users.map((u) => {
+        const doc = byUid.get(u.uid) ?? {};
+        return {
+          uid: u.uid,
+          email: u.email ?? null,
+          isPro: !!doc.isPro,
+          proSource: doc.proSource ?? null,
+          subscriptionType: doc.subscriptionType ?? null,
+          createdAt: u.metadata.creationTime
+            ? new Date(u.metadata.creationTime).toISOString() : null,
+          lastSeenAt: u.metadata.lastSignInTime
+            ? new Date(u.metadata.lastSignInTime).toISOString() : null,
+          xp: doc.xp ?? 0,
+          streak: doc.streak ?? 0,
+          studyLevel: doc.studyLevel ?? null,
+        };
+      });
+
+      const countOf = async (name: string) => {
+        try { return (await db.collection(name).count().get()).data().count; }
+        catch { return 0; }
+      };
+      const [
+        studyKits, studySessions, paperSessions, mistakesLogged, tasks, exams,
+        insights, profiles,
+      ] = await Promise.all([
+        countOf('study_history'), countOf('study_sessions'), countOf('paper_sessions'),
+        countOf('study_mistakes'), countOf('study_tasks'), countOf('exams'),
+        countOf('examiner_insights'), countOf('public_profiles'),
+      ]);
+
+      let openIssues = 0;
+      try {
+        openIssues = (await db.collection('issue_reports')
+          .where('status', '==', 'open').count().get()).data().count;
+      } catch { openIssues = 0; }
+
+      const [orders, subs] = await Promise.all([
+        lemonSqueezy('orders'), lemonSqueezy('subscriptions'),
+      ]);
+
+      /*
+        A subscription does not carry its own price. Lemon Squeezy keeps the
+        amount and the billing interval on a separate `prices` object, reached
+        through first_subscription_item.price_id — so MRR needs a second lookup
+        per distinct price, cached here so ten subscriptions on one plan cost one
+        request rather than ten.
+
+        Without this the interval is unknown, and an annual plan counted whole
+        would overstate MRR twelvefold. StudyQuest's own plan is annual, so that
+        is the live case, not a hypothetical.
+      */
+      const priceIds = [...new Set(subs
+        .map((s: any) => s.attributes?.first_subscription_item?.price_id)
+        .filter(Boolean))];
+      const prices = new Map<string, { unit: number; unit_interval: string; qty: number }>();
+      for (const id of priceIds) {
+        try {
+          const r: any = await fetch(`https://api.lemonsqueezy.com/v1/prices/${id}`, {
+            headers: {
+              Accept: 'application/vnd.api+json',
+              Authorization: `Bearer ${LEMONSQUEEZY_API_KEY}`,
+            },
+          });
+          if (!r.ok) continue;
+          const j: any = await r.json();
+          prices.set(String(id), {
+            unit: j.data?.attributes?.unit_price ?? 0,
+            unit_interval: j.data?.attributes?.renewal_interval_unit ?? 'month',
+            qty: j.data?.attributes?.renewal_interval_quantity ?? 1,
+          });
+        } catch { /* a missing price leaves that subscription out of MRR, not the page */ }
+      }
+
+      const data = {
+        generatedAt: new Date().toISOString(),
+        users,
+        orders: orders.map((o: any) => ({
+          total: o.attributes.total ?? 0,
+          currency: o.attributes.currency ?? 'GBP',
+          status: o.attributes.status ?? 'unknown',
+          createdAt: o.attributes.created_at ?? '',
+          refunded: !!o.attributes.refunded,
+        })),
+        subscriptions: subs.map((s: any) => {
+          const p = prices.get(String(s.attributes?.first_subscription_item?.price_id));
+          return {
+            status: s.attributes.status ?? 'unknown',
+            // Normalised to one billing period; a "every 3 months" plan is
+            // divided down so MRR stays monthly.
+            amount: p ? Math.round(p.unit / (p.qty || 1)) : null,
+            interval: p?.unit_interval ?? null,
+            createdAt: s.attributes.created_at ?? '',
+            productName: s.attributes.product_name ?? '',
+            variantName: s.attributes.variant_name ?? '',
+          };
+        }),
+        usage: {
+          studyKits, studySessions, paperSessions, mistakesLogged, tasks, exams,
+          insights, openIssues,
+          // public_profiles outnumbering users means rows were left behind by
+          // account deletions. Worth seeing rather than quietly carrying.
+          orphanedProfiles: Math.max(0, profiles - userDocs.size),
+        },
+        billing: {
+          configured: !!LEMONSQUEEZY_API_KEY && !!LEMONSQUEEZY_STORE_ID,
+          storeId: LEMONSQUEEZY_STORE_ID ?? null,
+        },
+      };
+
+      metricsCache = { at: Date.now(), data };
+      res.json({ ...data, cached: false });
+    } catch (err: any) {
+      const status = err instanceof HttpError ? err.status : 500;
+      if (status === 500) console.error('[admin/metrics]', err);
+      res.status(status).json({ error: err.message ?? 'Could not load metrics.' });
+    }
+  });
+
+  /* Who can see the dashboard, and adding Daniel to that list. */
+  app.get('/api/admin/team', async (req, res) => {
+    try {
+      await requireAdmin(req.headers.authorization);
+      const snap = await admin.firestore().collection('users')
+        .where('role', '==', 'admin').get();
+      res.json({
+        team: snap.docs.map((d) => ({
+          uid: d.id, email: d.data().email ?? null,
+          displayName: d.data().displayName ?? null,
+        })),
+      });
+    } catch (err: any) {
+      const status = err instanceof HttpError ? err.status : 500;
+      res.status(status).json({ error: err.message ?? 'Could not load the team.' });
+    }
+  });
+
+  app.post('/api/admin/team', async (req, res) => {
+    try {
+      const actor = await requireAdmin(req.headers.authorization);
+      const { email, grant } = req.body ?? {};
+      if (typeof email !== 'string' || !email.includes('@')) {
+        throw new HttpError(400, 'That is not an email address.');
+      }
+
+      const target = await admin.auth().getUserByEmail(email.trim().toLowerCase())
+        .catch(() => null);
+      if (!target) {
+        // The account has to exist first, and only its owner can create it.
+        throw new HttpError(404,
+          'No StudyQuest account with that email. Ask them to sign up first, then add them.');
+      }
+
+      if (!grant && target.uid === actor) {
+        throw new HttpError(400, 'You cannot remove your own access.');
+      }
+      if (!grant) {
+        const admins = await admin.firestore().collection('users')
+          .where('role', '==', 'admin').get();
+        // Never leave the dashboard with nobody able to open it.
+        if (admins.size <= 1) throw new HttpError(400, 'That is the last admin.');
+      }
+
+      await admin.firestore().collection('users').doc(target.uid)
+        .set({ role: grant ? 'admin' : 'client' }, { merge: true });
+      res.json({ ok: true, uid: target.uid, email: target.email, role: grant ? 'admin' : 'client' });
+    } catch (err: any) {
+      const status = err instanceof HttpError ? err.status : 500;
+      if (status === 500) console.error('[admin/team]', err);
+      res.status(status).json({ error: err.message ?? 'Could not change access.' });
     }
   });
 

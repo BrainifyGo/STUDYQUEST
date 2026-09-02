@@ -20,6 +20,7 @@ export const VIEW_TITLES: Record<string, string> = {
   mistakes:    'My Mistakes',
   paper:       'Past Papers',
   insights:    'What Examiners Say',
+  admin:       'Business & Revenue',
   arcade:      'Arcade',
   friends:     'Friends',
   report:      'Report an Issue',
