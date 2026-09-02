@@ -57,6 +57,9 @@ import Markdown from 'react-markdown';
 import { pdfjsLib } from './lib/pdfConfig';
 import { cn } from './lib/utils';
 import { looksLikeExamPaper, parseExamPaper, type ExamPaper } from './lib/examPaper';
+import { startSession, type PaperSession } from './lib/paperSession';
+import { saveSession } from './lib/paperStore';
+import { PaperPractice } from './components/PaperPractice';
 import { normaliseLevel, promptFor, resolveSubject } from './lib/studyLevel';
 import { boxFor, BOX_BLURBS, BOX_LABELS, type Confidence } from './lib/confidence';
 import { recordAttempt } from './lib/confidenceStore';
@@ -268,6 +271,29 @@ export default function App() {
     their browser, and StudyQuest keeps none of it.
   */
   const [detectedPaper, setDetectedPaper] = useState<ExamPaper | null>(null);
+
+  /*
+    The paper the student is currently working through, if any. Held here rather
+    than in a route because the app has no router — `activeView` is the whole
+    navigation model, and a session is a mode of the practice view.
+  */
+  const [paperSession, setPaperSession] = useState<PaperSession | null>(null);
+
+  const startPaperPractice = (paper: ExamPaper) => {
+    const session = startSession({
+      // Stable per paper per student, so re-uploading the same file resumes it
+      // rather than starting a second copy alongside the first.
+      id: `p-${paper.board ?? 'x'}-${paper.subject ?? 'x'}-${paper.questions.length}-${paper.totalMarks ?? 0}`
+        .toLowerCase().replace(/[^a-z0-9-]/g, ''),
+      paperTitle: [paper.board, paper.subject].filter(Boolean).join(' ') || 'Past paper',
+      board: paper.board,
+      subject: paper.subject,
+      questions: paper.questions,
+    });
+    setPaperSession(session);
+    setActiveView('paper');
+    void saveSession(session);
+  };
   const [joinRoomId, setJoinRoomId] = useState('');
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showUpgradeSuccess, setShowUpgradeSuccess] = useState(false);
@@ -2677,6 +2703,18 @@ export default function App() {
             <FriendsView
               onStartRoom={(code) => { setCollabRoomId(code); setActiveView('collab'); }}
             />
+          ) : activeView === 'paper' ? (
+            paperSession ? (
+              <PaperPractice
+                session={paperSession}
+                onChange={setPaperSession}
+                onExit={() => setActiveView('dashboard')}
+              />
+            ) : (
+              <div className="p-8 text-center text-text-dim">
+                No paper open. Upload one from the dashboard to start.
+              </div>
+            )
           ) : activeView === 'mistakes' ? (
             <MistakesView
               onBack={() => setActiveView('dashboard')}
@@ -2887,7 +2925,7 @@ export default function App() {
                           flow, which is the right thing for them.
                         */}
                         {detectedPaper && (
-                          <div className="mt-3 rounded-xl border border-emerald-400/30 bg-emerald-400/[0.06] px-4 py-3">
+                          <div className="relative z-20 mt-3 rounded-xl border border-emerald-400/30 bg-emerald-400/[0.06] px-4 py-3">
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                               <span className="text-[11px] font-black uppercase tracking-widest text-emerald-300">
                                 Past paper detected
@@ -2902,6 +2940,12 @@ export default function App() {
                             <p className="mt-1.5 text-[12px] leading-relaxed text-white/40">
                               Your file stays on your device — StudyQuest reads it here and keeps no copy.
                             </p>
+                            <button
+                              onClick={() => startPaperPractice(detectedPaper)}
+                              className="mt-3 flex min-h-11 w-full items-center justify-center rounded-xl bg-emerald-500/20 px-4 text-sm font-black text-emerald-200 transition-all hover:bg-emerald-500/30"
+                            >
+                              Work through it question by question →
+                            </button>
                           </div>
                         )}
                         {inputMethod === 'pdf' && (
@@ -2964,7 +3008,15 @@ export default function App() {
                         )}
                         
                         <AnimatePresence>
-                          {detectedSubject && (
+                          {/*
+                            Hidden while a past paper is open. The chip is
+                            absolutely positioned at the bottom of this box, so
+                            it sat on top of the banner's button and swallowed
+                            the click — and its guess was worse anyway: on a real
+                            AQA paper it read "Exam instructions" where the
+                            banner already says "AQA · Mathematics".
+                          */}
+                          {detectedSubject && !detectedPaper && (
                             <motion.div 
                               initial={{ opacity: 0, y: 10 }}
                               animate={{ opacity: 1, y: 0 }}

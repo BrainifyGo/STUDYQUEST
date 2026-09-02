@@ -377,6 +377,30 @@ service cloud.firestore {
       only reason to edit one would be to make past performance look better,
       which would quietly destroy the only thing the data is for.
     */
+    /*
+      A past paper the student is working through, saved so they can come back.
+
+      The document holds their own answers and the questions they extracted from
+      a file THEY uploaded — StudyQuest never stores the paper itself, and this
+      is readable only by the person who wrote it. Id is `{uid}__{sessionId}`, so
+      the ownership check and the key agree by construction.
+
+      Updates are allowed here, unlike confidence attempts, because working
+      through a paper is exactly a thing you come back and change.
+    */
+    match /paper_sessions/{sessionId} {
+      allow read, delete: if isAuthenticated() && resource.data.user_id == request.auth.uid;
+      allow create, update: if isAuthenticated()
+                    && request.resource.data.user_id == request.auth.uid
+                    && request.resource.data.keys().hasAll(['user_id', 'id', 'questions', 'attempts'])
+                    && request.resource.data.id is string
+                    && request.resource.data.id.size() > 0
+                    && request.resource.data.questions is list
+                    && request.resource.data.questions.size() <= 100
+                    && request.resource.data.attempts is list
+                    && request.resource.data.attempts.size() <= 100;
+    }
+
     match /confidence_attempts/{attemptId} {
       allow read: if isAuthenticated() && resource.data.user_id == request.auth.uid;
       allow create: if isAuthenticated()

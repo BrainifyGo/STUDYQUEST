@@ -31,11 +31,13 @@ export type Feature =
   | 'study-rooms'       // real-time collaboration, and the multiplayer quiz in it
   | 'advanced-analytics'// period switching, subject breakdown, badges
   | 'unlimited-kits'    // saving more than the free allowance
-  | '3d-arena';        // the boss fight rendered in 3D rather than 2D
+  | '3d-arena'          // the boss fight rendered in 3D rather than 2D
+  | 'paper-marking';   // marking a past paper answer against the scheme
 
 /** What Pro unlocks, in the order it is advertised. */
 export const PRO_FEATURES: Feature[] = [
-  'ai-tutor', 'study-rooms', 'advanced-analytics', 'unlimited-kits', '3d-arena',
+  'ai-tutor', 'paper-marking', 'study-rooms', 'advanced-analytics',
+  'unlimited-kits', '3d-arena',
 ];
 
 /**
@@ -93,6 +95,13 @@ export function upsellFor(feature: Feature): { title: string; body: string } {
       return {
         title: `Free accounts keep ${FREE_SAVED_KITS} study kits`,
         body: 'Pro keeps every kit you ever make, so nothing you have revised from disappears.',
+      };
+    case 'paper-marking':
+      return {
+        title: 'Past paper marking is part of Pro',
+        body: 'Upload a paper you already have and get every answer marked against what the '
+          + 'examiner wants — with the reason each mark went, not just a score. Free still '
+          + 'reads your paper and shows you the questions.',
       };
   }
 }

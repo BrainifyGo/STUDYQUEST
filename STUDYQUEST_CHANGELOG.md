@@ -4329,3 +4329,128 @@ real screen proves it is reachable.
 `src/lib/pdfConfig.ts` (new), `src/App.tsx`, `src/lib/pdfWorker.ts`,
 `src/lib/examPaper.ts`, `src/components/Settings.tsx`,
 `src/components/StudyLevelPicker.tsx`, `tests/examPaper.test.ts`.
+
+---
+
+## [2026-09-02] — Working through a past paper, and being told why the marks went
+
+**Editor:** Claude Code (Opus 5)
+
+RED's original ask, finished: upload a paper you already have, answer the
+questions, see what earns the marks, save it, come back tomorrow.
+
+### The session
+
+`src/lib/paperSession.ts` is deliberately **plain serialisable data** — no
+functions, no class instances, no `undefined`. "Come back later" is the whole
+request, and it fails the moment something in there stops surviving a round trip
+through Firestore and a browser that was closed in between. A test asserts
+exactly that, because it is the kind of thing that breaks silently and subtly
+rather than loudly.
+
+Marks are capped at what the question is worth, always. Models return 3/2 more
+often than you would hope, and one impossible score makes every honest number
+beside it look untrustworthy.
+
+Progress is scored **out of what has been marked**, not out of the paper. A
+student who has done three questions well must not be shown a failing percentage
+because seven are still blank.
+
+### The part that is actually the product
+
+Not the score — the **reason**. Every mark carries one:
+
+```
+correct · knowledge-gap · command-word · incomplete-chain
+unshown-working · misread · unanswered
+```
+
+A mark lost to a command word and a mark lost to not knowing the material look
+identical on a percentage and have completely different fixes: one is five
+minutes of reading the question properly, the other is revision. After a few
+papers `lossBreakdown()` can say *"58% of the marks you lost went to one thing"*,
+which is a sentence that changes what someone does tomorrow. "You got 68%" is not.
+
+### Marking honestly
+
+Two rules run through `markAnswer.ts`:
+
+**Being generous is the failure that matters.** A student told they earned 4/4
+for a 2/4 answer believes it until the real exam, where it counts. The prompt
+says to mark to the scheme rather than to encourage.
+
+**`parseMarkingReply` throws rather than guessing.** A silent 0 tells a student
+they got nothing right; a silent full mark is worse. Both are lies, so an
+unreadable reply is an error the caller handles — the UI says it could not mark
+that one, which is at least true.
+
+It also refuses to print a reason that contradicts the mark. "Full marks" above
+1/3, or a fault named above a perfect score, reads as a broken app and taints
+every honest number next to it.
+
+### What Pro buys
+
+Marking is `paper-marking`, gated on the server against the verified token —
+a check in the browser is a suggestion.
+
+**Reading the paper is not gated.** A free account can upload a paper, see every
+question with its marks, write answers and keep them across sittings. Pro buys
+the examiner, which is the part that costs money per question and is the genuinely
+hard thing to get anywhere else.
+
+### Verified on the real paper
+
+The actual AQA 8300/1H RED linked, in a browser, end to end:
+
+```
+opened on      : QUESTION 1(A)
+question reads : 1 (a) Work out 0.7 × 0.5 [1 mark]
+answer "0.35, because 7 x 5 = 35…"  →  FULL MARKS, 1/1
+answer "3.5"                        →  0/1, unshown-working
+   "You provided a final answer, but did not show the working to get to the…"
+```
+
+Then read back out of Firestore rather than trusting the screen: the session was
+there, with the answer, the mark and the reason.
+
+Rules were deployed and probed live first — create, update and delete allowed for
+the owner; someone else's `user_id`, a missing id, a non-list `questions` and a
+200-question payload all refused.
+
+### Two bugs found by running it
+
+**The start button could not be clicked.** A "Detected: subject" chip is
+`absolute bottom-2` inside the input box, so it sat on top of the banner's button
+and swallowed every click. Its guess was also worse than the banner's — on the
+real paper it read *"Exam instructions"* where the banner already said
+*"AQA · Mathematics"*. It is now hidden while a paper is open, and the banner
+sits above it.
+
+**A test that could not fail.** The first version checked persistence with
+`typeof window.__sessionProbe`, which returns the string `"undefined"` — truthy.
+It asserted nothing. Persistence is now checked against Firestore itself, which
+is the only place that can answer the question after a reload.
+
+### Worth knowing
+
+The AI provider chain is degraded and it showed up in every run:
+
+```
+Groq     Request too large — 8451 tokens against a 8000 TPM limit
+Mistral  HTTP 403
+Together Credit limit exceeded
+```
+
+Marking still succeeded on a fallback, but three of the providers are unusable
+and the marking prompt is close enough to Groq's per-minute ceiling to trip it.
+That affects study kits too, not only this. Worth looking at on its own.
+
+Also: the reason a mark is given is only as good as the model giving it. "3.5"
+for 0.7 × 0.5 was categorised `unshown-working` when `knowledge-gap` fits better.
+The taxonomy is sound; the judgement is a model's, on a fallback provider.
+
+### Files
+`src/lib/paperSession.ts` (new), `src/lib/markAnswer.ts` (new),
+`src/lib/paperStore.ts` (new), `src/components/PaperPractice.tsx` (new),
+`tests/paperSession.test.ts` (new), `src/lib/entitlements.ts`,
+`firestore.rules`, `src/App.tsx`.
