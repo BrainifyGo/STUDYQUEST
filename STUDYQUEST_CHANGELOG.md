@@ -5367,3 +5367,87 @@ and the prompt says so in as many words: **push the WORK, never the person**.
 ### Files
 `src/lib/lesson.ts`, `src/components/LessonPlayer.tsx`, `src/store/useUserStore.ts`,
 `tests/lesson.test.ts`, `CLAUDE.md`.
+
+---
+
+## [2026-09-02] — Lessons you can come back to, taught from your own notes
+
+**Editor:** Claude Code (Opus 5)
+
+Two gaps in Learn, both of which stopped it being something a student lives in
+rather than tries once.
+
+### It forgot everything when you closed the tab
+
+The whole method is "bit by bit", and bit by bit happens across days. A lesson
+held only in component state quietly demanded the opposite: finish in one
+sitting or lose it. For a student with twenty minutes before dinner that is the
+difference between a tool and a demo.
+
+Lessons now save to a `lessons` collection — one document per lesson, keyed
+`uid__lessonId` so two tabs converge instead of leaving a duplicate to choose
+between. Saved on a 1.2s pause rather than per keystroke: a write per answer is
+wasteful, and a write only on completion loses exactly the student this is for.
+
+The start screen leads with **Carry on where you left off**, showing how far they
+got and whether it came from their own notes.
+
+**One gotcha worth writing down.** `progress.cleared` is keyed by step NUMBER,
+and Firestore has no numeric object keys — it stores them as strings and returns
+them as strings. JavaScript looks up `obj[0]` and `obj["0"]` identically, so this
+survives the round trip *by accident of the language rather than by design*. So
+`fromStorage` puts the numbers back deliberately, and a test asserts the round
+trip, so a future rewrite cannot quietly break resuming.
+
+`forStorage` also never emits `undefined`, which Firestore rejects outright — an
+absent `game` or `because` is written as `null`. Tested.
+
+### It could only teach a topic name
+
+A lesson built from "Adding fractions" is a lesson about the topic in general. A
+student sitting with their own class notes, or the paper their teacher set, needs
+the lesson to use the same wording, notation and worked examples they will be
+marked against.
+
+Learn now takes pasted notes, or a past paper the student already uploaded —
+in which case the questions themselves become the material, since those are what
+they will actually be asked. The prompt tells the model to stay inside it:
+*"do not wander into parts of the subject it does not touch"*, and never
+contradict what they have. Wandering off is worse than useless here; it teaches
+something the student will not be sat.
+
+**Proved with nonsense.** The browser test pastes notes about "zorbons" and
+"klimps" — invented particles no model can know — and asserts the lesson teaches
+those. It does, in the student's own words.
+
+### Privacy
+
+`lessons` is private to its owner, with **no admin read**. A founder does not
+need to see a child's half-finished lesson on fractions to run the business.
+Verified live from two separate student accounts: one can save and list its own,
+cannot read the other's, cannot write a lesson onto another account, and cannot
+store a 40-step lesson (the size cap that stops the collection becoming free
+storage).
+
+### The test accounts are gone
+
+RED approved the cleanup. **32 accounts and 51 documents deleted** — more than
+the 17 first counted, because testing since then had added more. The pattern was
+widened first: the original `debug.[a-z]+.[0-9]+@example.com` missed
+`debug.2fa.…`, whose middle segment has a digit.
+
+Seven real accounts remain, and the dashboard's figures are now real without
+needing the exclusion filter at all (it stays, for the next round of testing).
+
+### Verified
+
+- **802 tests** (was 792), `tsc` clean, `eslint` 0 errors.
+- Rules probed live from two students: own save allowed, cross-account write
+  refused, oversized lesson refused, cross-account read refused.
+- In a browser, end to end: taught from invented notes, answered a step, moved
+  on, **reloaded the page**, found "Carry on where you left off" with "1 of 6
+  steps", and resumed on the right step.
+
+### Files
+`src/lib/lessonStore.ts` (new), `src/lib/lesson.ts`,
+`src/components/LessonPlayer.tsx`, `tests/lesson.test.ts`, `firestore.rules`.

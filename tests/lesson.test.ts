@@ -13,10 +13,11 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  MAX_TEACH_LINES, STYLE_LABELS, advance, buildAskPrompt, buildLessonPrompt,
-  canAdvance, encourage, isCorrect, lessonProgress, parseLesson, praise,
-  recordCheck, startLesson, stepDone,
-  type Lesson, type LearningStyle,
+  MAX_MATERIAL_CHARS, MAX_TEACH_LINES, STYLE_LABELS, advance, buildAskPrompt,
+  buildLessonPrompt, canAdvance, encourage, forStorage, fromStorage, isCorrect,
+  lessonProgress, newLessonId, parseLesson, praise, recordCheck, startLesson,
+  stepDone,
+  type Lesson, type LearningStyle, type SavedLesson,
 } from '../src/lib/lesson';
 
 const check = { question: 'What is 2 + 2?', answer: '4', because: 'Two twos.' };
@@ -367,5 +368,120 @@ describe('marking a young student fairly', () => {
     expect(isCorrect('5', '4')).toBe(false);
     expect(isCorrect('', '4')).toBe(false);
     expect(isCorrect('   ', '4')).toBe(false);
+  });
+});
+
+describe('coming back to it tomorrow', () => {
+  /*
+    THE METHOD NEEDS THIS. "Bit by bit" happens across days, and a lesson that
+    vanished with the tab quietly demanded the opposite: finish in one sitting or
+    lose it. For a student with twenty minutes before dinner that is the
+    difference between a tool and a demo.
+  */
+  const saved = (): SavedLesson => ({
+    id: newLessonId(),
+    topic: 'Fractions',
+    subject: 'Mathematics',
+    steps: [
+      { teach: 'one', checks: [check, check] },
+      {
+        teach: 'two',
+        checks: [check],
+        game: { kind: 'order', instruction: 'Order it.', items: ['a', 'b'] },
+      },
+    ],
+    progress: { cursor: 1, cleared: { 0: 2, 1: 1 } },
+    createdAt: '2026-09-02T10:00:00.000Z',
+    updatedAt: '2026-09-02T11:00:00.000Z',
+  });
+
+  it('survives the round trip with progress intact', () => {
+    const back = fromStorage(forStorage(saved()));
+    expect(back).not.toBeNull();
+    expect(back!.progress.cursor).toBe(1);
+    expect(back!.steps).toHaveLength(2);
+    expect(back!.topic).toBe('Fractions');
+  });
+
+  it('puts the numeric step keys back', () => {
+    /*
+      Firestore has no numeric object keys — it stores them as strings and hands
+      them back as strings. JavaScript looks up obj[0] and obj["0"] identically,
+      so this survives by accident of the language rather than by design. The
+      round trip is asserted so a future rewrite cannot quietly break resuming.
+    */
+    const stored = forStorage(saved()) as any;
+    expect(Object.keys(stored.progress.cleared)).toEqual(['0', '1']);
+
+    const back = fromStorage(stored)!;
+    expect(back.progress.cleared[0]).toBe(2);
+    expect(back.progress.cleared[1]).toBe(1);
+    // and the resumed lesson still knows step 0 was finished
+    expect(stepDone({ topic: 'x', subject: null, steps: back.steps }, back.progress, 0))
+      .toBe(true);
+  });
+
+  it('never writes undefined, which Firestore rejects outright', () => {
+    const withGaps: SavedLesson = {
+      ...saved(),
+      steps: [{ teach: 'one', checks: [{ question: 'q', answer: 'a' }] }],
+    };
+    const json = JSON.stringify(forStorage(withGaps));
+    expect(json).not.toContain('undefined');
+    // `because` and `game` are absent above, so both must be null, not missing.
+    const stored = forStorage(withGaps) as any;
+    expect(stored.steps[0].game).toBeNull();
+    expect(stored.steps[0].checks[0].because).toBeNull();
+  });
+
+  it('refuses a document that is not a lesson', () => {
+    expect(fromStorage(null)).toBeNull();
+    expect(fromStorage({})).toBeNull();
+    expect(fromStorage({ id: 'x', steps: [] })).toBeNull();
+  });
+
+  it('gives every lesson its own id', () => {
+    const ids = new Set(Array.from({ length: 50 }, () => newLessonId()));
+    expect(ids.size).toBe(50);
+  });
+});
+
+describe('teaching from the student\'s own notes', () => {
+  const notes = 'Osmosis is the movement of water across a partially permeable membrane.';
+
+  it('teaches from their material when they give it', () => {
+    /*
+      A lesson from a topic name is about the topic in general. A student with
+      their own class notes needs the lesson to match the wording and notation
+      they will actually be marked on.
+    */
+    const p = buildLessonPrompt({ topic: 'Osmosis', material: notes });
+    expect(p).toMatch(/THE STUDENT HAS GIVEN YOU THEIR OWN MATERIAL/);
+    expect(p).toMatch(/use their wording, their notation and their examples/i);
+    expect(p).toContain(notes);
+  });
+
+  it('tells it not to wander off their syllabus', () => {
+    // Teaching something they will not be asked is worse than useless.
+    const p = buildLessonPrompt({ topic: 'Osmosis', material: notes });
+    expect(p).toMatch(/do not wander into parts of the\s+subject it does not touch/i);
+    expect(p).toMatch(/never contradict what they have/i);
+  });
+
+  it('says nothing about material when there is none', () => {
+    const p = buildLessonPrompt({ topic: 'Osmosis' });
+    expect(p).not.toMatch(/THEIR MATERIAL/);
+    expect(p).not.toMatch(/OWN MATERIAL/);
+  });
+
+  it('caps how much of a long paper it sends', () => {
+    const huge = 'x'.repeat(MAX_MATERIAL_CHARS * 3);
+    const p = buildLessonPrompt({ topic: 'Osmosis', material: huge });
+    expect(p.length).toBeLessThan(MAX_MATERIAL_CHARS + 4000);
+  });
+
+  it('ignores material that is only whitespace', () => {
+    expect(buildLessonPrompt({ topic: 'Osmosis', material: '   \n  ' }))
+      .not.toMatch(/THEIR MATERIAL/);
   });
 });

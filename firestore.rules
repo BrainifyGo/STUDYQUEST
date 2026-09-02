@@ -482,6 +482,33 @@ service cloud.firestore {
                     && request.resource.data.attempts.size() <= 100;
     }
 
+    /*
+      A staged lesson, kept so the student can come back to it tomorrow.
+
+      Private to its owner: what someone is struggling to learn is nobody else's
+      business, so there is no admin read here either — a founder does not need
+      to see a child's half-finished lesson on fractions to run the business.
+
+      The size caps are what stops this collection being used as free storage:
+      a lesson is a handful of small steps, not a document store.
+    */
+    match /lessons/{lessonId} {
+      allow read, delete: if isAuthenticated()
+                          && resource.data.user_id == request.auth.uid;
+      allow create, update: if isAuthenticated()
+                    && request.resource.data.user_id == request.auth.uid
+                    && request.resource.data.keys().hasAll(
+                         ['user_id', 'id', 'topic', 'steps', 'progress'])
+                    && request.resource.data.id is string
+                    && request.resource.data.id.size() > 0
+                    && request.resource.data.id.size() < 80
+                    && request.resource.data.topic is string
+                    && request.resource.data.topic.size() < 300
+                    && request.resource.data.steps is list
+                    && request.resource.data.steps.size() <= 20
+                    && request.resource.data.progress is map;
+    }
+
     match /confidence_attempts/{attemptId} {
       allow read: if isAuthenticated() && resource.data.user_id == request.auth.uid;
       allow create: if isAuthenticated()

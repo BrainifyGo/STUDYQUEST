@@ -1,14 +1,18 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  ArrowLeft, ArrowRight, Check, HelpCircle, Loader2, Sparkles,
+  ArrowLeft, ArrowRight, BookOpen, Check, HelpCircle, Loader2, Sparkles,
 } from 'lucide-react';
 import {
   STYLE_LABELS, advance, buildAskPrompt, buildLessonPrompt, canAdvance,
-  encourage, isCorrect, lessonProgress, parseLesson, praise, recordCheck,
-  startLesson, stepDone,
+  encourage, isCorrect, lessonProgress, newLessonId, parseLesson, praise,
+  recordCheck, startLesson, stepDone,
   type Game, type LearningStyle, type Lesson, type LessonProgress,
+  type SavedLesson,
 } from '../lib/lesson';
+import { listLessons, saveLesson } from '../lib/lessonStore';
+import { listSessions } from '../lib/paperStore';
+import type { PaperSession } from '../lib/paperSession';
 import { doc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { useUserStore } from '../store/useUserStore';
@@ -217,6 +221,57 @@ export const LessonPlayer: React.FC<Props> = ({ onBack }) => {
   const [asking, setAsking] = useState('');
   const [askBusy, setAskBusy] = useState(false);
   const [replies, setReplies] = useState<Record<number, { q: string; a: string }[]>>({});
+  const [material, setMaterial] = useState('');
+  const [showMaterial, setShowMaterial] = useState(false);
+  const [papers, setPapers] = useState<PaperSession[]>([]);
+  const [saved, setSaved] = useState<SavedLesson[] | null>(null);
+  const lessonId = useRef<string>('');
+  const createdAt = useRef<string>('');
+  const fromMaterial = useRef(false);
+
+  /* What they can carry on with, and what they could be taught from. */
+  useEffect(() => {
+    if (lesson) return;
+    listLessons().then(setSaved).catch(() => setSaved([]));
+    listSessions().then(setPapers).catch(() => setPapers([]));
+  }, [lesson]);
+
+  /*
+    Save on a pause rather than on every keystroke.
+
+    A write per answer would be wasteful; a write only when they finish loses the
+    progress of anyone who closes the tab mid-step — which is exactly the student
+    this is for, the one with twenty minutes before dinner.
+  */
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!lesson || !lessonId.current) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      void saveLesson({
+        id: lessonId.current,
+        topic: lesson.topic,
+        subject: lesson.subject,
+        steps: lesson.steps,
+        progress,
+        createdAt: createdAt.current,
+        updatedAt: new Date().toISOString(),
+        fromMaterial: fromMaterial.current,
+      });
+    }, 1200);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+  }, [lesson, progress]);
+
+  const resume = (s: SavedLesson) => {
+    lessonId.current = s.id;
+    createdAt.current = s.createdAt || new Date().toISOString();
+    fromMaterial.current = !!s.fromMaterial;
+    setLesson({ topic: s.topic, subject: s.subject, steps: s.steps });
+    setProgress(s.progress);
+    setAnswers({});
+    setShown({});
+    setReplies({});
+  };
 
   const teach = async () => {
     if (!topic.trim() || busy) return;
@@ -239,17 +294,23 @@ export const LessonPlayer: React.FC<Props> = ({ onBack }) => {
         },
         body: JSON.stringify({
           feature: 'study-kit',
-          prompt: buildLessonPrompt({ topic: topic.trim(), level, style }),
+          prompt: buildLessonPrompt({
+            topic: topic.trim(), level, style, material: material.trim() || null,
+          }),
         }),
       });
       const { result, error } = await res.json();
       if (!res.ok) throw new Error(error ?? 'Could not build that lesson.');
 
       const { lesson: built, rejected } = parseLesson(result, topic.trim());
+      lessonId.current = newLessonId();
+      createdAt.current = new Date().toISOString();
+      fromMaterial.current = !!material.trim();
       setLesson(built);
       setProgress(startLesson());
       setAnswers({});
       setShown({});
+      setReplies({});
       if (rejected.length) {
         // Worth knowing: it usually means the model wrote an essay and most of
         // it was thrown away for not being steps.
@@ -337,6 +398,42 @@ export const LessonPlayer: React.FC<Props> = ({ onBack }) => {
             of notes. Name a topic and we start at the beginning.
           </p>
         </div>
+
+        {/* Half-finished lessons come first: the point of saving them is that
+            carrying on is easier than starting again. */}
+        {saved && saved.length > 0 && (
+          <div>
+            <p className="mb-2 text-[11.5px] font-black uppercase tracking-widest text-text-dim">
+              Carry on where you left off
+            </p>
+            <div className="space-y-2">
+              {saved.slice(0, 5).map((s) => {
+                const done = s.steps.filter(
+                  (_, i) => (s.progress.cleared[i] ?? 0) >= s.steps[i].checks.length,
+                ).length;
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => resume(s)}
+                    className="flex w-full items-center justify-between gap-3 rounded-xl border border-border-main bg-glass-bg px-3 py-2.5 text-left hover:border-brand-purple"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-[13.5px] font-bold">{s.topic}</span>
+                      <span className="text-[11.5px] text-text-dim">
+                        {done} of {s.steps.length} steps
+                        {s.fromMaterial && ' · from your own notes'}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-[12px] font-bold text-brand-purple">
+                      {done >= s.steps.length ? 'Review' : 'Continue'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-2">
           <input
             value={topic}
@@ -375,6 +472,66 @@ export const LessonPlayer: React.FC<Props> = ({ onBack }) => {
           <p className="mt-2 text-[11.5px] leading-relaxed text-text-dim">
             You can change this whenever you like. Nobody else sees it.
           </p>
+        </div>
+
+        {/*
+          Teaching from what they actually have.
+
+          A lesson from a topic name is about the topic in general. A student
+          sitting with their own class notes, or the paper their teacher set,
+          needs it to match the wording they will be marked on.
+        */}
+        <div className="rounded-2xl border border-border-main bg-glass-bg p-4">
+          <button
+            onClick={() => setShowMaterial(!showMaterial)}
+            aria-expanded={showMaterial}
+            className="flex w-full items-center gap-2 text-left text-[13px] font-bold"
+          >
+            <BookOpen size={15} />
+            Teach me from my own notes or a paper
+            <span className="ml-auto text-text-dim">{showMaterial ? '−' : '+'}</span>
+          </button>
+
+          {showMaterial && (
+            <div className="mt-3 space-y-3">
+              <textarea
+                value={material}
+                onChange={(e) => setMaterial(e.target.value)}
+                rows={5}
+                placeholder="Paste your class notes, a page of a textbook, anything you have to learn…"
+                className="w-full rounded-xl border border-border-main bg-glass-bg p-3 text-[13.5px]"
+              />
+              {papers.length > 0 && (
+                <div>
+                  <p className="mb-2 text-[11.5px] font-black uppercase tracking-widest text-text-dim">
+                    Or a paper you already uploaded
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {papers.slice(0, 6).map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => {
+                          // The questions themselves are the material: they are
+                          // what this student will actually be asked.
+                          setMaterial(p.questions.map((q) => q.text).join('\n\n'));
+                          if (!topic.trim()) setTopic(p.subject || p.paperTitle);
+                        }}
+                        className="rounded-lg border border-border-main px-2.5 py-1.5 text-[12.5px] text-text-dim hover:text-text-main"
+                      >
+                        {p.paperTitle}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {material.trim() && (
+                <p className="text-[11.5px] leading-relaxed text-text-dim">
+                  The lesson will be built from this, using its wording and examples.
+                  Still give it a topic name above so you can find it again.
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-2">

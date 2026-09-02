@@ -152,6 +152,9 @@ this, or stupid, or cannot do it — do not let it pass and do not agree. Tell
 them plainly that this topic is genuinely hard and that being stuck on it is
 normal, then carry on teaching. Do not make a speech about it.`;
 
+/** How much of the student's own material is worth sending. */
+export const MAX_MATERIAL_CHARS = 14_000;
+
 export function buildLessonPrompt(args: {
   topic: string;
   subject?: string | null;
@@ -159,8 +162,43 @@ export function buildLessonPrompt(args: {
   level?: string;
   style?: LearningStyle;
   steps?: number;
+  /**
+   * The student's OWN material — pasted class notes, or the text of a paper they
+   * uploaded. When present, the lesson is taught from this rather than from
+   * whatever the model happens to know about the topic.
+   */
+  material?: string | null;
 }): string {
-  const { topic, subject, level, style = 'gentle', steps = 6 } = args;
+  const { topic, subject, level, style = 'gentle', steps = 6, material } = args;
+
+  /*
+    TEACHING FROM WHAT THEY ACTUALLY HAVE.
+
+    A lesson built from a topic name is a lesson about that topic in general. A
+    student sitting with their own class notes, or the paper their teacher set,
+    needs the lesson to be about THAT — the same wording, the same notation, the
+    same worked examples they will be marked against.
+
+    So when material is supplied it becomes the source and the model is told to
+    stay inside it. Wandering into a different syllabus is worse than useless
+    here: it teaches something the student will not be asked.
+  */
+  const fromMaterial = material?.trim()
+    ? `
+THE STUDENT HAS GIVEN YOU THEIR OWN MATERIAL, BELOW. TEACH FROM IT.
+
+Use their wording, their notation and their examples wherever you can, so what
+they learn here matches what they will be marked on. Cover what is actually in
+it, in the order it makes sense to learn, and do not wander into parts of the
+subject it does not touch.
+
+If it is thin on something they plainly need in order to follow the rest, you may
+add that — keep it small, and never contradict what they have.
+
+THEIR MATERIAL:
+${material.trim().slice(0, MAX_MATERIAL_CHARS)}
+`
+    : '';
 
   return `You are a teacher taking one student through "${topic}"${
     subject ? ` in ${subject}` : ''}.
@@ -168,7 +206,7 @@ ${level ? `
 ${level}
 ` : ''}
 ${TONE}
-
+${fromMaterial}
 ${STYLE_NOTES[style]}
 
 Teach it in ${steps} SMALL STEPS. This matters more than anything else below:
@@ -284,6 +322,98 @@ function cleanGame(raw: unknown): Game | undefined {
   if (kind === 'fill' && typeof answer !== 'string') return undefined;
 
   return { kind, instruction, items, answer };
+}
+
+/* ── keeping a lesson to come back to ─────────────────────────────────────── */
+
+/**
+ * A lesson as it is stored, with how far the student got.
+ *
+ * The whole method is "bit by bit", and bit by bit happens over days. A lesson
+ * that vanished when the tab closed asked the student to finish in one sitting,
+ * which is the opposite of the point.
+ */
+export interface SavedLesson {
+  id: string;
+  topic: string;
+  subject: string | null;
+  steps: Step[];
+  progress: LessonProgress;
+  createdAt: string;
+  updatedAt: string;
+  /** True when it was taught from the student's own notes or paper. */
+  fromMaterial?: boolean;
+}
+
+export function newLessonId(): string {
+  return `l_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Flatten for Firestore.
+ *
+ * `progress.cleared` is keyed by step NUMBER, and Firestore has no numeric
+ * object keys — it stores them as strings and hands them back as strings. In
+ * JavaScript `obj[0]` and `obj["0"]` are the same lookup, so this survives the
+ * round trip, but only by accident of the language. It is written down here, and
+ * `fromStorage` puts the numbers back deliberately rather than relying on it.
+ */
+export function forStorage(lesson: SavedLesson): Record<string, unknown> {
+  return {
+    id: lesson.id,
+    topic: lesson.topic,
+    subject: lesson.subject ?? null,
+    steps: lesson.steps.map((s) => ({
+      teach: s.teach,
+      checks: s.checks.map((c) => ({
+        question: c.question, answer: c.answer, because: c.because ?? null,
+      })),
+      // Firestore rejects `undefined` outright, so absent means null here.
+      game: s.game
+        ? { ...s.game, answer: s.game.answer ?? null }
+        : null,
+    })),
+    progress: {
+      cursor: lesson.progress.cursor,
+      cleared: Object.fromEntries(
+        Object.entries(lesson.progress.cleared).map(([k, v]) => [String(k), v]),
+      ),
+    },
+    createdAt: lesson.createdAt,
+    updatedAt: lesson.updatedAt,
+    fromMaterial: !!lesson.fromMaterial,
+  };
+}
+
+/** Read one back, turning the string keys of `cleared` into numbers again. */
+export function fromStorage(raw: unknown): SavedLesson | null {
+  const d = (raw ?? {}) as Record<string, any>;
+  if (!d.id || !Array.isArray(d.steps) || !d.steps.length) return null;
+
+  const cleared: Record<number, number> = {};
+  for (const [k, v] of Object.entries(d.progress?.cleared ?? {})) {
+    const n = Number(k);
+    if (Number.isFinite(n)) cleared[n] = Number(v) || 0;
+  }
+
+  return {
+    id: String(d.id),
+    topic: String(d.topic ?? ''),
+    subject: d.subject ?? null,
+    steps: d.steps.map((s: any) => ({
+      teach: String(s?.teach ?? ''),
+      checks: (Array.isArray(s?.checks) ? s.checks : []).map((c: any) => ({
+        question: String(c?.question ?? ''),
+        answer: String(c?.answer ?? ''),
+        because: c?.because ?? undefined,
+      })),
+      game: s?.game ? { ...s.game, answer: s.game.answer ?? undefined } : undefined,
+    })),
+    progress: { cursor: Number(d.progress?.cursor) || 0, cleared },
+    createdAt: String(d.createdAt ?? ''),
+    updatedAt: String(d.updatedAt ?? ''),
+    fromMaterial: !!d.fromMaterial,
+  };
 }
 
 /**
