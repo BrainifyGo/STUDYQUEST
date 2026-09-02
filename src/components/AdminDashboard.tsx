@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  ArrowLeft, RefreshCw, TrendingUp, Users, Activity, ShieldCheck, Wallet,
+  ArrowLeft, Activity, MessageSquareWarning, RefreshCw, ShieldCheck,
+  TrendingUp, Users, Wallet,
 } from 'lucide-react';
 import { auth } from '../lib/firebase';
 import { forgetPass, recallPass, rememberPass } from '../lib/secretEntry';
+import { IssueTriage } from './IssueTriage';
 import {
   count, headline, money, percent, revenueMetrics, signupSeries, userMetrics,
   type RawOrder, type RawSubscription, type RawUser, type UsageMetrics,
@@ -28,7 +30,7 @@ import {
  * so nothing here needs RED's laptop or a shared password.
  */
 
-type Tab = 'overview' | 'revenue' | 'people' | 'app' | 'team';
+type Tab = 'overview' | 'revenue' | 'people' | 'app' | 'issues' | 'team';
 
 interface Payload {
   generatedAt: string;
@@ -47,6 +49,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'revenue', label: 'Revenue', icon: <Wallet size={15} /> },
   { id: 'people', label: 'People', icon: <Users size={15} /> },
   { id: 'app', label: 'App health', icon: <Activity size={15} /> },
+  { id: 'issues', label: 'Reports', icon: <MessageSquareWarning size={15} /> },
   { id: 'team', label: 'Access', icon: <ShieldCheck size={15} /> },
 ];
 
@@ -453,6 +456,10 @@ export const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => 
           </Panel>
         </>
       )}
+
+      {/* Reads Firestore directly — the rules gate this on the admin role, so it
+          does not depend on the metrics API being reachable. */}
+      {tab === 'issues' && <IssueTriage />}
 
       {data && tab === 'team' && (
         <>

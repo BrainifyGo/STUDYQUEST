@@ -1,8 +1,10 @@
-import { addDoc, collection, getDocs, limit, query, where } from 'firebase/firestore';
+import {
+  addDoc, collection, doc, getDocs, limit, query, updateDoc, where,
+} from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import {
   fingerprint, readContext, suggestSeverity,
-  type IssueCategory, type IssueReport,
+  type IssueCategory, type IssueReport, type IssueStatus, type Severity,
 } from './issueReport';
 
 const COLLECTION = 'issue_reports';
@@ -73,6 +75,33 @@ export async function myReports(): Promise<IssueReport[]> {
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, COLLECTION);
     return [];
+  }
+}
+
+/**
+ * Triage: what the team decided about a report.
+ *
+ * Admin only, enforced in firestore.rules. Only these three fields can move —
+ * the report itself is what the student wrote and is never edited on their
+ * behalf. Changing someone's words and then acting on them would make the whole
+ * collection untrustworthy as a record of what was actually said.
+ */
+export async function updateReport(
+  id: string,
+  changes: { status?: IssueStatus; severity?: Severity; notes?: string },
+): Promise<boolean> {
+  if (!auth.currentUser || !id) return false;
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (changes.status) patch.status = changes.status;
+  if (changes.severity) patch.severity = changes.severity;
+  if (changes.notes !== undefined) patch.notes = changes.notes.slice(0, 2000);
+
+  try {
+    await updateDoc(doc(db, COLLECTION, id), patch);
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, COLLECTION);
+    return false;
   }
 }
 

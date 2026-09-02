@@ -140,15 +140,27 @@ export function reviewSummary(
 }
 
 /**
- * One sentence naming what to fix first, or null.
+ * One sentence naming the pattern, or null.
  *
- * Null when a single report is the top of the list — one student hitting
- * something is not a pattern, and dressing it up as "the top problem this cycle"
- * would make the review look like theatre.
+ * IT READS THE MOST-REPORTED CLUSTER, NOT THE HIGHEST-RANKED ONE, and those are
+ * different jobs. `rank` decides what to fix first, and deliberately lets one
+ * `critical` outrank three ordinary reports — somebody locked out of an account
+ * they paid for is not a queue position. But the headline answers a different
+ * question: what did most students actually hit?
+ *
+ * Reading `problems[0]` conflated the two. Found by a browser test with five
+ * seeded reports: three students reported the same broken quiz and one reported
+ * a double charge, and the review said "no single problem stands out yet —
+ * nothing has been reported twice" while a three-report cluster sat directly
+ * beneath it. The lone critical had taken the top slot, so the headline looked
+ * at that instead and reported the opposite of the truth.
+ *
+ * Still null when nothing was reported twice: one student hitting something is
+ * not a pattern, and dressing it up would make the review theatre.
  */
 function headlineFor(total: number, problems: Cluster[]): string | null {
   if (!total || !problems.length) return null;
-  const top = problems[0];
+  const top = [...problems].sort((a, b) => b.count - a.count)[0];
   if (top.count < 2) return null;
 
   const share = Math.round((top.count / total) * 100);

@@ -243,6 +243,40 @@ describe('the two month review', () => {
     expect(reviewSummary(rs, now).headline).toMatch(/fix that first/i);
   });
 
+  it('names the most REPORTED problem, not the highest ranked one', () => {
+    /*
+      A REAL BUG, FOUND IN A BROWSER WITH FIVE SEEDED REPORTS.
+
+      Three students reported the same broken quiz; one reported a double
+      charge. `rank` deliberately puts the lone critical first — being locked out
+      of something you paid for is not a queue position. But the headline read
+      `problems[0]`, so it looked at that one-report cluster and announced
+      "nothing has been reported twice" with a three-report cluster sitting
+      directly underneath it.
+
+      Ranking answers "what do we fix first". The headline answers "what did most
+      students actually hit". Two different questions.
+    */
+    const rs = [
+      ...Array.from({ length: 3 }, () => report({
+        title: 'quiz stuck loading', category: 'bug', severity: 'high',
+        created_at: daysAgo(2),
+      })),
+      report({
+        title: 'charged twice this month', category: 'billing', severity: 'critical',
+        created_at: daysAgo(1),
+      }),
+    ];
+    const summary = reviewSummary(rs, now);
+
+    // The critical billing report still leads the fix list…
+    expect(summary.problems[0].title).toMatch(/charged twice/i);
+    expect(summary.problems[0].count).toBe(1);
+    // …while the headline reports the actual pattern.
+    expect(summary.headline).toMatch(/3 of 4/);
+    expect(summary.headline).toMatch(/quiz stuck loading/i);
+  });
+
   it('writes a summary that can be pasted somewhere', () => {
     const rs = [
       ...Array.from({ length: 4 }, () => report({ title: 'quiz stuck loading', created_at: daysAgo(2) })),

@@ -5451,3 +5451,74 @@ needing the exclusion filter at all (it stays, for the next round of testing).
 ### Files
 `src/lib/lessonStore.ts` (new), `src/lib/lesson.ts`,
 `src/components/LessonPlayer.tsx`, `tests/lesson.test.ts`, `firestore.rules`.
+
+---
+
+## [2026-09-02] — Somewhere for the reports to land
+
+**Editor:** Claude Code (Opus 5)
+
+StudyQuest has had a **Report an issue** button on every screen for weeks, and
+nowhere for anyone to read what came in. That makes it a suggestion box nobody
+empties, which is worse than not asking — a student who reports something and
+sees nothing change learns not to bother.
+
+The review engine (`issueReview.ts`) and the store were already built. What was
+missing was the screen.
+
+### It lives in the hidden dashboard
+
+A sixth tab, **Reports**, beside Overview / Revenue / People / App health /
+Access, so admin work is in one place rather than scattered. It reads Firestore
+directly — the rules gate `issue_reports` on the admin role — so it does not
+depend on the metrics API being reachable.
+
+The two-month review sits at the top because it is the **decision**: not "here
+are 40 reports" but "three students hit the same thing, fix that first". The
+individual reports are underneath for when you actually work on one, with status
+and severity dropdowns and a notes field.
+
+**A student's own words are never editable.** Only status, severity and the
+team's notes move. Changing what someone wrote and then acting on it would make
+the collection worthless as a record of what was actually said.
+
+### The bug the browser found
+
+Five reports were seeded: three students reporting the same broken quiz, one
+reporting a double charge, one asking for a theme.
+
+The review said **"No single problem stands out yet — nothing has been reported
+twice"** — with a three-report cluster sitting directly underneath it.
+
+`headlineFor` read `problems[0]`, the highest-**ranked** cluster. And `rank`
+deliberately puts a lone `critical` above three ordinary reports, because being
+locked out of something you paid for is not a queue position. So the headline
+was looking at a one-report cluster and reporting the opposite of the truth.
+
+Ranking answers *what do we fix first*. The headline answers *what did most
+students actually hit*. Two different questions, one of them silently wrong.
+
+Now it reads the most-reported cluster, and the same fixture produces:
+
+> 3 of 5 reports were the same problem — the quiz is stuck loading, 60% of
+> everything sent this cycle. Fix that first.
+
+while the critical billing report still leads the fix list. Re-planted the bug
+to confirm the new test fails without the fix.
+
+None of the 27 existing tests caught this: every one of them used a single
+severity, so ranking and count never disagreed. It took two different severities
+in the same window — which is what real reports look like.
+
+### Verified
+
+- **803 tests** (was 802), `tsc` clean, `eslint` 0 errors.
+- In a browser as an admin, through the hidden door: the review renders, the
+  cluster headline is right, untouched reports are flagged, suggestions stay
+  separate from problems, and changing a status writes to Firestore.
+- The five seeded reports and the throwaway admin were deleted afterwards.
+
+### Files
+`src/components/IssueTriage.tsx` (new), `src/lib/issueReview.ts`,
+`src/lib/issueStore.ts`, `src/components/AdminDashboard.tsx`,
+`tests/issueReport.test.ts`.
