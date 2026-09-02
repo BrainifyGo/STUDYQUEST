@@ -14,6 +14,9 @@ import { auth } from '../lib/firebase';
 import { useUserStore } from '../store/useUserStore';
 import { normaliseLevel, promptFor, resolveSubject } from '../lib/studyLevel';
 import { ProGate } from './ProGate';
+import { topInsightForQuestion, type Insight } from '../lib/examinerReport';
+import { listInsights } from '../lib/insightStore';
+import { InsightCard } from './InsightCard';
 
 /**
  * Working through a past paper the student uploaded, one question at a time.
@@ -43,6 +46,20 @@ export const PaperPractice: React.FC<Props> = ({ session, onChange, onExit }) =>
   const { userData } = useUserStore();
   const [marking, setMarking] = useState(false);
   const [draft, setDraft] = useState('');
+
+  /*
+    Examiner insights for this subject, loaded once.
+
+    This is what stops the insight library being a page nobody visits. When a
+    student loses marks on a topic that examiners write about every year, the
+    place to say so is here — beside the mark they just lost, about the topic
+    they just got wrong — not on a separate screen they would have to think to
+    open.
+  */
+  const [insights, setInsights] = useState<Insight[]>([]);
+  useEffect(() => {
+    listInsights(session.subject).then(setInsights).catch(() => setInsights([]));
+  }, [session.subject]);
 
   const question = session.questions[session.cursor];
   const attempt = question ? attemptFor(session, question.number) : null;
@@ -233,6 +250,26 @@ export const PaperPractice: React.FC<Props> = ({ session, onChange, onExit }) =>
               {LOSS_ADVICE[attempt.reason]}
             </p>
           )}
+
+          {/*
+            Only when this student's own question matches something examiners
+            actually reported. Silence otherwise — a generic "examiners say read
+            the question" beside every mark would teach people to skip the box.
+          */}
+          {(() => {
+            // Matched against the WHOLE question, not a truncated slice: the
+            // topic an examiner writes about is as likely to be named at the end
+            // of a question as the start.
+            const match = topInsightForQuestion(insights, question.text);
+            return match ? (
+              <div className="border-t border-current/15 pt-3">
+                <p className="mb-2 text-[11px] font-black uppercase tracking-widest opacity-70">
+                  Examiners report this every year
+                </p>
+                <InsightCard insight={match} compact />
+              </div>
+            ) : null;
+          })()}
 
           {/* Only after they have answered — this is the point of a past paper. */}
           {attempt.modelAnswer && (

@@ -18,9 +18,10 @@ import { describe, expect, it } from 'vitest';
 import {
   KIND_LABELS,
   buildMiningPrompt, citation, insightsForTopics, looksLikeExaminerReport,
-  parseInsights, readReportMeta, topInsight,
+  insightsForQuestion, parseInsights, readReportMeta, topInsight, topInsightForQuestion,
   type Insight, type InsightKind, type Provenance,
 } from '../src/lib/examinerReport';
+import { detectSubject } from '../src/lib/examPaper';
 
 /** Verbatim from the real PDF, spacing artefacts and all. */
 const REAL_HEADER =
@@ -260,5 +261,116 @@ describe('showing where it came from', () => {
   it('copes with a partial source', () => {
     expect(citation({ ...source, paperCode: '', session: '' }))
       .toBe('AQA GCSE Biology');
+  });
+});
+
+describe('the subject name has to match on both sides', () => {
+  /*
+    A SILENT-FAILURE GUARD, not a style check.
+
+    The practice screen loads insights with `listInsights(session.subject)`,
+    which is an EXACT-MATCH Firestore query on `source.subject`. The paper's
+    subject comes from `detectSubject` in examPaper.ts; the insight's comes from
+    `readReportMeta` here. Those are two separate hard-coded lists.
+
+    If one of them ever says "Maths" where the other says "Mathematics", or
+    "biology" where the other says "Biology", the query matches nothing and the
+    whole feature quietly stops appearing where it matters most. Nothing throws
+    and no test would otherwise fail.
+  */
+  const BOTH_KNOW = [
+    'Biology', 'Chemistry', 'Physics', 'Mathematics', 'Combined Science',
+    'English Language', 'English Literature', 'History', 'Geography',
+    'Computer Science', 'Business', 'Economics', 'Psychology', 'Sociology',
+    'Religious Studies', 'French', 'Spanish', 'German',
+  ];
+
+  it.each(BOTH_KNOW)('agrees on %s', (subject) => {
+    const fromPaper = detectSubject(`AQA GCSE ${subject} 8461/1H Higher Tier Paper 1`);
+    const fromReport = readReportMeta(
+      `AQA GCSE ${subject} 8461/1H Report on the Examination June 2023`).subject;
+    expect(fromPaper).toBe(subject);
+    expect(fromReport).toBe(subject);
+  });
+
+  it('normalises "Maths" to "Mathematics" on the paper side', () => {
+    // The report list has no "Maths" alias, so the paper side must not emit one.
+    expect(detectSubject('AQA GCSE Maths 8300/1H Higher Tier')).toBe('Mathematics');
+  });
+});
+
+describe('connecting an insight to the question in front of the student', () => {
+  const make = (topic: string, kind: InsightKind): Insight => ({
+    id: `q-${topic}-${kind}`.toLowerCase(),
+    topic, kind,
+    issue: 'Candidates repeatedly got this wrong in a way worth describing here.',
+    practise: 'Do three questions on it and check the wording.',
+    source,
+    created_at: '2026-09-02T00:00:00.000Z',
+  });
+
+  const all = [
+    make('Osmosis', 'misconception'),
+    make('Osmosis', 'command-word'),
+    make('Electrolysis', 'mistake'),
+    make('pH', 'technique'),
+    make('Ion', 'mistake'),
+  ];
+
+  it('fires on a question that names the topic', () => {
+    const q = 'Explain how osmosis moves water into the plant cell. (4 marks)';
+    expect(insightsForQuestion(all, q).map((i) => i.topic)).toContain('Osmosis');
+  });
+
+  it('finds a topic named at the END of a long question', () => {
+    /*
+      THE BUG THIS FUNCTION EXISTS FOR, PLANTED AS A TEST.
+
+      The first version of the marking screen passed `question.text.slice(0, 80)`
+      into `insightsForTopics`. That was wrong twice over: the direction was
+      backwards, AND the slice threw away most of the question. An exam question
+      names its topic wherever it likes, very often in the last clause.
+    */
+    const q = 'A student set up the apparatus shown in Figure 3 and recorded the '
+      + 'mass of the potato cylinder every five minutes for half an hour before '
+      + 'plotting the results. Explain these results in terms of osmosis.';
+    expect(q.slice(0, 80)).not.toMatch(/osmosis/i); // the slice really did lose it
+    expect(insightsForQuestion(all, q).map((i) => i.topic)).toContain('Osmosis');
+  });
+
+  it('is the opposite direction from insightsForTopics, which is why it exists', () => {
+    /*
+      A REGRESSION GUARD FOR A SILENT FAILURE.
+
+      Passing question text to the topic matcher does not throw and does not warn
+      — it just quietly returns nothing, for ever. If someone reconnects the
+      marking screen to `topInsight` again, this fails and says why.
+    */
+    const q = 'Explain how osmosis moves water into the plant cell. (4 marks)';
+    expect(topInsight(all, [q])).toBeNull();
+    expect(topInsightForQuestion(all, q)).not.toBeNull();
+  });
+
+  it('matches whole words only', () => {
+    // "Ion" must not fire on "ionisation"; "pH" must not fire on "graph".
+    const q = 'Describe the ionisation energy trend shown by the graph in Figure 2.';
+    expect(insightsForQuestion(all, q)).toEqual([]);
+  });
+
+  it('still matches a real two-character topic', () => {
+    const q = 'Calculate the pH of the solution after the acid was added.';
+    expect(insightsForQuestion(all, q).map((i) => i.topic)).toEqual(['pH']);
+  });
+
+  it('picks the most actionable insight for that question', () => {
+    const q = 'Explain how osmosis moves water into the plant cell. (4 marks)';
+    expect(topInsightForQuestion(all, q)!.kind).toBe('command-word');
+  });
+
+  it('says nothing rather than something irrelevant', () => {
+    expect(insightsForQuestion(all, 'Name the process shown in Figure 1.')).toEqual([]);
+    expect(topInsightForQuestion(all, 'Name the process shown.')).toBeNull();
+    expect(insightsForQuestion(all, '')).toEqual([]);
+    expect(insightsForQuestion([], 'Explain osmosis in the potato cell.')).toEqual([]);
   });
 });

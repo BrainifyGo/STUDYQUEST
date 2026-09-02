@@ -4804,3 +4804,148 @@ exam than a general note on what good answers look like.
 
 ### Files
 `src/lib/examinerReport.ts` (new), `tests/examinerReport.test.ts` (new).
+
+---
+
+## [2026-09-02] — Examiner insights, on screen: the library, the mining tool, and the bug that would have made it match nothing
+
+**Editor:** Claude Code (Opus 5)
+
+The mining engine landed last commit but nothing showed it. This makes it
+reachable: a screen students can browse, an admin tool that reads a report and
+publishes what comes out, and the connection that matters most — the insight
+appearing beside the mark the student just lost.
+
+### The bug I nearly shipped
+
+The marking screen originally called:
+
+```ts
+topInsight(insights, [question.text.slice(0, 80), session.subject ?? ''])
+```
+
+That is wrong twice, and both failures are silent.
+
+`insightsForTopics` asks *"is this insight about one of these topics?"* — it
+checks whether the insight's topic **contains** the string given. An insight
+topic of `"Osmosis"` never contains eighty characters of exam question, and
+`"Osmosis"` does not contain `"Biology"` either. It would have matched nothing,
+for every student, for ever, without throwing or logging anything.
+
+The second failure is the slice. Even in the right direction, `slice(0, 80)`
+throws away most of the question, and an exam question names its topic wherever
+it likes — very often in the last clause: *"…before plotting the results.
+Explain these results in terms of **osmosis**."*
+
+So `insightsForQuestion` is a separate function running the other direction:
+does the insight's topic appear **in** the question? Matching is on whole words,
+so `"Ion"` does not fire on every question containing "ionisation", and a real
+two-character topic like `"pH"` still works because there is no word boundary
+inside "graph".
+
+The regression test asserts `topInsight(all, [question])` is null while
+`topInsightForQuestion(all, question)` is not — so if anyone reconnects the
+screen to the wrong one, a test says why instead of the feature going quiet.
+
+### The subject name has to match on both sides
+
+The practice screen loads insights with `listInsights(session.subject)`, which
+is an **exact-match** Firestore query on `source.subject`. The paper's subject
+comes from `detectSubject` in `examPaper.ts`; the insight's comes from
+`readReportMeta` in `examinerReport.ts`. Those are two separate hard-coded
+lists.
+
+They agree today. If one ever drifts — "Maths" against "Mathematics", "biology"
+against "Biology" — the query matches nothing and the feature quietly stops
+appearing exactly where it is most useful. Eighteen subjects are now asserted
+identical on both sides, plus the "Maths" → "Mathematics" alias, because this
+is the same class of failure as the bug above: nothing throws.
+
+### One nav entry, not two
+
+The mining tool lives on the insights screen rather than its own, shown only to
+an admin, so there is one place insights live. `isAdminUser` decides that and is
+**cosmetic** — it mirrors one arm of `isAdmin()` in `firestore.rules`, and the
+rules are what actually refuse a publish. A student who flipped the flag in a
+debugger would make the panel appear and every write from it fail.
+
+It checks `role == 'admin'` on the user document rather than mirroring the
+rules' other arm, which is a known email address. **The secret scan caught that
+one before the commit**: hard-coding the address would have compiled a real
+person's email into the client bundle that ships to every student — a privacy
+leak, and a signpost naming exactly which account is worth phishing.
+
+The role field is the better signal anyway, because the rules already protect
+it: `create` requires role to be `'client'` or absent, and `update` requires
+`request.resource.data.role == resource.data.role`, so a student cannot promote
+themselves. RED's account has been given `role: 'admin'` (nothing else on the
+document was touched — isPro and XP verified identical before and after).
+
+`InsightCard` moved to its own file: both screens need it and the browse screen
+renders the mining tool, which made an import cycle where it was.
+
+### Verified in a real browser
+
+A throwaway account signed up through the actual sign-up form — not an injected
+token, because sign-up is where the last permissions bug lived — then, as that
+student:
+
+```
+OK  a fresh student can sign up and land in the app
+OK  Examiner Insights is in the navigation
+OK  the insights screen opens
+OK  the student can read a published insight
+OK  the card cites the exact paper and session
+OK  the citation links out to the board
+OK  the outbound link is rel="noopener noreferrer"
+OK  it opens in a new tab
+OK  a student is not shown the admin mining tool
+OK  a student is not shown a publish button
+OK  filtering by kind keeps a matching insight
+OK  filtering by another kind hides it
+OK  the browser tab names the view
+```
+
+Hidden is also what a permanently broken feature looks like, so the other half
+was proven too — a second throwaway account, promoted to admin with the Admin
+SDK rather than by using RED's own credentials:
+
+```
+OK  an admin IS shown the mining tool
+OK  the source-URL field is there
+OK  the panel says it is admin only
+OK  the admin also sees the published library
+OK  the report file picker is present
+```
+
+That account was deleted afterwards, from both Firestore and Auth.
+
+The seeded insight was **deleted from the live library afterwards**. It carried
+a made-up finding and a placeholder URL, which is precisely what rule 2 of
+`examinerReport.ts` exists to keep out. The library is back to empty and will
+fill only from real reports.
+
+### Also
+
+- Five views had no `<title>` — `paper`, `insights`, `arcade`, `friends` and
+  `report` all read plain "StudyQuest". Named now, which is what the hook was
+  written for.
+- `zz-*.mjs` probe scripts are gitignored. They hit live Firebase with real
+  credentials from `.env` and exist to answer one question.
+
+### Verified
+
+- **726 tests** (was 700), `tsc` clean, `eslint` 0 errors.
+- Both new guards re-planted and confirmed failing without the fix: removing the
+  word-boundary match breaks two tests, not zero.
+- `npm test` excludes `tests/rules.test.ts` and `e2e/**` by design — those need
+  the Firestore emulator and Playwright. Running bare `vitest` fails those three
+  files identically on a clean checkout; that is pre-existing, not new.
+
+### Files
+`src/components/InsightCard.tsx` (new), `src/lib/isAdmin.ts` (new),
+`src/store/useUserStore.ts`,
+`src/components/ExaminerInsights.tsx`, `src/components/MineReport.tsx`,
+`src/components/PaperPractice.tsx`, `src/lib/examinerReport.ts`,
+`src/lib/insightStore.ts`, `src/hooks/useDocumentTitle.ts`, `src/App.tsx`,
+`firestore.rules`, `tests/examinerReport.test.ts`, `.gitignore`.

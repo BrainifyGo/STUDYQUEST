@@ -15,6 +15,13 @@ export interface UserData {
   streak: number;
   isPro: boolean;
   plan?: 'free' | 'pro';
+  /**
+   * Set by an admin, never by the account itself: firestore.rules requires a new
+   * user's role to be 'client' or absent, and refuses any update that changes
+   * it. Used only to decide whether to DRAW the admin tools — the rules are what
+   * actually permit the writes. See src/lib/isAdmin.ts.
+   */
+  role?: 'client' | 'admin';
   notifications?: boolean;
   studyReminders?: boolean;
   dailyGenerations: number;

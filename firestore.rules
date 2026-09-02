@@ -401,6 +401,33 @@ service cloud.firestore {
       whoever marks their own report critical, which is exactly the signal the
       review exists to avoid.
     */
+    /*
+      Examiner insights, mined from public examiner reports.
+
+      SHARED AND READ-ONLY. Every student sees the same library, and only an
+      admin writes to it. That is deliberate: examiner reports are public and
+      identical for everybody, so mining them per-student would spend a model
+      call each on the same PDF, produce slightly different findings every time,
+      and leave nobody able to correct a bad one.
+
+      These are presented to students as what real examiners said, so a human has
+      to be able to delete anything that reads wrong — which is only possible if
+      one curated copy exists rather than thousands.
+
+      Every insight must carry its source. A finding with no report behind it is
+      a confident, unfalsifiable claim about the exam.
+    */
+    match /examiner_insights/{insightId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin()
+                   && request.resource.data.keys().hasAll(
+                        ['topic', 'kind', 'issue', 'practise', 'source'])
+                   && request.resource.data.source.keys().hasAll(['board', 'subject', 'url'])
+                   && request.resource.data.source.url is string
+                   && request.resource.data.source.url.size() > 0;
+      allow delete: if isAdmin();
+    }
+
     match /issue_reports/{reportId} {
       allow read: if isAuthenticated()
                   && (resource.data.user_id == request.auth.uid || isAdmin());

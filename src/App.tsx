@@ -62,6 +62,7 @@ import { saveSession } from './lib/paperStore';
 import { PaperPractice } from './components/PaperPractice';
 import { PaperLibrary } from './components/PaperLibrary';
 import { ReportIssue } from './components/ReportIssue';
+import { ExaminerInsights } from './components/ExaminerInsights';
 import { normaliseLevel, promptFor, resolveSubject } from './lib/studyLevel';
 import { boxFor, BOX_BLURBS, BOX_LABELS, type Confidence } from './lib/confidence';
 import { recordAttempt } from './lib/confidenceStore';
@@ -2231,6 +2232,15 @@ export default function App() {
                   collapsed={railCollapsed}
                 />
               </GuestGuard>
+              <GuestGuard featureName="Examiner Insights">
+                <SidebarItem
+                  icon={<Lightbulb size={18} />}
+                  label="Examiner Insights"
+                  active={activeView === 'insights'}
+                  onClick={() => navigate('insights')}
+                  collapsed={railCollapsed}
+                />
+              </GuestGuard>
               <GuestGuard featureName="My Mistakes">
                 <SidebarItem
                   icon={<RotateCcw size={18} />}
@@ -2757,6 +2767,8 @@ export default function App() {
                 onBack={() => setActiveView('dashboard')}
               />
             )
+          ) : activeView === 'insights' ? (
+            <ExaminerInsights onBack={() => setActiveView('dashboard')} />
           ) : activeView === 'mistakes' ? (
             <MistakesView
               onBack={() => setActiveView('dashboard')}

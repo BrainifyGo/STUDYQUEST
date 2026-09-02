@@ -28,3 +28,7 @@ commitmsg.txt
 # Screen recordings RED drops in the repo root — 34 MB and not source.
 *.mp4
 *.mov
+
+# Throwaway probe scripts and their output (zz-*). They hit live Firebase with real
+# credentials from .env and exist to answer one question, then stop mattering.
+zz-*

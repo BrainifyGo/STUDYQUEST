@@ -295,6 +295,46 @@ export function insightsForTopics(all: Insight[], topics: string[]): Insight[] {
   });
 }
 
+const KIND_PRIORITY: InsightKind[] = ['command-word', 'misconception', 'mistake', 'technique', 'rewarded'];
+
+/**
+ * Insights whose topic is mentioned in a question the student just answered.
+ *
+ * A DIFFERENT DIRECTION FROM `insightsForTopics`, and the difference is the
+ * whole reason this exists separately.
+ *
+ * `insightsForTopics` takes topics and asks whether an insight is about one of
+ * them. This takes a QUESTION and asks whether an insight's topic appears in it.
+ * Passing question text to the other one matches nothing at all — an insight
+ * topic of "Osmosis" never contains eighty characters of exam question — and it
+ * fails silently, which is the worst way for a feature to not work.
+ *
+ * Matching is on whole words, so an insight about "Ion" does not fire on every
+ * question containing "ionisation", and a real two-character topic like "pH"
+ * still works — it will not match inside "graph", because there is no word
+ * boundary there.
+ */
+export function insightsForQuestion(all: Insight[], questionText: string): Insight[] {
+  const text = String(questionText ?? '').toLowerCase();
+  if (text.length < 10) return [];
+
+  return (all ?? []).filter((insight) => {
+    const topic = insight.topic.toLowerCase().trim();
+    // One character is noise; two is "pH", which is a real topic.
+    if (topic.length < 2) return false;
+    return new RegExp(`\\b${topic.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(text);
+  });
+}
+
+/** The most actionable insight for a question, or null. */
+export function topInsightForQuestion(all: Insight[], questionText: string): Insight | null {
+  const matches = insightsForQuestion(all, questionText);
+  if (!matches.length) return null;
+  return [...matches].sort(
+    (a, b) => KIND_PRIORITY.indexOf(a.kind) - KIND_PRIORITY.indexOf(b.kind),
+  )[0];
+}
+
 /**
  * The single most useful insight for a student, or null.
  *
@@ -302,8 +342,6 @@ export function insightsForTopics(all: Insight[], topics: string[]): Insight[] {
  * is more actionable before an exam than a general note about technique, and
  * both beat being told what good answers look like.
  */
-const KIND_PRIORITY: InsightKind[] = ['command-word', 'misconception', 'mistake', 'technique', 'rewarded'];
-
 export function topInsight(all: Insight[], topics: string[]): Insight | null {
   const matches = insightsForTopics(all, topics);
   if (!matches.length) return null;
