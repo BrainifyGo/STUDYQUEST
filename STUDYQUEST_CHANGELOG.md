@@ -5068,3 +5068,112 @@ OK  the second call is served from cache
 `src/lib/adminMetrics.ts` (new), `src/components/AdminDashboard.tsx` (new),
 `tests/adminMetrics.test.ts` (new), `server.ts`, `firestore.rules`,
 `src/App.tsx`, `src/hooks/useDocumentTitle.ts`.
+
+---
+
+## [2026-09-02] — The dashboard goes behind an unmarked door
+
+**Editor:** Claude Code (Opus 5)
+
+RED asked for the business dashboard to be hidden, opened by typing
+`STUDYQUEST`, and unfindable "even when the app gets hacked".
+
+### What is actually possible, said plainly
+
+**A password checked in the browser is not security.** The client bundle is
+served to everyone who loads the site; hiding code from the machine that has to
+run it is impossible. Anything shipped can be read.
+
+So the work split in two, and it matters which half is which:
+
+**Obscurity — worth having, but not a lock.** There is no menu entry. The
+sidebar item is gone entirely, even for an admin. `admin` was removed from
+`VIEW_TITLES`, so the browser tab reads plain "StudyQuest" rather than
+announcing "Business & Revenue" during a screen share. The trigger word is
+stored as character codes, not text: **the literal "STUDYQUEST" now appears zero
+times in the built JavaScript**, verified against `dist/` after a real build.
+Someone reading the code carefully reverses that in seconds — it is a speed
+bump, and the comment where it lives says so.
+
+**Security — the part that actually holds.** Two layers, neither in the bundle:
+
+1. `role == 'admin'` on the account, checked server-side against a verified
+   Firebase ID token and enforced again in `firestore.rules`.
+2. `ADMIN_PASSPHRASE`, held in the server's environment and compared there. It
+   is **never compiled into the client**, verified by grepping the build.
+
+So finding the door gets an attacker a page that returns 403 and renders
+nothing. The lock is on the data, not the door.
+
+### It fails closed
+
+An unset `ADMIN_PASSPHRASE` refuses the dashboard with a message saying what to
+fix, rather than quietly degrading to "admin role only". A silent downgrade is
+exactly the kind nobody notices until it matters. **This means the live site
+refuses the dashboard until the variable is set on Render.**
+
+The comparison is constant-time, over SHA-256 digests of both sides so that a
+length mismatch cannot leak the length either.
+
+### The accident this had to avoid
+
+Students paste revision notes, essay questions and whole past papers into
+StudyQuest. If the sequence matched inside a text box, anyone typing the app's
+own name into their own notes would swing the door open — on a borrowed or
+shared laptop, precisely the situation hiding it was meant to protect against.
+Keystrokes in an `input`, `textarea`, `select` or anything `contenteditable` are
+ignored and reset the sequence. There is a test for it.
+
+The passphrase is held in `sessionStorage`, not `localStorage`: it dies with the
+tab, so a laptop left open in a common room does not stay unlocked for whoever
+sits down next.
+
+### A bug the browser found
+
+The first version sent the passphrase **as typed**. Matching is case-insensitive
+so the door opened on "studyquest", but the server compares exactly against
+`STUDYQUEST` — so it was refused every single time. Fixed by sending the
+canonical word. Only a real browser showed this; the unit tests passed
+throughout.
+
+### The upgrade path, and why it is not decoration
+
+By default the trigger word and the passphrase are the same, which is what RED
+asked for — type it, and you are in. But then anyone who decodes the bundle can
+send it, so that second factor only stops a **stolen session**, not a determined
+reader.
+
+Setting `ADMIN_PASSPHRASE` to something different upgrades it to a genuine
+second factor: the word still opens the door, and the dashboard then asks for
+the real passphrase, which exists nowhere in the client. Proven by changing the
+server's value and re-running:
+
+```
+OK  the trigger word alone shows NO data when the server passphrase differs
+OK  it asks for the passphrase instead
+OK  the prompt says nothing about what it guards
+OK  a wrong passphrase is refused
+OK  the correct passphrase opens it
+```
+
+### Verified
+
+- **754 tests** (was 746), `tsc` clean, `eslint` 0 errors.
+- Against the built bundle: `ADMIN_PASSPHRASE` absent from `dist/`, the literal
+  trigger word absent from the JavaScript, no provider keys or private keys.
+- In a browser, as an admin: no sidebar entry, the tab title gives nothing away,
+  typing it into a text box does nothing, typing it on the page opens the
+  dashboard and the data loads.
+
+### RED must do one thing
+Set **`ADMIN_PASSPHRASE`** in Render → Environment to the word he chose. Until
+then the live dashboard refuses everyone, by design.
+
+The value is deliberately NOT written here. A passphrase committed to the
+repository is not a passphrase, and this file is version-controlled — which is
+the same reason it is not in `.env.example` either.
+
+### Files
+`src/lib/secretEntry.ts` (new), `tests/secretEntry.test.ts` (new), `server.ts`,
+`src/App.tsx`, `src/components/AdminDashboard.tsx`,
+`src/hooks/useDocumentTitle.ts`, `.env.example`.

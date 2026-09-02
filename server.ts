@@ -1425,7 +1425,40 @@ async function startServer() {
      account, granted through /api/admin/team — not a shared password, and not
      something that needs RED's laptop.
   */
-  async function requireAdmin(authHeader: string | undefined): Promise<string> {
+  /*
+    A SECOND FACTOR THAT NEVER SHIPS TO A BROWSER.
+
+    The dashboard is hidden in the client, but hiding code from the machine that
+    runs it is impossible, so that is only obscurity. This is the part that is
+    actually security: a passphrase held in the server's environment, compared
+    here, and never compiled into the bundle. Reading every line of the client
+    reveals the door and not the key.
+
+    It is a SECOND factor, not a replacement — an admin account is still
+    required. Together they mean a stolen session alone is not enough, and the
+    passphrase alone is not either.
+
+    FAILS CLOSED when unconfigured. An unset passphrase must never quietly
+    degrade to "account check only": that is precisely the sort of silent
+    downgrade nobody notices until it matters. The message says what to fix.
+  */
+  const ADMIN_PASSPHRASE = process.env.ADMIN_PASSPHRASE;
+  console.log('Admin dashboard passphrase configured:', !!ADMIN_PASSPHRASE);
+
+  /** Constant time, so the comparison cannot be timed one character at a time. */
+  function passMatches(given: string, expected: string): boolean {
+    const a = Buffer.from(given);
+    const b = Buffer.from(expected);
+    // timingSafeEqual throws on a length mismatch, which would itself leak the
+    // length; hash both first so the buffers are always the same size.
+    const ha = crypto.createHash('sha256').update(a).digest();
+    const hb = crypto.createHash('sha256').update(b).digest();
+    return crypto.timingSafeEqual(ha, hb);
+  }
+
+  async function requireAdmin(
+    authHeader: string | undefined, passHeader?: string | string[] | undefined,
+  ): Promise<string> {
     if (!authHeader?.startsWith('Bearer ')) throw new HttpError(401, 'Sign in first.');
     let uid: string;
     try {
@@ -1437,6 +1470,16 @@ async function startServer() {
     if (snap.data()?.role !== 'admin') {
       // Deliberately the same shape of refusal as a bad token: an ordinary user
       // probing this route learns only that they cannot have it.
+      throw new HttpError(403, 'Not available on this account.');
+    }
+
+    if (!ADMIN_PASSPHRASE) {
+      throw new HttpError(503,
+        'The dashboard passphrase is not set on this server. '
+        + 'Add ADMIN_PASSPHRASE to the environment and restart.');
+    }
+    const given = Array.isArray(passHeader) ? passHeader[0] : passHeader;
+    if (!given || !passMatches(given, ADMIN_PASSPHRASE)) {
       throw new HttpError(403, 'Not available on this account.');
     }
     return uid;
@@ -1474,7 +1517,7 @@ async function startServer() {
 
   app.get('/api/admin/metrics', async (req, res) => {
     try {
-      await requireAdmin(req.headers.authorization);
+      await requireAdmin(req.headers.authorization, req.headers['x-sq-pass']);
 
       if (metricsCache && Date.now() - metricsCache.at < METRICS_TTL) {
         return res.json({ ...(metricsCache.data as object), cached: true });
@@ -1611,7 +1654,7 @@ async function startServer() {
   /* Who can see the dashboard, and adding Daniel to that list. */
   app.get('/api/admin/team', async (req, res) => {
     try {
-      await requireAdmin(req.headers.authorization);
+      await requireAdmin(req.headers.authorization, req.headers['x-sq-pass']);
       const snap = await admin.firestore().collection('users')
         .where('role', '==', 'admin').get();
       res.json({
@@ -1628,7 +1671,7 @@ async function startServer() {
 
   app.post('/api/admin/team', async (req, res) => {
     try {
-      const actor = await requireAdmin(req.headers.authorization);
+      const actor = await requireAdmin(req.headers.authorization, req.headers['x-sq-pass']);
       const { email, grant } = req.body ?? {};
       if (typeof email !== 'string' || !email.includes('@')) {
         throw new HttpError(400, 'That is not an email address.');

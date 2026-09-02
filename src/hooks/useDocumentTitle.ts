@@ -14,13 +14,18 @@ import { trackView } from '../lib/analytics';
 
 const SUFFIX = 'StudyQuest';
 
+/*
+  The founders' dashboard ('admin') is deliberately ABSENT from this map, so it
+  falls back to the plain "StudyQuest" title. A browser tab reading "Business &
+  Revenue" would announce the hidden page during a screen share, which is one of
+  the situations hiding it is for.
+*/
 export const VIEW_TITLES: Record<string, string> = {
   dashboard:   'Dashboard',
   library:     'My Library',
   mistakes:    'My Mistakes',
   paper:       'Past Papers',
   insights:    'What Examiners Say',
-  admin:       'Business & Revenue',
   arcade:      'Arcade',
   friends:     'Friends',
   report:      'Report an Issue',

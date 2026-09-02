@@ -28,7 +28,6 @@ import {
   Users,
   UserPlus,
   BarChart3,
-  TrendingUp,
   FolderOpen,
   MessageSquareText,
   Plus,
@@ -66,6 +65,9 @@ import { ReportIssue } from './components/ReportIssue';
 import { ExaminerInsights } from './components/ExaminerInsights';
 import { AdminDashboard } from './components/AdminDashboard';
 import { isAdminUser } from './lib/isAdmin';
+import {
+  SECRET_WORD, freshKnock, isTypingIntoSomething, pressKey, rememberPass,
+} from './lib/secretEntry';
 import { normaliseLevel, promptFor, resolveSubject } from './lib/studyLevel';
 import { boxFor, BOX_BLURBS, BOX_LABELS, type Confidence } from './lib/confidence';
 import { recordAttempt } from './lib/confidenceStore';
@@ -504,6 +506,44 @@ export default function App() {
   // Give each view its own <title>. Without a router every view shared one title, which made
   // browser tabs, history and bookmarks all read "StudyQuest".
   useDocumentTitle(activeView);
+
+  /*
+    THE UNMARKED DOOR TO THE FOUNDERS' DASHBOARD.
+
+    There is no menu entry for it. Typing the passphrase anywhere in the app —
+    but never inside a text box, see secretEntry.ts — opens it.
+
+    This is obscurity, not security, and it is worth being clear about which.
+    Anyone can read this bundle. What it stops is DISCOVERY: a student in the
+    menus, someone glancing over a shoulder, a screen share. The real gates are
+    the admin role and a passphrase the server holds in its environment and this
+    file never contains — the word typed here is sent to be checked there.
+  */
+  useEffect(() => {
+    let knock = freshKnock();
+    const onKey = (e: KeyboardEvent) => {
+      if (isTypingIntoSomething(e.target)) { knock = freshKnock(); return; }
+      const r = pressKey(knock, e.key, SECRET_WORD);
+      knock = r.state;
+      if (r.opened) {
+        /*
+          Send the CANONICAL word, not the keys as typed. Matching is
+          case-insensitive so the door opens for "studyquest", but the server
+          compares against its environment value exactly — sending the lowercase
+          form refused every time.
+
+          If the server's passphrase has been changed to something other than the
+          trigger word, this is simply wrong and the dashboard asks for the real
+          one. That is the upgrade path from "one word does both" to a genuine
+          second factor.
+        */
+        rememberPass(SECRET_WORD);
+        setActiveView('admin');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [setActiveView]);
   const [dueFlashcardsCount, setDueFlashcardsCount] = useState(0);
   const [studyGoal, setStudyGoal] = useState(2); // Default 2 hours daily
   const [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
@@ -2235,19 +2275,6 @@ export default function App() {
                   collapsed={railCollapsed}
                 />
               </GuestGuard>
-              {/* Founders only. The server refuses the data to anyone else, so
-                  this decides visibility, not access. */}
-              {isAdminUser(userData) && (
-                <SidebarItem
-                  icon={<TrendingUp size={18} />}
-                  // Not "Dashboard": that label already belongs to the student
-                  // home above, and two identical entries is a coin toss.
-                  label="Business"
-                  active={activeView === 'admin'}
-                  onClick={() => navigate('admin')}
-                  collapsed={railCollapsed}
-                />
-              )}
               <GuestGuard featureName="Examiner Insights">
                 <SidebarItem
                   icon={<Lightbulb size={18} />}

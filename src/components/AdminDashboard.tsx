@@ -4,6 +4,7 @@ import {
   ArrowLeft, RefreshCw, TrendingUp, Users, Activity, ShieldCheck, Wallet,
 } from 'lucide-react';
 import { auth } from '../lib/firebase';
+import { forgetPass, recallPass, rememberPass } from '../lib/secretEntry';
 import {
   count, headline, money, percent, revenueMetrics, signupSeries, userMetrics,
   type RawOrder, type RawSubscription, type RawUser, type UsageMetrics,
@@ -51,11 +52,16 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 
 async function authed(path: string, init: RequestInit = {}) {
   const token = auth.currentUser ? await auth.currentUser.getIdToken() : null;
+  // The passphrase the founder typed to get in. The server holds the real one in
+  // its environment and does the comparing; this bundle never knows whether what
+  // it is sending is right.
+  const pass = recallPass();
   return fetch(path, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(pass ? { 'x-sq-pass': pass } : {}),
       ...(init.headers ?? {}),
     },
   });
@@ -146,13 +152,21 @@ export const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => 
   const [busy, setBusy] = useState(false);
   const [team, setTeam] = useState<TeamMember[] | null>(null);
   const [invite, setInvite] = useState('');
+  const [needsPass, setNeedsPass] = useState(false);
+  const [passDraft, setPassDraft] = useState('');
 
   const load = useCallback(async () => {
     setBusy(true);
     try {
       const res = await authed('/api/admin/metrics');
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? 'Could not load the dashboard.');
+      if (!res.ok) {
+        // A wrong passphrase must not sit in the tab being retried; forget it so
+        // the next attempt starts clean and the prompt below can ask again.
+        if (res.status === 403) { forgetPass(); setNeedsPass(true); }
+        throw new Error(json.error ?? 'Could not load the dashboard.');
+      }
+      setNeedsPass(false);
       setData(json);
       setError(null);
     } catch (err) {
@@ -189,6 +203,50 @@ export const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => 
     setInvite('');
     void loadTeam();
   };
+
+  /*
+    Refused for the passphrase: ask for it rather than showing a dead end.
+
+    This is what makes the passphrase a real second factor rather than a
+    formality. When the server's ADMIN_PASSPHRASE is the same as the word that
+    opens the door, this never appears. Change it to something else and the door
+    still opens on the word, but the data needs the passphrase — so reading the
+    bundle is no longer enough to see anything.
+
+    Deliberately says nothing about what it is guarding.
+  */
+  if (needsPass) {
+    const submit = () => {
+      if (!passDraft.trim()) return;
+      rememberPass(passDraft.trim());
+      setPassDraft('');
+      setNeedsPass(false);
+      void load();
+    };
+    return (
+      <div className="mx-auto max-w-sm space-y-4 p-6 pt-16">
+        <input
+          type="password"
+          autoFocus
+          value={passDraft}
+          onChange={(e) => setPassDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+          aria-label="Passphrase"
+          className="min-h-11 w-full rounded-xl border border-border-main bg-glass-bg px-3 text-sm"
+        />
+        <div className="flex gap-2">
+          <button onClick={submit}
+                  className="min-h-11 flex-1 rounded-xl bg-brand-purple px-4 font-black text-white">
+            Continue
+          </button>
+          <button onClick={onBack}
+                  className="min-h-11 rounded-xl border border-border-main px-4 text-[13px] font-bold text-text-dim">
+            Back
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (error) {
     return (
