@@ -61,6 +61,7 @@ import { startSession, type PaperSession } from './lib/paperSession';
 import { saveSession } from './lib/paperStore';
 import { PaperPractice } from './components/PaperPractice';
 import { PaperLibrary } from './components/PaperLibrary';
+import { ReportIssue } from './components/ReportIssue';
 import { normaliseLevel, promptFor, resolveSubject } from './lib/studyLevel';
 import { boxFor, BOX_BLURBS, BOX_LABELS, type Confidence } from './lib/confidence';
 import { recordAttempt } from './lib/confidenceStore';
@@ -273,6 +274,16 @@ export default function App() {
     timerIsRunning,
     timerTimeLeft
   } = useUserStore();
+
+  /*
+    The screen the student was on before opening the report form. A report that
+    says "report" as its location tells nobody anything; the one they came from
+    is the whole point of collecting it.
+  */
+  const lastViewRef = useRef<string>('dashboard');
+  useEffect(() => {
+    if (activeView !== 'report') lastViewRef.current = activeView;
+  }, [activeView]);
   const [showTutor, setShowTutor] = useState(false);
   const [collabRoomId, setCollabRoomId] = useState<string | null>(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
@@ -2726,6 +2737,12 @@ export default function App() {
           ) : activeView === 'friends' ? (
             <FriendsView
               onStartRoom={(code) => { setCollabRoomId(code); setActiveView('collab'); }}
+            />
+          ) : activeView === 'report' ? (
+            <ReportIssue
+              onBack={() => setActiveView('dashboard')}
+              // The screen they came FROM is the useful one, not this page.
+              fromView={lastViewRef.current}
             />
           ) : activeView === 'paper' ? (
             paperSession ? (

@@ -4,6 +4,7 @@ import { progress, type PaperSession } from '../lib/paperSession';
 import { deleteSession, listSessions } from '../lib/paperStore';
 import { resumeAt } from './PaperPractice';
 import { GeneratePaper } from './GeneratePaper';
+import { ExamResources } from './ExamResources';
 
 /**
  * Papers on the go, and a way to start a new one.
@@ -54,6 +55,16 @@ export const PaperLibrary: React.FC<Props> = ({ onOpen, onBack }) => {
       </div>
 
       <GeneratePaper onReady={(s) => onOpen(s)} />
+
+      {/*
+        The boards' own material, beside the practice tools rather than on a page
+        of its own. A student looking for a past paper is in exactly one frame of
+        mind, and splitting "papers we generate" from "papers the board
+        publishes" across two screens serves the org chart, not them.
+      */}
+      <div className="glass rounded-2xl border border-border-main p-5">
+        <ExamResources />
+      </div>
 
       <div>
         <h3 className="mb-3 text-[11px] font-black uppercase tracking-widest text-text-dim">

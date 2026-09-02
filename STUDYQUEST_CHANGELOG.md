@@ -4572,3 +4572,154 @@ phone already has built in.
 `src/components/PaperLibrary.tsx` (new), `tests/generatePaper.test.ts` (new),
 `src/lib/markAnswer.ts`, `src/components/PaperPractice.tsx`,
 `tests/paperSession.test.ts`, `src/App.tsx`.
+
+---
+
+## [2026-09-02] — Official board resources, and a way to tell us what is broken
+
+**Editor:** Claude Code (Opus 5)
+
+Priorities 1 and 3 of RED's upgrade plan, plus the two-month review that makes
+the second one worth having.
+
+### 1. Official exam board resources
+
+Specifications, past papers, mark schemes and examiner reports — on the boards'
+own sites. StudyQuest **links, it does not host**. That is the legal position and
+also the honest one: the boards keep these current, and a copy taken today is
+wrong by September.
+
+Two rules shaped `src/lib/examBoards.ts`, and the first matters more:
+
+**Nothing in the catalogue is from memory.** Every URL returned HTTP 200 when it
+was added. A plausible-looking link that 404s is worse than no link — the student
+concludes the material is gone rather than that we made it up. `npm run
+check:links` is committed beside it, because these *will* rot and nothing in the
+app can detect it: a 404 page still renders perfectly well in a new tab.
+
+```
+Checking 11 exam board links…
+  ok   200   AQA GCSE Biology (8461)          https://www.aqa.org.uk/subjects/biology/gcse/biology-8461
+  ok   200   OCR GCSE Computer Science (J277) https://www.ocr.org.uk/qualifications/gcse/computer-science-j277-from-2020/
+  …
+All links alive.
+```
+
+**Subject pages, not deep PDF links.** A link to `AQA-8461-SQP-JUN23.PDF` rots
+the moment a board reorganises, and boards reorganise constantly. The subject
+page always carries the current specification, the newest papers and the latest
+examiner reports, so it stays right with nobody maintaining it. That is why
+`hub` is its own document type rather than being labelled "the specification" —
+a small lie the student discovers on arrival.
+
+A test asserts every link is on the domain of the board it claims to be from. An
+entry labelled AQA that pointed at a revision blog would be worse than no entry,
+because the student trusts it *because StudyQuest called it official*.
+
+Their own subjects float to the top, and nothing is hidden — students take
+subjects the app was never told about, and a list that quietly dropped those
+would read as broken rather than personalised.
+
+### 3. Report a problem
+
+A student writing this is already annoyed; something has just wasted their
+revision time. So the form is short, says what happens next, and never argues.
+
+The one thing it insists on is a sentence:
+
+> *"Tell us what you were doing and what happened — a sentence is enough."*
+
+"it dosnt work" cannot be fixed, and the difference is fifteen seconds of typing.
+That rule is the difference between a report that gets fixed and one that gets
+counted and forgotten.
+
+**What gets collected is named one field at a time** — the screen, a browser
+summary, a size bucket, the app version — and shown to the student in one line.
+The raw user-agent is never stored. A bug report is not a licence to fingerprint
+a teenager, and collecting something about someone silently is not on.
+
+### The grouping is the whole feature
+
+Two hundred individually-written reports are noise nobody reads. *"41 reports
+about the quiz getting stuck"* is a decision. So every report carries a
+fingerprint, and these all land in one pile:
+
+```
+"The quiz gets stuck loading"
+"quiz stuck loading!!"
+"Loading stuck on the quiz"
+"the app is not loading"            → groups with "not loading"
+```
+
+Deliberately crude — title reduced to meaningful words, sorted, paired with the
+category. It over-groups occasionally and under-groups occasionally; both beat a
+clustering scheme two people cannot predict. Adding a content word like "forever"
+*does* make a new group, which a test records so nobody is surprised by it later.
+
+### The two-month review
+
+`issueReview.ts` turns the pile into the page that decision needs: clusters
+ranked by how many students hit them, ideas kept apart from faults, and a plain
+text summary to paste somewhere.
+
+Two judgements in it:
+
+- **A single `critical` outranks three cosmetic reports.** Somebody locked out of
+  an account they paid for is not a queue position.
+- **It says nothing when one report is top of the list.** One student hitting
+  something is not a pattern, and calling it "the top problem this cycle" would
+  make the review look like theatre.
+
+Severity is guessed at submission — billing and lockouts high, an idea never
+urgent however strongly it is worded — and the team can change it.
+
+### Who can read what
+
+The rule that matters: **a student can read their own reports and nobody else's.**
+These contain other students' words about their own accounts — *"I was charged
+twice"*, *"I cannot get into my account"* — and a report page is not a reason to
+let one teenager read another's.
+
+Students also cannot set status, severity or notes, or edit a report once sent.
+Otherwise the two-month ranking becomes a popularity contest for whoever marks
+their own report critical, which is the exact signal the review exists to avoid.
+
+Probed against the live rules after deploying:
+
+```
+  OK      a student can send a report
+  refused a report marked critical by the student
+  refused a report with team notes pre-filled
+  refused a one-word description
+  refused an invented category
+  refused someone else's user_id
+  OK      read own reports (1)
+  refused a student editing their own report
+  refused student B reading everyone's
+  refused student B reading student A's
+```
+
+### Verified
+
+- **674 tests** (was 648), `tsc` clean, `eslint` 0 errors.
+- All 15 links alive, checked over the network.
+- Driven in a browser: the resources search finds AQA Biology by its code `8461`,
+  links to the real board URL with `rel="noopener noreferrer"`, the form refuses
+  "it dosnt work" with a useful message, accepts a real report, and shows it
+  back. Zero console errors.
+- The stored report read back out of Firestore: fingerprinted, severity assigned,
+  context recorded field by field with no raw user-agent.
+
+### Still to come from the plan
+
+Examiner report mining (Priority 2), admin triage UI (Priority 5's other half),
+and the second billing provider — which is a decision before it is code, and RED
+has not yet said what is driving it.
+
+### Files
+`src/lib/examBoards.ts` (new), `src/lib/issueReport.ts` (new),
+`src/lib/issueReview.ts` (new), `src/lib/issueStore.ts` (new),
+`src/components/ExamResources.tsx` (new), `src/components/ReportIssue.tsx` (new),
+`scripts/check-links.mjs` (new), `tests/examBoards.test.ts` (new),
+`tests/issueReport.test.ts` (new), `firestore.rules`, `src/App.tsx`,
+`src/components/Settings.tsx`, `src/components/PaperLibrary.tsx`, `package.json`.

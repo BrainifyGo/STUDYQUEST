@@ -298,6 +298,26 @@ export const Settings: React.FC = () => {
       </section>
 
       {/*
+        Report a problem, in Settings because that is where people look when
+        something is wrong with an app rather than with their work.
+      */}
+      <section className="glass rounded-2xl border border-border-main p-6">
+        <button
+          onClick={() => setActiveView('report')}
+          className="flex w-full items-center gap-3 text-left"
+        >
+          <AlertCircle size={20} className="shrink-0 text-brand-purple" />
+          <span className="flex-1">
+            <span className="block font-black tracking-tight">Report a problem</span>
+            <span className="mt-0.5 block text-[13px] text-text-dim">
+              Something broken, wrong, or just annoying. We read everything every two months
+              and fix whatever came up most.
+            </span>
+          </span>
+        </button>
+      </section>
+
+      {/*
         How the app looks. Swatches rather than names, because "Orchid" means
         nothing until you see it — and "a new one each day" sits among them as a
         choice of equal standing rather than a toggle bolted underneath.
