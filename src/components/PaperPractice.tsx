@@ -129,7 +129,9 @@ export const PaperPractice: React.FC<Props> = ({ session, onChange, onExit }) =>
         return;
       }
       const { result } = await res.json();
-      const marked = parseMarkingReply(result, question.marks ?? 1);
+      // `true`: we only get here when the answer is non-blank, so the marker
+      // is not allowed to label it "left blank".
+      const marked = parseMarkingReply(result, question.marks ?? 1, true);
       persist(markQuestion(withAnswer, question.number, marked));
     } catch (err) {
       // parseMarkingReply throws rather than inventing a mark, and this is why:

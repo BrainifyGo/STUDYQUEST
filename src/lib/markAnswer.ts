@@ -94,7 +94,12 @@ const REASONS: LossReason[] = [
  * silently returns full marks is worse. Both are lies, so an unreadable reply is
  * an error the caller has to handle — by asking again or saying so.
  */
-export function parseMarkingReply(raw: string, available: number): MarkResult {
+export function parseMarkingReply(
+  raw: string,
+  available: number,
+  /** Whether the student actually wrote anything. See the coercion below. */
+  answered = true,
+): MarkResult {
   if (typeof raw !== 'string' || !raw.trim()) {
     throw new Error('The marker returned nothing.');
   }
@@ -136,6 +141,18 @@ export function parseMarkingReply(raw: string, available: number): MarkResult {
   */
   if (awarded >= cap) reason = 'correct';
   else if (reason === 'correct') reason = 'incomplete-chain';
+
+  /*
+    CAUGHT BY RUNNING IT. A student wrote a real paragraph about electrolysis in
+    answer to a calculation question, and the marker came back "unanswered" — so
+    the screen said LEFT BLANK above three lines of their own writing.
+
+    A model reaches for "unanswered" to mean "nothing usable here", which is a
+    fair judgement and the wrong word. Only the caller knows whether the box was
+    actually empty, so only the caller can allow that label.
+  */
+  if (!answered && reason !== 'correct') reason = 'unanswered';
+  else if (answered && reason === 'unanswered') reason = 'misread';
 
   return {
     awarded,

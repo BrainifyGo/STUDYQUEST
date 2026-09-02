@@ -4454,3 +4454,112 @@ The taxonomy is sound; the judgement is a model's, on a fallback provider.
 `src/lib/paperStore.ts` (new), `src/components/PaperPractice.tsx` (new),
 `tests/paperSession.test.ts` (new), `src/lib/entitlements.ts`,
 `firestore.rules`, `src/App.tsx`.
+
+---
+
+## [2026-09-02] — Practice papers, written rather than copied
+
+**Editor:** Claude Code (Opus 5)
+
+The other half of the past-questions idea, and the half that is actually allowed.
+
+### Why this is the version that can exist
+
+StudyQuest cannot host real past papers — those belong to AQA, Pearson, OCR and
+WJEC. What it can do is what every revision guide and every teacher already does:
+write **new** questions in the style of the specification. Topics, formats and
+command words are not copyrightable; the boards' actual papers are.
+
+So the prompt in `generatePaper.ts` insists on original questions and explicitly
+forbids reproducing a real one from memory — which a model asked for "a past
+paper question" will otherwise cheerfully attempt. That instruction is not
+decoration; it is the reason the feature is permissible at all, and a test fails
+if it is ever dropped.
+
+The output is the same `ExamQuestion[]` an uploaded PDF produces, so generated
+and uploaded papers go through identical machinery: the same session, the same
+marking, the same post-mortem.
+
+### What a real run produced
+
+Year 11, set 1 of 4 for Chemistry, topic "electrolysis":
+
+> **Question 1 — 4 marks**
+> Calculate the mass of copper deposited at the cathode during the electrolysis
+> of copper sulfate solution using a current of 2.5 A for 30 minutes. (Cu = 63.5)
+>
+> *"Calculate" — Work out a value and show the stages. Method marks exist even
+> when the answer is wrong.*
+
+That is a genuine Higher-tier question with a sane mark allocation, and the
+command-word hint sits under it automatically because the generator was told to
+open every question with one.
+
+### Nothing unusable reaches the student
+
+`parseGeneratedPaper` drops anything that would arrive looking real and then
+behave strangely: a question with no marks cannot be marked, a fragment cannot be
+answered, a 40-mark question is a misread of the format, and models repeat
+themselves more than you would hope. Questions are renumbered in sequence, so a
+model that skips from 3 to 5 does not leave a paper that looks like it lost a
+page. When nothing survives it throws, because an empty paper is worse than an
+error — the student sits looking at a screen that says nothing is wrong and
+offers nothing to do.
+
+### Two bugs found by running it, neither visible in a fixture
+
+**The screen said LEFT BLANK above three lines the student had written.**
+
+A deliberately off-topic answer to the electrolysis calculation was marked 0/4
+with an accurate explanation — and labelled `unanswered`. The model reaches for
+that category to mean "nothing usable here", which is a fair judgement and the
+wrong word. Only the caller knows whether the box was actually empty, so
+`parseMarkingReply` now takes that as an argument: a written answer can never be
+called blank, and a blank one can never be called anything else.
+
+**Tapping a nav item on a phone did not close the menu.**
+
+`SidebarItem` only called `setActiveView`. On desktop that is correct — the
+sidebar is a persistent rail that pushes the page across. On a phone it is an
+overlay covering the whole screen, so tapping "Past Papers" changed the view and
+left it hidden underneath the menu. The student taps, sees the same menu, and
+taps again. Eleven nav items now close the drawer behind them on a phone.
+
+### The library
+
+`PaperLibrary` is where "come back later" actually lands. A session that saved
+perfectly and cannot be found again has not been saved in any sense that matters,
+so the list is part of the feature rather than a nicety on top. Resuming goes to
+the first **unanswered** question — not question one, and not wherever the cursor
+happened to stop.
+
+### What Pro buys
+
+Generating and marking are both `paper-marking`, enforced on the server against
+the verified token. Reading a paper you uploaded is still free: every question,
+its marks, room to answer, and answers kept across sittings. Pro buys the
+examiner.
+
+### Verified
+
+- **618 tests**, `tsc` clean, `eslint` 0 errors.
+- Rules for `paper_sessions` deployed and probed live before any UI was built:
+  the owner can create, update and delete; someone else's `user_id`, a missing
+  id, a non-list `questions` field and a 200-question payload are all refused.
+- Generated, answered and marked in a browser end to end.
+
+### Worth raising
+
+**Past Papers is not on the phone's bottom bar.** That bar is Home, Library,
+Stats, Focus, Settings; everything else — Past Papers, Arcade, Friends, My
+Mistakes, Study Planner, Leaderboard, Study Rooms — lives behind the hamburger.
+On a phone, a feature behind a menu is a feature most people never find. That is
+a product decision rather than a bug, so nothing was changed, but if past papers
+are meant to be central then Focus is the weakest of the five and the obvious
+swap.
+
+### Files
+`src/lib/generatePaper.ts` (new), `src/components/GeneratePaper.tsx` (new),
+`src/components/PaperLibrary.tsx` (new), `tests/generatePaper.test.ts` (new),
+`src/lib/markAnswer.ts`, `src/components/PaperPractice.tsx`,
+`tests/paperSession.test.ts`, `src/App.tsx`.

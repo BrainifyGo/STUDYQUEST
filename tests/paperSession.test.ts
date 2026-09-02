@@ -258,6 +258,27 @@ describe('reading what the marker sent back', () => {
       .toBe('correct');
   });
 
+  it('will not say "left blank" above an answer the student wrote', () => {
+    /*
+      CAUGHT BY RUNNING IT, not by a fixture. A student wrote a real paragraph
+      about electrolysis in answer to a calculation question, the marker replied
+      "unanswered" — a fair judgement, the wrong word — and the screen said
+      LEFT BLANK above three lines of their own writing.
+
+      Only the caller knows whether the box was empty, so only the caller can
+      permit that label.
+    */
+    expect(parseMarkingReply('{"awarded": 0, "reason": "unanswered"}', 4, true).reason)
+      .toBe('misread');
+    expect(parseMarkingReply('{"awarded": 0, "reason": "unanswered"}', 4, false).reason)
+      .toBe('unanswered');
+  });
+
+  it('still lets a genuinely blank answer be called blank', () => {
+    expect(parseMarkingReply('{"awarded": 0, "reason": "knowledge-gap"}', 4, false).reason)
+      .toBe('unanswered');
+  });
+
   it('falls back to a real category for one it does not recognise', () => {
     expect(parseMarkingReply('{"awarded": 0, "reason": "vibes"}', 2).reason)
       .toBe('knowledge-gap');

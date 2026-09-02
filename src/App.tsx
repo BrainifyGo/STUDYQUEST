@@ -60,6 +60,7 @@ import { looksLikeExamPaper, parseExamPaper, type ExamPaper } from './lib/examPa
 import { startSession, type PaperSession } from './lib/paperSession';
 import { saveSession } from './lib/paperStore';
 import { PaperPractice } from './components/PaperPractice';
+import { PaperLibrary } from './components/PaperLibrary';
 import { normaliseLevel, promptFor, resolveSubject } from './lib/studyLevel';
 import { boxFor, BOX_BLURBS, BOX_LABELS, type Confidence } from './lib/confidence';
 import { recordAttempt } from './lib/confidenceStore';
@@ -234,6 +235,20 @@ export default function App() {
   const [activeOutputTab, setActiveOutputTab] = useState<StudyMode>('summary');
   const [showCopyFeedback, setShowCopyFeedback] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  /*
+    Navigate, and on a phone close the drawer behind you.
+
+    SidebarItem only ever called setActiveView, which is right on desktop where
+    the sidebar is a persistent rail that pushes the page across. On a phone it
+    is an overlay covering the whole screen, so tapping "Past Papers" changed the
+    view and then left it hidden underneath the menu — the student taps, sees the
+    same menu, and taps again.
+  */
+  const navigate = (view: string) => {
+    setActiveView(view);
+    if (!isDesktop) setSidebarOpen(false);
+  };
   const { 
     activeView, 
     setActiveView, 
@@ -2166,7 +2181,7 @@ export default function App() {
                 icon={<Layout size={18} />} 
                 label="Dashboard" 
                 active={activeView === 'dashboard'} 
-                onClick={() => setActiveView('dashboard')}
+                onClick={() => navigate('dashboard')}
                 collapsed={railCollapsed}
               />
               <GuestGuard featureName="Library">
@@ -2174,7 +2189,7 @@ export default function App() {
                   icon={<FolderOpen size={18} />}
                   label="Library"
                   active={activeView === 'library'}
-                  onClick={() => setActiveView('library')}
+                  onClick={() => navigate('library')}
                   collapsed={railCollapsed}
                 />
               </GuestGuard>
@@ -2183,7 +2198,7 @@ export default function App() {
                   icon={<Zap size={18} />}
                   label="Arcade"
                   active={activeView === 'arcade'}
-                  onClick={() => setActiveView('arcade')}
+                  onClick={() => navigate('arcade')}
                   collapsed={railCollapsed}
                 />
               </GuestGuard>
@@ -2192,7 +2207,16 @@ export default function App() {
                   icon={<UserPlus size={18} />}
                   label="Friends"
                   active={activeView === 'friends'}
-                  onClick={() => setActiveView('friends')}
+                  onClick={() => navigate('friends')}
+                  collapsed={railCollapsed}
+                />
+              </GuestGuard>
+              <GuestGuard featureName="Past Papers">
+                <SidebarItem
+                  icon={<FileText size={18} />}
+                  label="Past Papers"
+                  active={activeView === 'paper'}
+                  onClick={() => navigate('paper')}
                   collapsed={railCollapsed}
                 />
               </GuestGuard>
@@ -2201,7 +2225,7 @@ export default function App() {
                   icon={<RotateCcw size={18} />}
                   label="My Mistakes"
                   active={activeView === 'mistakes'}
-                  onClick={() => setActiveView('mistakes')}
+                  onClick={() => navigate('mistakes')}
                   collapsed={railCollapsed}
                 />
               </GuestGuard>
@@ -2210,7 +2234,7 @@ export default function App() {
                   icon={<BarChart3 size={18} />}
                   label="Analytics"
                   active={activeView === 'analytics'}
-                  onClick={() => setActiveView('analytics')}
+                  onClick={() => navigate('analytics')}
                   collapsed={railCollapsed}
                 />
               </GuestGuard>
@@ -2219,7 +2243,7 @@ export default function App() {
                   icon={<Calendar size={18} />}
                   label="Study Planner"
                   active={activeView === 'planner'}
-                  onClick={() => setActiveView('planner')}
+                  onClick={() => navigate('planner')}
                   collapsed={railCollapsed}
                 />
               </GuestGuard>
@@ -2228,7 +2252,7 @@ export default function App() {
                   icon={<Trophy size={18} />}
                   label="Leaderboard"
                   active={activeView === 'leaderboard'}
-                  onClick={() => setActiveView('leaderboard')}
+                  onClick={() => navigate('leaderboard')}
                   collapsed={railCollapsed}
                 />
               </GuestGuard>
@@ -2236,7 +2260,7 @@ export default function App() {
                 icon={<Clock size={18} />}
                 label="Focus Timer"
                 active={activeView === 'focus'}
-                onClick={() => setActiveView('focus')}
+                onClick={() => navigate('focus')}
                 collapsed={railCollapsed}
               />
               {timerIsRunning && activeView !== 'focus' && (
@@ -2263,7 +2287,7 @@ export default function App() {
                   icon={<Users size={18} />}
                   label="Study Rooms"
                   active={activeView === 'collab'}
-                  onClick={() => setActiveView('collab')}
+                  onClick={() => navigate('collab')}
                   collapsed={railCollapsed}
                 />
               </GuestGuard>
@@ -2708,12 +2732,13 @@ export default function App() {
               <PaperPractice
                 session={paperSession}
                 onChange={setPaperSession}
-                onExit={() => setActiveView('dashboard')}
+                onExit={() => setPaperSession(null)}
               />
             ) : (
-              <div className="p-8 text-center text-text-dim">
-                No paper open. Upload one from the dashboard to start.
-              </div>
+              <PaperLibrary
+                onOpen={(s) => setPaperSession(s)}
+                onBack={() => setActiveView('dashboard')}
+              />
             )
           ) : activeView === 'mistakes' ? (
             <MistakesView
