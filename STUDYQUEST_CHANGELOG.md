@@ -5761,3 +5761,71 @@ the app itself needs the $7/month instance to use a subdomain.
 `site/index.html` (new), `site/README.md` (new), `site/icon*` (new),
 `src/lib/install.ts` (new), `src/components/InstallPrompt.tsx` (new),
 `tests/install.test.ts` (new), `src/App.tsx`.
+
+---
+
+## [2026-09-03] — "Do this next", on the home screen
+
+**Editor:** Claude Code (Opus 5)
+
+The dashboard has always shown what StudyQuest can **do** — make a kit, upload a
+PDF, pick a mode, play the arcade. That is a menu, and a menu is exactly what a
+student with twenty minutes and no idea where to start does not need. It was
+priority 6 of RED's own improvement plan and the least-touched part of the app.
+
+It now opens with one instruction and the reason behind it.
+
+### What it ranks, and why in that order
+
+1. **An exam inside 14 days.** A date is a fact about the world; it does not lose
+   to a preference. *"Your Biology exam is in 5 days."*
+2. **A half-finished lesson.** Finishing beats starting, which is also what the
+   teacher's method assumes — you drop a subject bit by bit, across days. The
+   lesson closest to done wins.
+3. **A blind spot** — questions they were **sure about and still got wrong**.
+   This is the only list that tells a student something they did not already
+   know; an unfinished paper they can see for themselves.
+4. **A paper left part-way.**
+5. **Mistakes**, but only past five of them. Two wrong answers is a Tuesday, not
+   a revision session.
+
+### The rule that keeps it believable
+
+**Every reason is a fact this app already holds** — how far into a lesson they
+stopped, how many questions they were confidently wrong about, how many days
+until an exam they entered themselves. There is a test asserting every suggestion
+contains a digit, because a reason without a number is a feeling.
+
+And where there is nothing to go on, **it says so**: *"Nothing to go on yet —
+once you have studied a bit, this shows what to do next."* Filling that space
+with something that sounds personal is easy, and anyone who has used the app
+twice can tell. Once a student catches one invented recommendation they stop
+believing the real ones, so the empty state is guarded by its own test that the
+wording contains no "based on your" or "recommended for you".
+
+### Days are counted as days
+
+An exam at 09:00 tomorrow and one at 23:00 tomorrow are both *tomorrow* to a
+student. Subtracting milliseconds would call one of them today, so the comparison
+is on calendar dates, and 0 and 1 read as "today" and "tomorrow" rather than as
+numbers.
+
+### A mismatch caught before it shipped
+
+The first wiring passed the suggested topic to `setInputText` — which fills the
+**study kit** box, on a different screen from the one the suggestion opens. It
+now hands the topic to the Learn screen through `sessionStorage`, read once and
+cleared, so returning days later does not silently refill a box with something
+long forgotten.
+
+### Verified
+
+- **847 tests** (was 831), `tsc` clean, `eslint` 0 errors.
+- Against a real account, in a browser: a brand-new student is told there is
+  nothing to go on and gets **no** invented reason; adding a real exam five days
+  out and a lesson stopped at step 4 of 6 makes both appear with their true
+  reasons; and clicking through lands on the right screen with the lesson waiting.
+
+### Files
+`src/lib/nextUp.ts` (new), `src/components/NextUp.tsx` (new),
+`tests/nextUp.test.ts` (new), `src/App.tsx`, `src/components/LessonPlayer.tsx`.

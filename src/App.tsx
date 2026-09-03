@@ -66,6 +66,7 @@ import { ExaminerInsights } from './components/ExaminerInsights';
 import { LessonPlayer } from './components/LessonPlayer';
 import { AdminDashboard } from './components/AdminDashboard';
 import { InstallPrompt } from './components/InstallPrompt';
+import { NextUp } from './components/NextUp';
 import { isAdminUser } from './lib/isAdmin';
 import {
   SECRET_WORD, freshKnock, isTypingIntoSomething, pressKey, rememberPass,
@@ -2922,6 +2923,25 @@ export default function App() {
                   </div>
                 </div>
               </section>
+
+              {/*
+                What to do next, before what the app can do.
+
+                Everything below this is a menu — make a kit, upload a PDF, pick a
+                mode — and a menu is what a student with twenty minutes and no idea
+                where to start does not need. See src/lib/nextUp.ts.
+              */}
+              <NextUp
+                onGo={(view, s) => {
+                  // The topic is handed to the Learn screen through
+                  // sessionStorage rather than the study-kit box, which belongs
+                  // to a different screen entirely.
+                  if (view === 'learn' && s.subject) {
+                    try { sessionStorage.setItem('sq.learn.topic', s.subject); } catch { /* private mode */ }
+                  }
+                  navigate(view);
+                }}
+              />
 
               {/*
                 Without this the level setting is a feature nobody finds. It is

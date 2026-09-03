@@ -237,6 +237,22 @@ export const LessonPlayer: React.FC<Props> = ({ onBack }) => {
   }, [lesson]);
 
   /*
+    A topic handed over from "Do this next" on the home screen.
+
+    Read once and cleared, so returning here later does not silently refill a box
+    with something they picked days ago.
+  */
+  useEffect(() => {
+    try {
+      const handed = sessionStorage.getItem('sq.learn.topic');
+      if (handed) {
+        sessionStorage.removeItem('sq.learn.topic');
+        setTopic(handed);
+      }
+    } catch { /* private mode */ }
+  }, []);
+
+  /*
     Save on a pause rather than on every keystroke.
 
     A write per answer would be wasteful; a write only when they finish loses the
