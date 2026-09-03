@@ -5679,3 +5679,85 @@ works without one; offline support is a separate job to do carefully.
 ### Files
 `public/manifest.webmanifest` (new), `public/icon.svg` (new),
 `public/icon-180.png` / `icon-192.png` / `icon-512.png` (new), `index.html`.
+
+---
+
+## [2026-09-03] — A separate site to tell people about it, and an install that actually installs
+
+**Editor:** Claude Code (Opus 5)
+
+RED asked for a separate site that explains StudyQuest, with an Install button
+that installs the web version — or offers an APK.
+
+### The rule that decides the whole design
+
+**A site can only install its own app.** `beforeinstallprompt` is same-origin, so
+a marketing site at `studyquest.co.uk` cannot install the app at
+`studyquest-ruuq.onrender.com`. Browsers refuse deliberately: otherwise any page
+could push an app onto you from a domain you had never visited.
+
+So the landing page does not try. Every Install button hands off to the app with
+`?install=1`, and the app opens its own install sheet. That reasoning is written
+into `site/README.md` and the top of `src/lib/install.ts`, so nobody later
+spends an afternoon trying to make the button "work properly" from the landing
+page.
+
+### iPhone has no install API at all
+
+Safari has never fired `beforeinstallprompt` and Apple has never offered an
+alternative — on iOS the user goes through the Share menu themselves. A button
+waiting for an event that cannot arrive would leave every iPhone user tapping
+nothing, so the iOS path is instructions, and that is the only route that exists
+rather than a fallback from a failure.
+
+There is a further trap: **Chrome, Firefox and Edge on iOS cannot install at
+all**, only Safari can. Telling a Chrome-on-iPhone user to tap Share sends them
+hunting for a menu item that is not there, so they are told to open Safari first
+and why.
+
+### What was added
+
+- `site/` — one static HTML file, no build step, no dependencies. Explains the
+  teaching method with a worked example on screen, lists what else is in the app,
+  and gives per-device install steps that change when you pick a device.
+- `src/lib/install.ts` + `tests/install.test.ts` — platform detection, whether we
+  are already installed, and what to say. Ten tests.
+- `src/components/InstallPrompt.tsx` — the sheet. Captures Chrome's prompt when
+  it arrives, shows instructions when it cannot, and a quiet one-time nudge on
+  phones that is never shown again once dismissed.
+
+### The bug the browser test found
+
+The install sheet was rendered in the signed-in part of the app. The auth screen
+returns before that — so **someone arriving from the marketing site, who by
+definition has no account yet, clicked Install and got a sign-up form and
+nothing else**. Exactly the person the feature is for. It now renders on both
+sides of the auth gate.
+
+### On the APK
+
+Not built, and the site says so plainly rather than promising one. An APK means
+wrapping the app, an Android build toolchain, and signing keys — and for the
+student it means turning off a safety setting and reinstalling by hand for every
+update. The browser install is better until there is a real Play listing.
+
+### A correction to the build report
+
+The report said custom domains need a paid Render plan. That is true of **web
+services** — it is not true of **static sites**, which are free and can carry a
+custom domain on the free Hobby tier. So the marketing site can sit on
+`studyquest.co.uk` for the price of the domain alone (&asymp;&pound;10), and only
+the app itself needs the $7/month instance to use a subdomain.
+
+### Verified
+
+- **831 tests** (was 821), `tsc` clean, `eslint` 0 errors, production build fine.
+- Both served locally and driven in a real browser: the page loads, the device
+  tabs produce genuinely different instructions, every Install link carries the
+  hand-off, arriving at the app with `?install=1` opens the sheet with real
+  instructions, and a normal visit does **not** shove it in the visitor's face.
+
+### Files
+`site/index.html` (new), `site/README.md` (new), `site/icon*` (new),
+`src/lib/install.ts` (new), `src/components/InstallPrompt.tsx` (new),
+`tests/install.test.ts` (new), `src/App.tsx`.

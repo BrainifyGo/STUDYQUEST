@@ -65,6 +65,7 @@ import { ReportIssue } from './components/ReportIssue';
 import { ExaminerInsights } from './components/ExaminerInsights';
 import { LessonPlayer } from './components/LessonPlayer';
 import { AdminDashboard } from './components/AdminDashboard';
+import { InstallPrompt } from './components/InstallPrompt';
 import { isAdminUser } from './lib/isAdmin';
 import {
   SECRET_WORD, freshKnock, isTypingIntoSomething, pressKey, rememberPass,
@@ -1965,6 +1966,13 @@ export default function App() {
   if (!user && !isGuest) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-black p-4 bg-gradient-to-b from-black to-[#0a0a0f]">
+        {/*
+          Here too, and this is the case that matters most: someone arriving from
+          the marketing site with ?install=1 has no account yet, and this screen
+          returns before the signed-in tree below. Rendering the sheet only there
+          meant the Install button led to a sign-up form and nothing else.
+        */}
+        <InstallPrompt />
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -2184,6 +2192,10 @@ export default function App() {
   return (
     <ErrorBoundary>
       <Toaster position="bottom-right" />
+
+      {/* The only place StudyQuest can be installed: a site may only install its
+          own app, so the marketing site links here with ?install=1. */}
+      <InstallPrompt />
       <TimerEngine />
       <AutoUpdateBanner
         show={showUpdateBanner} 

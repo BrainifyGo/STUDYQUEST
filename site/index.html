@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StudyQuest — learn it bit by bit</title>
+<meta name="description" content="A GCSE study app that teaches in small steps, marks your past papers, and tells you where the marks actually went. Free to start.">
+<meta name="theme-color" content="#0f0f1a">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-180.png">
+
+<meta property="og:title" content="StudyQuest — learn it bit by bit">
+<meta property="og:description" content="Teaches in small steps, marks your past papers, and tells you where the marks actually went.">
+<meta property="og:type" content="website">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Public+Sans:wght@400;500;600;700&display=swap">
+
+<!--
+  THE MARKETING SITE. Deliberately a separate, plain static site.
+
+  It cannot install StudyQuest itself, and no amount of JavaScript changes that:
+  `beforeinstallprompt` is same-origin, so a browser will only ever let a site
+  install ITS OWN app. Otherwise any page could push an app onto you from a
+  domain you had never visited.
+
+  So every Install button here simply hands over to the app with ?install=1, and
+  the app opens its install sheet. That is the only route that exists, and it is
+  worth writing down so nobody wastes an afternoon trying to do it from here.
+
+  No build step, no framework, one file. It deploys as a Render Static Site,
+  which is free and — unlike a free web service — can carry a custom domain.
+-->
+<style>
+  :root {
+    --bg:      #0f0f1a;
+    --panel:   #16162a;
+    --panel-2: #1c1c33;
+    --line:    #29294a;
+    --text:    #edecff;
+    --dim:     #a3a0c8;
+    --faint:   #706d94;
+    --accent:  #7c7cff;
+    --accent-2:#9a9aff;
+    --ok:      #34d399;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
+
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Public Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-size: 17px; line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 0 22px; }
+
+  h1, h2, h3 { font-family: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif; }
+
+  /* header */
+  header.bar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding: 18px 0;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px;
+           font-family: "Bricolage Grotesque", sans-serif; letter-spacing: -.02em; }
+  .brand img { width: 30px; height: 30px; border-radius: 8px; }
+  .brand span { color: var(--accent); }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    font: inherit; font-weight: 700; text-decoration: none; cursor: pointer;
+    padding: 12px 20px; border-radius: 12px; border: 1px solid transparent;
+    min-height: 46px; white-space: nowrap;
+  }
+  .btn-primary { background: var(--accent); color: #0b0b14; }
+  .btn-primary:hover { background: var(--accent-2); }
+  .btn-ghost { border-color: var(--line); color: var(--text); background: transparent; }
+  .btn-ghost:hover { border-color: var(--faint); }
+  .btn-sm { padding: 8px 14px; min-height: 38px; font-size: 14.5px; }
+
+  /* hero */
+  .hero { padding: 56px 0 40px; }
+  .hero h1 {
+    font-size: clamp(2.5rem, 7.5vw, 4.4rem); font-weight: 800; line-height: 1.02;
+    letter-spacing: -.03em; margin: 0 0 20px; text-wrap: balance;
+  }
+  .hero h1 em { font-style: normal; color: var(--accent); }
+  .hero p.lede {
+    font-size: clamp(1.05rem, 2.4vw, 1.32rem); color: var(--dim);
+    max-width: 40ch; margin: 0 0 30px;
+  }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .cta-note { font-size: 13.5px; color: var(--faint); margin: 14px 0 0; }
+
+  /* the method */
+  section { padding: 54px 0; border-top: 1px solid var(--line); }
+  section h2 {
+    font-size: clamp(1.7rem, 4vw, 2.4rem); font-weight: 800; letter-spacing: -.024em;
+    margin: 0 0 12px; text-wrap: balance;
+  }
+  section p.sub { color: var(--dim); max-width: 56ch; margin: 0 0 32px; }
+
+  .steps { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+  .step {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px;
+  }
+  .step .n {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 8px; margin-bottom: 12px;
+    background: rgba(124,124,255,.16); color: var(--accent);
+    font-weight: 800; font-size: 13px;
+  }
+  .step h3 { margin: 0 0 6px; font-size: 1.08rem; font-weight: 700; }
+  .step p { margin: 0; color: var(--dim); font-size: 14.5px; }
+
+  /* demo card */
+  .demo {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+    padding: 22px; margin-top: 26px;
+  }
+  .demo .tag {
+    font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--faint); margin: 0 0 12px;
+  }
+  .demo .teach p { margin: 0 0 8px; font-size: 15.5px; }
+  .demo .q {
+    margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line);
+    font-weight: 700; font-size: 15px;
+  }
+  .demo .a {
+    margin-top: 10px; padding: 11px 14px; border-radius: 10px;
+    background: rgba(52,211,153,.08); border: 1px solid rgba(52,211,153,.25);
+    font-size: 14.5px; color: var(--ok);
+  }
+
+  /* feature list */
+  .feats { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .feat { border: 1px solid var(--line); border-radius: 14px; padding: 20px; background: var(--panel); }
+  .feat h3 { margin: 0 0 6px; font-size: 1.05rem; font-weight: 700; }
+  .feat p { margin: 0; color: var(--dim); font-size: 14.5px; }
+
+  /* install */
+  #install .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 26px;
+  }
+  .plat { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 20px; }
+  .plat button {
+    font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+    background: transparent; border: 1px solid var(--line); color: var(--dim);
+    border-radius: 10px; padding: 9px 15px; min-height: 42px;
+  }
+  .plat button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); background: rgba(124,124,255,.1); }
+  .how { margin: 0 0 22px; padding: 0; list-style: none; display: grid; gap: 12px; }
+  .how li { display: grid; grid-template-columns: 26px 1fr; gap: 12px; align-items: start; }
+  .how .n {
+    width: 24px; height: 24px; border-radius: 999px; background: rgba(124,124,255,.16);
+    color: var(--accent); font-weight: 800; font-size: 12px;
+    display: flex; align-items: center; justify-content: center; margin-top: 2px;
+  }
+  .how p { margin: 0; font-size: 15px; }
+  .how small { display: block; color: var(--faint); font-size: 13px; margin-top: 2px; }
+
+  .apk {
+    margin-top: 22px; padding: 16px 18px; border-radius: 12px;
+    border: 1px solid var(--line); background: var(--panel-2);
+  }
+  .apk h3 { margin: 0 0 6px; font-size: 1rem; font-weight: 700; }
+  .apk p { margin: 0; font-size: 14px; color: var(--dim); }
+
+  footer.end {
+    border-top: 1px solid var(--line); padding: 30px 0 60px;
+    color: var(--faint); font-size: 14px;
+    display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between;
+  }
+  footer.end a { color: var(--dim); }
+
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px;
+  }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="bar">
+    <div class="brand"><img src="/icon-192.png" alt=""> Study<span>Quest</span></div>
+    <a class="btn btn-ghost btn-sm" href="https://studyquest-ruuq.onrender.com">Open the app</a>
+  </header>
+
+  <div class="hero">
+    <h1>Learn it <em>bit by bit</em>.</h1>
+    <p class="lede">
+      Most revision apps hand you a wall of notes and wish you luck. StudyQuest teaches
+      one small piece at a time, checks you got it, and only then moves on.
+    </p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://studyquest-ruuq.onrender.com/?install=1">Install StudyQuest</a>
+      <a class="btn btn-ghost" href="https://studyquest-ruuq.onrender.com">Try it in the browser</a>
+    </div>
+    <p class="cta-note">Free to start. No card. Works on a phone, tablet or laptop.</p>
+  </div>
+</div>
+
+<div class="wrap">
+  <section id="method">
+    <h2>Built on how a teacher actually teaches</h2>
+    <p class="sub">
+      A practising teacher told us the fastest way anyone learns: you do not drop the whole
+      subject on someone. You drop it bit by bit.
+    </p>
+
+    <div class="steps">
+      <div class="step">
+        <span class="n">1</span>
+        <h3>Four or five lines</h3>
+        <p>One small idea, in the simplest words. Never a wall of text — the app throws away
+        anything longer before you see it.</p>
+      </div>
+      <div class="step">
+        <span class="n">2</span>
+        <h3>Then a question on it</h3>
+        <p>Straight away, about exactly what you just read. Get it wrong and it tells you
+        kindly and shows you why.</p>
+      </div>
+      <div class="step">
+        <span class="n">3</span>
+        <h3>Then the next bit</h3>
+        <p>You cannot skip ahead until you have answered. That is the point — it starts at
+        the easiest idea and works up to the real thing.</p>
+      </div>
+    </div>
+
+    <div class="demo">
+      <p class="tag">Step 1 of 6 · Adding fractions</p>
+      <div class="teach">
+        <p>A fraction shows how many parts of a whole we have.</p>
+        <p>Imagine a chocolate bar broken into 4 equal pieces. One piece is 1/4 of the bar.</p>
+      </div>
+      <p class="q">If the chocolate bar has 4 equal pieces, how many pieces make the whole bar?</p>
+      <p class="a">Yes — that is it. All 4 pieces together make one whole bar.</p>
+    </div>
+  </section>
+
+  <section id="what">
+    <h2>What else is in it</h2>
+    <div class="feats">
+      <div class="feat">
+        <h3>Past papers, marked</h3>
+        <p>Upload a paper, paste a link from AQA, Edexcel, OCR or WJEC, or have one written
+        for you. Then work through it and find out where the marks actually went — not just
+        a score.</p>
+      </div>
+      <div class="feat">
+        <h3>What examiners really say</h3>
+        <p>Every year the boards publish reports on what students got wrong. Nobody reads
+        eleven pages of PDF, so we pull out the parts worth your time — always with a link
+        to the original.</p>
+      </div>
+      <div class="feat">
+        <h3>Pitched at your class</h3>
+        <p>Tell it your year and your set for each subject. Set 1 Maths and set 4 French get
+        asked different questions, because you are a different student in each.</p>
+      </div>
+      <div class="feat">
+        <h3>Ask anything, any time</h3>
+        <p>Stuck mid-lesson? Ask. It answers the question you actually asked, in plain
+        words, and asking never counts against you.</p>
+      </div>
+      <div class="feat">
+        <h3>Your mistakes, kept</h3>
+        <p>Everything you get wrong is saved so you can come back to it. That is the bit
+        that actually moves a grade.</p>
+      </div>
+      <div class="feat">
+        <h3>Make it yours</h3>
+        <p>Eight themes that change the whole app, not just the buttons. Or a new colour
+        every day if you like a surprise.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <h2>Get StudyQuest on your phone</h2>
+    <p class="sub">
+      It installs straight from your browser — its own icon, opens full screen, no app
+      store, nothing to download.
+    </p>
+
+    <div class="panel">
+      <div class="plat" role="tablist" aria-label="Choose your device">
+        <button role="tab" data-plat="ios" aria-selected="false">iPhone or iPad</button>
+        <button role="tab" data-plat="android" aria-selected="false">Android</button>
+        <button role="tab" data-plat="desktop" aria-selected="false">Computer</button>
+      </div>
+
+      <ol class="how" id="how"></ol>
+
+      <a class="btn btn-primary" id="go" href="https://studyquest-ruuq.onrender.com/?install=1">
+        Open StudyQuest to install
+      </a>
+      <p class="cta-note" id="why">
+        Installing happens inside the app itself — a website is only ever allowed to install
+        its own app, never someone else&rsquo;s.
+      </p>
+
+      <div class="apk">
+        <h3>Is there an APK?</h3>
+        <p>
+          Not yet, and honestly the install above is better for now: it updates itself, it
+          takes seconds, and Android does not warn you about it. A downloadable APK means
+          turning off a safety setting and reinstalling by hand for every update. A proper
+          Google Play listing is the plan &mdash; that is worth waiting for.
+        </p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="wrap">
+  <footer class="end">
+    <span>StudyQuest &mdash; GCSE revision that actually teaches.</span>
+    <span><a href="https://studyquest-ruuq.onrender.com">Open the app</a></span>
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var APP = 'https://studyquest-ruuq.onrender.com';
+
+    var GUIDES = {
+      ios: [
+        ['Open this page in <strong>Safari</strong>', 'Chrome and Firefox on iPhone cannot add apps — only Safari can.'],
+        ['Tap <strong>Open StudyQuest</strong> below', 'It takes you into the app.'],
+        ['Tap the <strong>Share</strong> button', 'The square with an arrow pointing up, at the bottom of the screen.'],
+        ['Choose <strong>Add to Home Screen</strong>', 'Scroll down the list a little. Then tap Add.']
+      ],
+      android: [
+        ['Tap <strong>Open StudyQuest</strong> below', 'It takes you into the app.'],
+        ['Tap <strong>Install</strong> when it offers', 'If nothing appears, open Chrome&rsquo;s ⋮ menu and choose “Install app”.'],
+        ['Confirm', 'StudyQuest gets its own icon and opens without the browser bar.']
+      ],
+      desktop: [
+        ['Click <strong>Open StudyQuest</strong> below', 'It opens in this browser.'],
+        ['Look in the address bar', 'There is a small install icon — a screen with a downward arrow.'],
+        ['Click it and confirm', 'StudyQuest opens in its own window, with no tabs.']
+      ]
+    };
+
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('.plat button'));
+    var list = document.getElementById('how');
+
+    function guess() {
+      var ua = navigator.userAgent || '';
+      var iPadAsMac = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+      if (/iPhone|iPad|iPod/.test(ua) || iPadAsMac) return 'ios';
+      if (/Android/.test(ua)) return 'android';
+      return 'desktop';
+    }
+
+    function show(plat) {
+      tabs.forEach(function (t) {
+        t.setAttribute('aria-selected', String(t.dataset.plat === plat));
+      });
+      list.innerHTML = '';
+      GUIDES[plat].forEach(function (row, i) {
+        var li = document.createElement('li');
+        var n = document.createElement('span');
+        n.className = 'n';
+        n.textContent = String(i + 1);
+        var p = document.createElement('p');
+        p.innerHTML = row[0] + '<small>' + row[1] + '</small>';
+        li.appendChild(n);
+        li.appendChild(p);
+        list.appendChild(li);
+      });
+    }
+
+    tabs.forEach(function (t) {
+      t.addEventListener('click', function () { show(t.dataset.plat); });
+    });
+
+    show(guess());
+
+    /*
+      Every install link carries ?install=1 so the app opens its install sheet
+      immediately. This page cannot do the installing — same-origin rule — so the
+      most useful thing it can do is make the hand-off land in the right place.
+    */
+    Array.prototype.forEach.call(document.querySelectorAll('a[href^="' + APP + '"]'), function (a) {
+      if (a.href.indexOf('install=1') === -1) return;
+      a.addEventListener('click', function () {
+        try { localStorage.setItem('sq.from', 'site'); } catch (e) { /* private mode */ }
+      });
+    });
+  })();
+</script>
+</body>
+</html>
