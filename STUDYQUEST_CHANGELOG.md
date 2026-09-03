@@ -5615,3 +5615,67 @@ pre-existing behaviour rather than something this changed.
 `src/lib/paperSource.ts` (new), `src/components/OpenPaperLink.tsx` (new),
 `tests/paperSource.test.ts` (new), `server.ts`, `src/lib/examPaper.ts`,
 `src/components/PaperLibrary.tsx`, `tests/examPaper.test.ts`.
+
+---
+
+## [2026-09-03] — Installable on a phone, for nothing
+
+**Editor:** Claude Code (Opus 5)
+
+While writing the build report I checked a claim I was about to make — that
+StudyQuest could be added to a phone's home screen — and it was **wrong**. There
+was no web manifest, so "Add to Home screen" only ever made a browser shortcut:
+it opened in a tab, address bar showing, which is not what a student means by
+"it should be an app".
+
+That is now fixed, and it is the cheapest possible answer to RED's app-store
+question: an installed icon that opens full screen, on Android and iPhone, with
+**no fee, no review, no developer account and no 18+ requirement** — the last of
+which is a real blocker on both stores, since RED is 14.
+
+### What was added
+
+- `public/manifest.webmanifest` — name, standalone display, scope, theme colours
+  taken from the app's own dark palette.
+- `public/icon.svg` — the brain mark from the favicon on StudyQuest's purple.
+  Square and full-bleed, with the glyph inside the middle 60% so Android's
+  maskable crop cannot cut into it.
+- `public/icon-180.png`, `icon-192.png`, `icon-512.png`, rendered from that SVG.
+- The iOS meta tags, so it opens full screen rather than in Safari's chrome.
+
+**The apple-touch-icon was already wrong.** It pointed at
+`logo-brain-transparent.png`, which is **1536×1024** — iOS letterboxes a
+non-square icon, so anyone who had added StudyQuest to their home screen had a
+squashed logo with bars down the sides.
+
+### Rendering the icons without adding a dependency
+
+No image library is installed, and adding a native one to resize a picture once
+is a poor trade. Playwright is already a dev dependency, so the icons are
+rendered by loading the SVG in a real browser at each size and screenshotting it
+(`zz-icons.mjs`). Same rasteriser the icons will actually be viewed in.
+
+### What this does NOT do, said plainly
+
+There is **no service worker**, so the app does not work offline and Chrome will
+not raise its own "Install app" prompt automatically — the user installs it from
+the browser menu, and iOS has always worked that way regardless.
+
+That was a deliberate choice, not an oversight. A service worker on a live app
+with real users is genuinely hard to undo if it goes wrong, and the classic
+failure is serving stale JavaScript to people who cannot clear it. The install
+works without one; offline support is a separate job to do carefully.
+
+### Verified
+
+- **821 tests**, `tsc` clean, `eslint` 0 errors.
+- `npm run build` puts the manifest and all three icons in `dist/`, so production
+  serves them.
+- In a real browser: the page links a manifest, the browser fetches and parses
+  it, `display` is `standalone`, and **every icon resolves and is square** —
+  checked by decoding each one and comparing width to height, which is exactly
+  the bug the old apple-touch-icon had.
+
+### Files
+`public/manifest.webmanifest` (new), `public/icon.svg` (new),
+`public/icon-180.png` / `icon-192.png` / `icon-512.png` (new), `index.html`.
