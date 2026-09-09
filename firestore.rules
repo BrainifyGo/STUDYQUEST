@@ -79,9 +79,22 @@ service cloud.firestore {
     }
 
     function isAdmin() {
+      /*
+        `.get(key, default)` rather than `.email` directly.
+
+        Reading a missing property off request.auth.token RAISES "Property email is undefined
+        on object" rather than evaluating to null. That error does NOT deny the request on its
+        own - Firestore evaluates the other side of the `||` and the rule still resolves - so
+        this is a tidy-up, not a security fix. What it removes is noise: the error was
+        attached to every denial diagnostic for any user signed in without an email claim
+        (anonymous auth, a custom token, a provider that omits it), which sent an audit on
+        2026-09-09 chasing a lockout that was not happening. A misleading error in a security
+        diagnostic costs time exactly when time is short.
+      */
       return isAuthenticated() && (
-        (request.auth.token.email == "olamidepeniel@gmail.com" && request.auth.token.email_verified == true) ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+        (request.auth.token.get('email', '') == "olamidepeniel@gmail.com"
+          && request.auth.token.get('email_verified', false) == true) ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin'
       );
     }
 

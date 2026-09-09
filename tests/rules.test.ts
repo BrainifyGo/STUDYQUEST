@@ -181,9 +181,43 @@ describe('redeeming a key', () => {
   it('works end to end: claim the key, then the upgrade lands', async () => {
     await assertSucceeds(claim(alice(), ALICE));
     await assertSucceeds(
+      // `proSource: 'key'` is required by redeemedWithMyKey() and IS what UpgradePage
+      // sends. This test omitted it and had been failing ever since that field was added —
+      // invisibly, because `npm test` excludes this file. It was also masking a real bug:
+      // see "a user whose token has no email" below.
+      updateDoc(doc(alice(), 'users', ALICE), {
+        isPro: true, subscriptionType: 'annual', redeemedKey: KEY, proSource: 'key',
+      })
+    );
+  });
+
+  it('CANNOT upgrade without stamping where the Pro came from', async () => {
+    // Without proSource the webhook cannot tell a key grant from a lapsed subscription, and
+    // would revoke Pro that can never be re-granted — a key only spends once.
+    await assertSucceeds(claim(alice(), ALICE));
+    await assertFails(
       updateDoc(doc(alice(), 'users', ALICE), {
         isPro: true, subscriptionType: 'annual', redeemedKey: KEY,
       })
+    );
+  });
+
+  /*
+    A guard, not a regression test for a bug that existed.
+
+    An audit on 2026-09-09 read "Property email is undefined on object" in this file's
+    failure output and concluded isAdmin() was locking out anyone without an email claim.
+    Re-planting the original rule disproved it: all 29 tests still passed, because Firestore
+    evaluates the other side of the `||` and the rule resolves anyway. The real cause of the
+    failure below was only the missing proSource.
+
+    Keeping the check anyway. Every context here authenticates with a bare uid and no email
+    claim, exactly like anonymous auth or a custom token, and this pins that such a user can
+    write to their own document - so if that ever DOES break, it breaks loudly.
+  */
+  it('a user whose token has no email can still write to their own document', async () => {
+    await assertSucceeds(
+      updateDoc(doc(alice(), 'users', ALICE), { displayName: 'Alice' })
     );
   });
 

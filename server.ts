@@ -23,6 +23,24 @@ import { composeReminder, dayKey, hourIn, shouldSend, EXAM_HORIZON_DAYS } from "
 
 dotenv.config();
 
+/**
+ * Compare two secrets without leaking their contents through timing.
+ *
+ * Hoisted here on 2026-09-09 because the codebase had TWO answers to the same question.
+ * The admin passphrase was compared correctly, with a comment explaining why. The Lemon
+ * Squeezy webhook - which is what turns a stranger's POST into a paid subscription - used
+ * `signature !== digest`, an ordinary string compare that returns as soon as two bytes
+ * differ and so can be timed one character at a time.
+ *
+ * Hashing first is deliberate: `timingSafeEqual` throws when the buffers differ in length,
+ * and that exception is itself a length oracle. Two SHA-256 digests are always 32 bytes.
+ */
+function constantTimeEquals(given: string, expected: string): boolean {
+  const a = crypto.createHash('sha256').update(String(given ?? '')).digest();
+  const b = crypto.createHash('sha256').update(String(expected ?? '')).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -317,11 +335,27 @@ async function startServer() {
         return res.status(400).json({ error: "Missing signature" });
       }
 
-      // Verify signature
+      /*
+        FAIL CLOSED when the secret is missing or blank.
+
+        An unset secret makes `createHmac` throw, which at least stops here. An EMPTY one
+        does not: `createHmac('sha256', '')` computes a perfectly good digest, and an empty
+        secret is a secret everybody knows - so anyone who can guess the payload shape could
+        forge this request and grant themselves a paid plan. `LEMONSQUEEZY_WEBHOOK_SECRET=`
+        with nothing after it is one keystroke away in any hosting dashboard.
+
+        The admin passphrase already fails closed and says so. This now matches it.
+      */
+      if (!LEMONSQUEEZY_WEBHOOK_SECRET || !LEMONSQUEEZY_WEBHOOK_SECRET.trim()) {
+        console.error('[webhook] LEMONSQUEEZY_WEBHOOK_SECRET is not set — refusing.');
+        return res.status(503).json({ error: "Webhook not configured" });
+      }
+
+      // Verify signature — constant time, because this grants paid access.
       const hmac = crypto.createHmac('sha256', LEMONSQUEEZY_WEBHOOK_SECRET);
       const digest = hmac.update(payload).digest('hex');
 
-      if (signature !== digest) {
+      if (!constantTimeEquals(signature, digest)) {
         console.error('Invalid webhook signature');
         return res.status(400).json({ error: "Invalid signature" });
       }
@@ -1579,15 +1613,10 @@ async function startServer() {
   const ADMIN_PASSPHRASE = process.env.ADMIN_PASSPHRASE;
   console.log('Admin dashboard passphrase configured:', !!ADMIN_PASSPHRASE);
 
-  /** Constant time, so the comparison cannot be timed one character at a time. */
+  /** Constant time, so the comparison cannot be timed one character at a time.
+      Shares one implementation with the payment webhook — see constantTimeEquals. */
   function passMatches(given: string, expected: string): boolean {
-    const a = Buffer.from(given);
-    const b = Buffer.from(expected);
-    // timingSafeEqual throws on a length mismatch, which would itself leak the
-    // length; hash both first so the buffers are always the same size.
-    const ha = crypto.createHash('sha256').update(a).digest();
-    const hb = crypto.createHash('sha256').update(b).digest();
-    return crypto.timingSafeEqual(ha, hb);
+    return constantTimeEquals(given, expected);
   }
 
   async function requireAdmin(

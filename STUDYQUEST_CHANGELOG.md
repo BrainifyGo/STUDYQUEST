@@ -5829,3 +5829,68 @@ long forgotten.
 ### Files
 `src/lib/nextUp.ts` (new), `src/components/NextUp.tsx` (new),
 `tests/nextUp.test.ts` (new), `src/App.tsx`, `src/components/LessonPlayer.tsx`.
+
+## 2026-09-09 — Security audit
+
+Same treatment JARVIS got: a hunt for things that claim to work and don't. StudyQuest has
+real users and takes real money, so the payment path went first.
+
+**Baseline is healthy.** 847 tests passing, `tsc --noEmit` clean, ESLint 0 errors (241
+`any` warnings, style not bugs), no secrets in the client bundle — every `VITE_*` is public
+Firebase config — and the ~50 `zz-*.mjs` scratch scripts and two `.mp4` files in the working
+tree are untracked, so the repo is 5.9MB.
+
+### 1. The payment webhook could be forged when the secret was blank
+`POST /api/lemonsqueezy/webhook` is what turns a stranger's request into a paid subscription.
+Two faults in twelve lines:
+
+- **`signature !== digest`** — an ordinary string compare, which returns as soon as two bytes
+  differ and can be timed one character at a time. The *admin passphrase* in the same file was
+  already compared with `timingSafeEqual`, with a comment explaining why. The payment path,
+  which matters more, was not. One file, two answers to the same question.
+- **No check that the secret exists.** An unset secret makes `createHmac` throw, which at
+  least stops. An **empty** one does not:
+
+```
+LEMONSQUEEZY_WEBHOOK_SECRET=""     (one keystroke in a hosting dashboard)
+
+  attacker signs their own "you are now Pro" payload with HMAC('')
+  OLD code accepts it : true
+  NEW code accepts it : false
+```
+
+An empty secret is a secret everyone knows. Anyone who could guess the payload shape could
+grant themselves a paid plan. The startup log prints `webhook: false` either way, so nothing
+would have said so.
+
+Fixed: one hoisted `constantTimeEquals()` used by **both** call sites (the admin helper now
+delegates to it, so there is a single implementation), and the webhook fails closed with a
+503 when the secret is missing or blank — matching the admin path, which already documented
+that it fails closed. `tests/webhookSignature.test.ts` (new, 11) covers forgery with the
+wrong secret, a tampered payload, an empty signature, the empty-secret case, and asserts
+`server.ts` no longer contains `if (signature !== digest)`.
+
+### 2. A Firestore rules test had been failing invisibly
+`npm test` **excludes** `tests/rules.test.ts` (it needs the emulator), so nobody had run it.
+Run against the emulator, it failed: the key-redemption test omitted `proSource: 'key'`,
+which `redeemedWithMyKey()` requires and which `UpgradePage.tsx` really does send. The app
+was correct; the test was stale from when that field was added, and had been red ever since
+with nobody watching.
+
+Corrected, plus a new test that the same upgrade **fails** without `proSource` — the field
+exists so the webhook can tell a permanent key grant from a lapsed subscription, and a key
+only spends once.
+
+### A wrong diagnosis, corrected
+The rules failure printed `Property email is undefined on object. for 'update' @ L268`, and
+this audit first concluded `isAdmin()` was locking out every user whose token carries no
+email claim. **Re-planting the original rule disproved it: all 29 tests still passed.**
+Firestore evaluates the other side of the `||` and the rule resolves; the error is
+diagnostic noise, not a denial. The real cause was only the missing `proSource`.
+
+`isAdmin()` still uses `.get('email', '')` — it removes an error that attaches itself to
+every denial diagnostic for anonymous/custom-token users and sent this audit chasing a
+lockout that was not happening. It is filed as a tidy-up, and the code comment says so
+rather than claiming a fix that was not one.
+
+Rules: **29 passing**. Suite: **858 passing** (847 + 11 new).
