@@ -4,6 +4,7 @@ import App from './App.tsx';
 import './index.css';
 import {initAnalytics} from './lib/analytics';
 import {watchKeyboard} from './lib/keyboardInset';
+import {registerOfflineShell} from './lib/offlineShell';
 
 /*
   A BLANK WHITE PAGE IS THE WORST WAY TO FAIL.
@@ -67,6 +68,10 @@ initAnalytics();
 // React on purpose: it is a property of the window, not of any one screen, and
 // every screen with a text box needs it.
 watchKeyboard();
+
+// Keeps the app shell on the device, so StudyQuest opens even while its server is waking up
+// from idle — which on the free tier can take the better part of a minute. See offlineShell.ts.
+registerOfflineShell();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
