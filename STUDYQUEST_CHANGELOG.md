@@ -8,6 +8,52 @@ the codebase this one started from.
 
 ---
 
+## [2026-09-14] — StudyQuest opens while the server is still waking up
+
+**Editor:** Claude Code (Opus 5)
+
+### The measurement that started it
+
+A request to the live site did not answer **within twelve seconds**. The very next request —
+which the first one had woken — answered in **0.13 seconds**.
+
+StudyQuest is a Node app: `server.ts` serves the API *and* the page. On Render's free tier that
+service spins down when idle, so the first person to open StudyQuest after a quiet spell waited
+up to a minute looking at nothing. No client-side trick fixes that, because until Node answers
+there is no page in which to run a trick.
+
+### The part that was worse
+
+There is a web manifest and an `InstallPrompt` component — people are actively invited to
+install StudyQuest on their phone — and there was **no service worker at all**. So an installed
+StudyQuest whose server was asleep opened on a browser error page. Installed apps get judged
+against phone apps: that reads as *broken*, not *slow*.
+
+### What changed
+
+`public/sw.js` keeps the app shell on the device, so the app opens instantly and the wait moves
+to the data instead of the whole page. `src/lib/offlineShell.ts` registers it.
+
+A service worker on a live app with paying users goes wrong quietly and stays wrong, so the
+rules are deliberate and pinned by tests:
+
+| Rule | Why |
+|---|---|
+| **Never caches `/api`** | AI answers, token budgets, sign-in checks. A stale one is worse than an honest failure. |
+| **Pages: network FIRST**, 3.5s timeout, cache second | Cache-first on HTML is the classic way to strand every user on an old build forever. |
+| **Hashed assets: cache first** | Their names change per build, so a cached one cannot be stale. |
+| **Other origins untouched** | Firebase, fonts and the AI provider are not ours to cache. |
+| **`cache.add` per file, not `addAll`** | `addAll` rejects the whole install if one file 404s, leaving everyone with no shell at all. |
+| **No registration in dev; cannot reload twice** | A dev server behind a cache wastes an afternoon, and a `controllerchange` handler that always reloads is an infinite refresh loop. |
+
+**Verified:** `npm test` 868 passing (10 of them new, reading the worker as source), the build
+ships `dist/sw.js`, and every pre-cached file really exists in `dist/`.
+
+**Not fixed, and honest about it:** this hides the cold start, it does not remove it. The data
+still waits for Render to wake. The real fix is a tier that does not sleep.
+
+---
+
 ## [2026-08-15] — Base established: Brainify in, ReviseGo's level curve ported
 
 **Editor:** Claude Code (Opus 5)
